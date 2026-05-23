@@ -6,6 +6,7 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const thinkingBufferRef = useRef<string>('');
   const currentMessageIdRef = useRef<string | null>(null);
+  const hasConnectedRef = useRef(false);
 
   const {
     currentSessionId,
@@ -18,8 +19,11 @@ export function useWebSocket() {
     setWsError,
   } = useStore();
 
-  const connect = useCallback((sessionId?: string) => {
-    const wsUrl = `ws://localhost:8000/ws${sessionId ? `?session_id=${sessionId}` : ''}`;
+  const connect = useCallback(() => {
+    if (hasConnectedRef.current) return;
+    hasConnectedRef.current = true;
+
+    const wsUrl = 'ws://localhost:8000/ws';
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
@@ -29,6 +33,7 @@ export function useWebSocket() {
     ws.onclose = () => {
       setWsConnected(false);
       setIsLoading(false);
+      hasConnectedRef.current = false;
     };
 
     ws.onerror = () => {
@@ -130,14 +135,14 @@ export function useWebSocket() {
   }, [currentSessionId, setIsLoading]);
 
   const disconnect = useCallback(() => {
+    hasConnectedRef.current = false;
     wsRef.current?.close();
     wsRef.current = null;
   }, []);
 
   useEffect(() => {
-    return () => {
-      wsRef.current?.close();
-    };
+    connect();
+    return () => disconnect();
   }, []);
 
   return { connect, send, disconnect };
