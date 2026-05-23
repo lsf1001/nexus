@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore';
 import type { StreamEvent, WSMessage, Message } from '../types';
 
 export function useWebSocket() {
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsInstanceRef = useRef<WebSocket | null>(null);
   const thinkingBufferRef = useRef<string>('');
   const currentMessageIdRef = useRef<string | null>(null);
   const hasConnectedRef = useRef(false);
@@ -23,8 +23,12 @@ export function useWebSocket() {
     if (hasConnectedRef.current) return;
     hasConnectedRef.current = true;
 
-    const wsUrl = 'ws://localhost:8000/ws';
-    const ws = new WebSocket(wsUrl);
+    if (wsInstanceRef.current?.readyState === WebSocket.OPEN) {
+      return;
+    }
+
+    const ws = new WebSocket('ws://localhost:8000/ws');
+    wsInstanceRef.current = ws;
 
     ws.onopen = () => {
       setWsConnected(true);
@@ -33,7 +37,7 @@ export function useWebSocket() {
     ws.onclose = () => {
       setWsConnected(false);
       setIsLoading(false);
-      hasConnectedRef.current = false;
+      wsInstanceRef.current = null;
     };
 
     ws.onerror = () => {
@@ -116,12 +120,10 @@ export function useWebSocket() {
         }
       }
     };
-
-    wsRef.current = ws;
   }, [currentSessionId, addMessage, updateMessage, addSession, setWsConnected, setCurrentSession, setIsLoading, setWsError]);
 
   const send = useCallback((content: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (wsInstanceRef.current?.readyState === WebSocket.OPEN) {
       thinkingBufferRef.current = '';
       currentMessageIdRef.current = null;
       setIsLoading(true);
@@ -130,20 +132,20 @@ export function useWebSocket() {
         session_id: currentSessionId || undefined,
         content,
       };
-      wsRef.current.send(JSON.stringify(msg));
+      wsInstanceRef.current.send(JSON.stringify(msg));
     }
   }, [currentSessionId, setIsLoading]);
 
   const disconnect = useCallback(() => {
     hasConnectedRef.current = false;
-    wsRef.current?.close();
-    wsRef.current = null;
+    wsInstanceRef.current?.close();
+    wsInstanceRef.current = null;
   }, []);
 
   useEffect(() => {
     connect();
     return () => disconnect();
-  }, []);
+  }, [connect, disconnect]);
 
   return { connect, send, disconnect };
 }

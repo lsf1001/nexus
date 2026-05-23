@@ -42,10 +42,16 @@ export const useStore = create<AppState>((set) => ({
 
   setCurrentSession: (id) => set({ currentSessionId: id }),
 
-  addSession: (session) => set((state) => ({
-    sessions: [session, ...state.sessions],
-    currentSessionId: session.id,
-  })),
+  addSession: (session) => set((state) => {
+    const exists = state.sessions.some(s => s.id === session.id);
+    if (exists) {
+      return state;
+    }
+    return {
+      sessions: [session, ...state.sessions],
+      currentSessionId: session.id,
+    };
+  }),
 
   addMessage: (sessionId, message) => set((state) => ({
     messages: {

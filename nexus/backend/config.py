@@ -20,7 +20,12 @@ def load_config() -> dict:
             try:
                 with open(settings_path) as f:
                     settings = json.load(f)
-                config["minimax_api_key"] = settings.get("env", {}).get("ANTHROPIC_AUTH_TOKEN", "")
+                # 首先尝试 MiniMax 专用 key，如果没有则使用 ANTHROPIC_AUTH_TOKEN
+                config["minimax_api_key"] = (
+                    settings.get("env", {}).get("MINIMAX_API_KEY") or
+                    settings.get("env", {}).get("MiniMax_API_KEY") or
+                    settings.get("env", {}).get("ANTHROPIC_AUTH_TOKEN", "")
+                )
             except Exception:
                 pass
 

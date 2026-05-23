@@ -3,7 +3,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from .config import CONFIG
 from .database import init_db
-from .agent import create_agent, is_research_topic
+from .agent import create_agent
 from .session import create_session, get_conversation_history, add_message, get_session_settings
 
 # 全局智能体实例
@@ -65,31 +65,26 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
             try:
                 for chunk in _agent.stream(
                     {"messages": history},
-                    stream_mode="messages"
+                    stream_mode="updates"
                 ):
-                    if not isinstance(chunk, tuple) or len(chunk) < 1:
+                    if not isinstance(chunk, dict):
                         continue
 
-                    msg = chunk[0]
-                    msg_type = getattr(msg, "type", "unknown")
-                    content = getattr(msg, "content", "") or ""
-
-                    if msg_type == "ai":
-                        if content.strip():
-                            if show_thinking:
-                                await websocket.send_json({
-                                    "type": "thinking",
-                                    "content": content,
-                                    "session_id": session_id
-                                })
-                            thinking_buffer += content
-
-                    elif msg_type == "tool":
-                        await websocket.send_json({
-                            "type": "tool_result",
-                            "content": content,
-                            "session_id": session_id
-                        })
+                    # 从 chunk 中提取 AI 消息内容
+                    model_data = chunk.get("model")
+                    if model_data and isinstance(model_data, dict):
+                        messages = model_data.get("messages", [])
+                        for msg in messages:
+                            if hasattr(msg, "content") and msg.content:
+                                content = msg.content
+                                if content.strip():
+                                    if show_thinking:
+                                        await websocket.send_json({
+                                            "type": "thinking",
+                                            "content": content,
+                                            "session_id": session_id
+                                        })
+                                    thinking_buffer += content
 
                 # 发送最终响应
                 final_content = thinking_buffer.strip() if thinking_buffer else ""
