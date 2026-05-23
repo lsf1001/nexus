@@ -1,7 +1,9 @@
 import uvicorn
-from nexus.backend.config import CONFIG
+from config import CONFIG
 
 if __name__ == "__main__":
+    import sys
+    sys.path.insert(0, "/Users/yxb/projects/nexus")
     uvicorn.run(
         "nexus.backend.main:app",
         host=CONFIG["server_host"],

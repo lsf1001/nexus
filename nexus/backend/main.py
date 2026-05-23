@@ -1,10 +1,10 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-from nexus.backend.config import CONFIG
-from nexus.backend.database import init_db
-from nexus.backend.agent import create_agent, is_research_topic
-from nexus.backend.session import create_session, get_conversation_history, add_message, get_session_settings
+from .config import CONFIG
+from .database import init_db
+from .agent import create_agent, is_research_topic
+from .session import create_session, get_conversation_history, add_message, get_session_settings
 
 # 全局智能体实例
 _agent = None

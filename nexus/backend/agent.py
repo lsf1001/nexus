@@ -16,7 +16,7 @@ def get_llm() -> ChatOpenAI:
 
 def create_agent() -> Any:
     """创建带工具的 DeepAgents 智能体。"""
-    from nexus.backend.tools import TOOLS
+    from .tools import TOOLS
 
     return create_deep_agent(
         model=get_llm(),
