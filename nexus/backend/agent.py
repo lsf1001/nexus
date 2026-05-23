@@ -1,7 +1,7 @@
 from typing import Any
 from langchain_openai import ChatOpenAI
 from deepagents import create_deep_agent
-from config import CONFIG
+from .config import CONFIG
 
 
 def get_llm() -> ChatOpenAI:
@@ -16,7 +16,7 @@ def get_llm() -> ChatOpenAI:
 
 def create_agent() -> Any:
     """创建带工具的 DeepAgents 智能体。"""
-    from tools import TOOLS
+    from nexus.backend.tools import TOOLS
 
     return create_deep_agent(
         model=get_llm(),
