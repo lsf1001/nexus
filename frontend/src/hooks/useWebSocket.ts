@@ -4,12 +4,17 @@ import type { StreamEvent, WSMessage, Message } from '../types';
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
+  const thinkingBufferRef = useRef<string>('');
+  const currentMessageIdRef = useRef<string | null>(null);
+
   const {
     currentSessionId,
     addMessage,
+    updateMessage,
     addSession,
     setWsConnected,
     setCurrentSession,
+    setIsLoading,
   } = useStore();
 
   const connect = useCallback((sessionId?: string) => {
@@ -22,53 +27,104 @@ export function useWebSocket() {
 
     ws.onclose = () => {
       setWsConnected(false);
+      setIsLoading(false);
     };
 
     ws.onerror = () => {
       setWsConnected(false);
+      setIsLoading(false);
     };
 
     ws.onmessage = (event) => {
       const data: StreamEvent = JSON.parse(event.data);
 
-      if (data.type === 'session_created') {
-        const newSession = {
-          id: data.session_id,
-          title: '新对话',
-          showThinking: true,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
-        addSession(newSession);
-        setCurrentSession(data.session_id);
-      } else if (data.type === 'thinking' || data.type === 'tool_result') {
-        if (currentSessionId) {
-          const msgId = crypto.randomUUID();
-          const msg: Message = {
-            id: msgId,
-            role: 'assistant',
-            content: data.content,
+      switch (data.type) {
+        case 'session_created': {
+          const newSession = {
+            id: data.session_id,
+            title: '新对话',
+            showThinking: true,
             createdAt: new Date(),
+            updatedAt: new Date(),
           };
-          addMessage(currentSessionId, msg);
+          addSession(newSession);
+          setCurrentSession(data.session_id);
+          break;
         }
-      } else if (data.type === 'done') {
-        // Done signal - can be used for any final cleanup
+
+        case 'thinking': {
+          if (currentSessionId) {
+            thinkingBufferRef.current += data.content;
+            if (currentMessageIdRef.current) {
+              updateMessage(currentSessionId, currentMessageIdRef.current, {
+                content: thinkingBufferRef.current,
+              });
+            } else {
+              const msgId = crypto.randomUUID();
+              currentMessageIdRef.current = msgId;
+              const msg: Message = {
+                id: msgId,
+                role: 'assistant',
+                content: data.content,
+                createdAt: new Date(),
+              };
+              addMessage(currentSessionId, msg);
+            }
+          }
+          break;
+        }
+
+        case 'tool_result': {
+          if (currentSessionId && currentMessageIdRef.current) {
+            updateMessage(currentSessionId, currentMessageIdRef.current, {
+              content: thinkingBufferRef.current + '\n[工具返回] ' + data.content,
+            });
+          }
+          break;
+        }
+
+        case 'final': {
+          if (currentSessionId && currentMessageIdRef.current) {
+            updateMessage(currentSessionId, currentMessageIdRef.current, {
+              content: data.content,
+              thinking: thinkingBufferRef.current,
+            });
+            thinkingBufferRef.current = '';
+            currentMessageIdRef.current = null;
+          }
+          setIsLoading(false);
+          break;
+        }
+
+        case 'done': {
+          setIsLoading(false);
+          break;
+        }
+
+        case 'error': {
+          console.error('WebSocket error:', data.content);
+          setIsLoading(false);
+          break;
+        }
       }
     };
 
     wsRef.current = ws;
-  }, [currentSessionId, addMessage, addSession, setWsConnected, setCurrentSession]);
+  }, [currentSessionId, addMessage, updateMessage, addSession, setWsConnected, setCurrentSession, setIsLoading]);
 
   const send = useCallback((content: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      thinkingBufferRef.current = '';
+      currentMessageIdRef.current = null;
+      setIsLoading(true);
+
       const msg: WSMessage = {
         session_id: currentSessionId || undefined,
         content,
       };
       wsRef.current.send(JSON.stringify(msg));
     }
-  }, [currentSessionId]);
+  }, [currentSessionId, setIsLoading]);
 
   const disconnect = useCallback(() => {
     wsRef.current?.close();

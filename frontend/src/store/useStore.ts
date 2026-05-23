@@ -10,6 +10,7 @@ interface AppState {
   showThinking: boolean;
   wsConnected: boolean;
   contextUsage: number;
+  isLoading: boolean;
 
   setCurrentSession: (id: string) => void;
   addSession: (session: Session) => void;
@@ -20,6 +21,7 @@ interface AppState {
   setContextUsage: (usage: number) => void;
   setShowThinking: (show: boolean) => void;
   setCurrentModel: (model: string) => void;
+  setIsLoading: (loading: boolean) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -33,6 +35,7 @@ export const useStore = create<AppState>((set) => ({
   showThinking: true,
   wsConnected: false,
   contextUsage: 0,
+  isLoading: false,
 
   setCurrentSession: (id) => set({ currentSessionId: id }),
 
@@ -65,4 +68,5 @@ export const useStore = create<AppState>((set) => ({
   setContextUsage: (usage) => set({ contextUsage: usage }),
   setShowThinking: (show) => set({ showThinking: show }),
   setCurrentModel: (model) => set({ currentModel: model }),
+  setIsLoading: (loading) => set({ isLoading: loading }),
 }));
