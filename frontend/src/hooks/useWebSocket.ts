@@ -15,6 +15,7 @@ export function useWebSocket() {
     setWsConnected,
     setCurrentSession,
     setIsLoading,
+    setWsError,
   } = useStore();
 
   const connect = useCallback((sessionId?: string) => {
@@ -32,6 +33,7 @@ export function useWebSocket() {
 
     ws.onerror = () => {
       setWsConnected(false);
+      setWsError('连接错误，请检查服务器');
       setIsLoading(false);
     };
 
@@ -103,6 +105,7 @@ export function useWebSocket() {
 
         case 'error': {
           console.error('WebSocket error:', data.content);
+          setWsError(data.content);
           setIsLoading(false);
           break;
         }
@@ -110,7 +113,7 @@ export function useWebSocket() {
     };
 
     wsRef.current = ws;
-  }, [currentSessionId, addMessage, updateMessage, addSession, setWsConnected, setCurrentSession, setIsLoading]);
+  }, [currentSessionId, addMessage, updateMessage, addSession, setWsConnected, setCurrentSession, setIsLoading, setWsError]);
 
   const send = useCallback((content: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

@@ -11,6 +11,7 @@ interface AppState {
   wsConnected: boolean;
   contextUsage: number;
   isLoading: boolean;
+  wsError: string | null;
 
   setCurrentSession: (id: string) => void;
   addSession: (session: Session) => void;
@@ -22,6 +23,7 @@ interface AppState {
   setShowThinking: (show: boolean) => void;
   setCurrentModel: (model: string) => void;
   setIsLoading: (loading: boolean) => void;
+  setWsError: (error: string | null) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -36,6 +38,7 @@ export const useStore = create<AppState>((set) => ({
   wsConnected: false,
   contextUsage: 0,
   isLoading: false,
+  wsError: null,
 
   setCurrentSession: (id) => set({ currentSessionId: id }),
 
@@ -69,4 +72,5 @@ export const useStore = create<AppState>((set) => ({
   setShowThinking: (show) => set({ showThinking: show }),
   setCurrentModel: (model) => set({ currentModel: model }),
   setIsLoading: (loading) => set({ isLoading: loading }),
+  setWsError: (error) => set({ wsError: error }),
 }));

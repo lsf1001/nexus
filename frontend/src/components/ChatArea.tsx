@@ -51,6 +51,13 @@ export function ChatArea({ onSend }: ChatAreaProps) {
         </label>
       </div>
 
+      {/* Connection error banner */}
+      {!wsConnected && (
+        <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-600">
+          连接已断开，请刷新页面重新连接
+        </div>
+      )}
+
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto p-4">
         {currentMessages.length === 0 && !isLoading ? (
