@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
     """启动时初始化，关闭时清理。"""
     global _agent
     _agent = create_agent()
-    print("✓ Nexus Backend 已初始化 (DeepAgents StoreBackend)")
+    print("✓ Nexus Backend 已初始化")
     yield
     print("✗ Nexus Backend 关闭中")
 
@@ -37,7 +37,7 @@ app.add_middleware(
 
 @app.get(f"{API_PREFIX}/")
 async def root():
-    return {"message": "Nexus Backend", "version": "1.0.0", "backend": "DeepAgents StoreBackend"}
+    return {"message": "Nexus Backend", "version": "1.0.0", "status": "running"}
 
 
 @app.websocket(f"{API_PREFIX}/ws")

@@ -96,7 +96,7 @@ def get_project_root() -> Path:
 
 
 def create_agent() -> Any:
-    """创建带完整 DeepAgents 原生能力的智能体。"""
+    """创建带完整 Nexus 能力的智能体。"""
     from .tools import TOOLS
 
     project_root = get_project_root()

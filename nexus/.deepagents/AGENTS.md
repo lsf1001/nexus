@@ -12,5 +12,5 @@
 2. 使用思考标签 <thinking></thinking>
 3. 用中文回答
 
-<!-- 此文件由 DeepAgents MemoryMiddleware 自动管理 -->
+<!-- 此文件由 Nexus MemoryMiddleware 自动管理 -->
 <!-- AI 会根据对话自动更新记忆 -->

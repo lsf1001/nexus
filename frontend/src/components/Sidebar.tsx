@@ -11,7 +11,7 @@ function Sidebar() {
       </div>
       <div className="flex-1 overflow-y-auto p-4">
         <div className="text-sm text-gray-500">
-          DeepAgents 原生架构
+          Nexus 应用架构
         </div>
       </div>
       <div className="p-4 border-t border-gray-200">
