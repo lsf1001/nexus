@@ -26,7 +26,7 @@ def _scan_content(content: str) -> str:
 
 def _load_identity() -> str:
     """从 AGENTS.md 加载身份配置。"""
-    agents_path = Path(__file__).parent.parent / ".deepagents" / "AGENTS.md"
+    agents_path = Path(__file__).parent.parent / ".nexus" / "AGENTS.md"
     if agents_path.exists():
         content = agents_path.read_text(encoding="utf-8").strip()
         if content:
@@ -100,8 +100,8 @@ def create_agent() -> Any:
     from .tools import TOOLS
 
     project_root = get_project_root()
-    agents_md = project_root / ".deepagents" / "AGENTS.md"
-    skills_dir = project_root / ".deepagents" / "skills"
+    agents_md = project_root / ".nexus" / "AGENTS.md"
+    skills_dir = project_root / ".nexus" / "skills"
 
     backend = StoreBackend()
 
@@ -111,11 +111,9 @@ def create_agent() -> Any:
         system_prompt=get_system_prompt(),
         backend=backend,
         memory=[
-            "~/.deepagents/AGENTS.md",
             str(agents_md),
         ],
         skills=[
-            "~/.deepagents/skills/",
             str(skills_dir),
         ] if skills_dir.exists() else [],
     )
