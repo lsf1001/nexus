@@ -10,14 +10,18 @@ function ChatBubble({ message, showThinking = true }: ChatBubbleProps) {
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
-      <div className={`max-w-xl ${isUser ? 'bg-blue-500 text-white' : 'bg-gray-100'} px-4 py-3 rounded-lg`}>
+      <div
+        className={`max-w-xl px-4 py-3 ${
+          isUser ? 'bubble-user' : 'bubble-assistant'
+        }`}
+      >
         {message.content}
         {showThinking && message.thinking && (
-          <div className="mt-2 text-sm text-gray-500 border-t pt-2">
-            <details>
-              <summary className="cursor-pointer">思考过程</summary>
-              <pre className="whitespace-pre-wrap text-xs mt-1">{message.thinking}</pre>
-            </details>
+          <div className="thinking-block">
+            <div className="text-[10px] uppercase text-[var(--color-moss)] mb-2 flex items-center gap-1">
+              🌿 思考过程
+            </div>
+            <pre className="whitespace-pre-wrap text-xs">{message.thinking}</pre>
           </div>
         )}
       </div>
