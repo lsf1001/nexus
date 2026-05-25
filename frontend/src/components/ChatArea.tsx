@@ -131,8 +131,8 @@ function ChatArea() {
       <div className="h-[50px] border-b border-[var(--color-border)] px-5 flex items-center justify-between">
         <span className="text-sm text-[var(--color-text-muted)]">MiniMax-M2.7</span>
         <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[var(--color-moss)]' : 'bg-red-500'}`} />
-          <span className={`text-xs ${wsConnected ? 'text-[var(--color-moss)]' : 'text-red-500'}`}>
+          <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[var(--color-moss)]' : 'bg-gray-400'}`} />
+          <span className={`text-xs ${wsConnected ? 'text-[var(--color-moss)]' : 'text-gray-500'}`}>
             {wsConnected ? '已连接' : '未连接'}
           </span>
         </div>
