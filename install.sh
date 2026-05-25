@@ -2,7 +2,7 @@
 # Nexus 安装脚本
 #
 # Usage:
-#   curl -fsSL https://.../install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/lsf1001/nexus/main/install.sh | bash
 #
 # 环境变量:
 #   NEXUS_HOME    - 安装目录 (默认: ~/.nexus)

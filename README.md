@@ -42,7 +42,7 @@ nexus/
 ### 一键安装
 
 ```bash
-curl -fsSL https://.../install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lsf1001/nexus/main/install.sh | bash
 ```
 
 安装后运行：
