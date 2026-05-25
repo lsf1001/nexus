@@ -88,10 +88,37 @@ wikipedia = WikipediaQueryRun(name="wikipedia", api_wrapper=WikipediaAPIWrapper(
 # 文件管理工具
 read_file = ReadFileTool()
 write_file_tool = WriteFileTool()
-list_dir = ListDirectoryTool()
 copy_file = CopyFileTool()
 move_file = MoveFileTool()
 delete_file = DeleteFileTool()
+
+
+@langchain_tool
+def list_dir(path: str | None = None) -> str:
+    """列出目录下的文件列表。
+
+    Args:
+        path: 目录路径，默认为 ~/Documents/Nexus
+    """
+    if path:
+        target = Path(path).expanduser()
+    else:
+        target = Path(CONFIG["default_save_path"]).expanduser()
+
+    if not target.exists():
+        return f"目录不存在: {target}"
+
+    if not target.is_dir():
+        return f"不是目录: {target}"
+
+    files = []
+    for item in sorted(target.iterdir()):
+        files.append(item.name)
+
+    if not files:
+        return f"{target} 目录下没有文件"
+
+    return "\n".join(files)
 
 TOOLS = [
     get_current_date,

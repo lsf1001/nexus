@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 from typing import Any
 from langchain_openai import ChatOpenAI
+from langgraph.store.memory import InMemoryStore
 from deepagents import create_deep_agent
 from deepagents.backends.store import StoreBackend
 
@@ -103,7 +104,8 @@ def create_agent() -> Any:
     agents_md = project_root / ".nexus" / "AGENTS.md"
     skills_dir = project_root / ".nexus" / "skills"
 
-    backend = StoreBackend()
+    memory_store = InMemoryStore()
+    backend = StoreBackend(store=memory_store)
 
     return create_deep_agent(
         model=get_llm(),

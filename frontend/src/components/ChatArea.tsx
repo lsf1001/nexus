@@ -12,6 +12,7 @@ function ChatArea() {
 
   const isLoading = useStore((s) => s.isLoading);
   const wsConnected = useStore((s) => s.wsConnected);
+  const showThinking = useStore((s) => s.showThinking);
   const setIsLoading = useStore((s) => s.setIsLoading);
   const setWsConnected = useStore((s) => s.setWsConnected);
   const setWsError = useStore((s) => s.setWsError);
@@ -156,7 +157,7 @@ function ChatArea() {
           </div>
         ) : (
           displayMessages.map((msg) => (
-            <ChatBubble key={msg.id} message={msg} />
+            <ChatBubble key={msg.id} message={msg} showThinking={showThinking} />
           ))
         )}
         {isLoading && (

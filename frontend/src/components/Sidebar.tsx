@@ -15,13 +15,12 @@ function Sidebar() {
 
       {/* 龙猫 GIF 区域 - 占据上方大空间 */}
       <div className="flex-1 flex flex-col items-center justify-center px-4">
-        <div className="bg-[var(--color-forest-end)]/50 backdrop-blur-sm rounded-2xl p-6 flex flex-col items-center">
+        <div className="w-40 h-40 rounded-2xl overflow-hidden bg-[var(--color-cream)] shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
           <img
-            src="/totoro.gif"
+            src="/totoro-new.gif"
             alt="龙猫"
-            className="w-40 h-40 object-contain"
+            className="w-full h-full object-cover"
           />
-          <div className="text-sm text-[var(--color-wood)] mt-3 font-medium">森林精灵</div>
         </div>
       </div>
 

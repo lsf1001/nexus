@@ -44,6 +44,9 @@ async def root():
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
 
+    # 维护对话历史
+    conversation_history: list[dict] = []
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -52,12 +55,15 @@ async def websocket_endpoint(websocket: WebSocket):
             if not user_content:
                 continue
 
+            # 添加用户消息到历史
+            conversation_history.append({"role": "user", "content": user_content})
+
             full_response = ""
             tool_calls = []
 
             try:
                 for chunk in _agent.stream(
-                    {"messages": [{"role": "user", "content": user_content}]},
+                    {"messages": conversation_history},
                     stream_mode="updates"
                 ):
                     if not isinstance(chunk, dict):
@@ -130,6 +136,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     "type": "done",
                     "content": "",
                 })
+
+                # 将助手回复添加到历史
+                if response_text:
+                    conversation_history.append({"role": "assistant", "content": response_text})
 
             except Exception as e:
                 error_msg = str(e)
