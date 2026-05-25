@@ -1,82 +1,29 @@
 import { create } from 'zustand';
-import type { Message, Session, ModelConfig } from '../types';
 
 interface AppState {
-  sessions: Session[];
-  currentSessionId: string | null;
-  messages: Record<string, Message[]>;
-  currentModel: string;
-  models: ModelConfig[];
-  showThinking: boolean;
-  wsConnected: boolean;
-  contextUsage: number;
+  input: string;
   isLoading: boolean;
+  wsConnected: boolean;
+  showThinking: boolean;
   wsError: string | null;
 
-  setCurrentSession: (id: string) => void;
-  addSession: (session: Session) => void;
-  addMessage: (sessionId: string, message: Message) => void;
-  updateMessage: (sessionId: string, messageId: string, updates: Partial<Message>) => void;
-  setMessages: (sessionId: string, messages: Message[]) => void;
-  setWsConnected: (connected: boolean) => void;
-  setContextUsage: (usage: number) => void;
-  setShowThinking: (show: boolean) => void;
-  setCurrentModel: (model: string) => void;
+  setInput: (input: string) => void;
   setIsLoading: (loading: boolean) => void;
+  setWsConnected: (connected: boolean) => void;
+  setShowThinking: (show: boolean) => void;
   setWsError: (error: string | null) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
-  sessions: [],
-  currentSessionId: null,
-  messages: {},
-  currentModel: 'MiniMax-M2.7',
-  models: [
-    { name: 'MiniMax-M2.7', contextWindow: 200000, apiBase: 'https://api.minimaxi.com/v1' },
-  ],
-  showThinking: true,
-  wsConnected: false,
-  contextUsage: 0,
+  input: '',
   isLoading: false,
+  wsConnected: false,
+  showThinking: true,
   wsError: null,
 
-  setCurrentSession: (id) => set({ currentSessionId: id }),
-
-  addSession: (session) => set((state) => {
-    const exists = state.sessions.some(s => s.id === session.id);
-    if (exists) {
-      return state;
-    }
-    return {
-      sessions: [session, ...state.sessions],
-      currentSessionId: session.id,
-    };
-  }),
-
-  addMessage: (sessionId, message) => set((state) => ({
-    messages: {
-      ...state.messages,
-      [sessionId]: [...(state.messages[sessionId] || []), message],
-    },
-  })),
-
-  updateMessage: (sessionId, messageId, updates) => set((state) => ({
-    messages: {
-      ...state.messages,
-      [sessionId]: (state.messages[sessionId] || []).map((msg) =>
-        msg.id === messageId ? { ...msg, ...updates } : msg
-      ),
-    },
-  })),
-
-  setMessages: (sessionId, messages) => set((state) => ({
-    messages: { ...state.messages, [sessionId]: messages },
-  })),
-
-  setWsConnected: (connected) => set({ wsConnected: connected }),
-  setContextUsage: (usage) => set({ contextUsage: usage }),
-  setShowThinking: (show) => set({ showThinking: show }),
-  setCurrentModel: (model) => set({ currentModel: model }),
+  setInput: (input) => set({ input }),
   setIsLoading: (loading) => set({ isLoading: loading }),
+  setWsConnected: (connected) => set({ wsConnected: connected }),
+  setShowThinking: (show) => set({ showThinking: show }),
   setWsError: (error) => set({ wsError: error }),
 }));

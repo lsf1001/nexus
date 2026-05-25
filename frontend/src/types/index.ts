@@ -6,27 +6,13 @@ export interface Message {
   createdAt: Date;
 }
 
-export interface Session {
-  id: string;
-  title: string;
-  showThinking: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface ModelConfig {
-  name: string;
-  contextWindow: number;
-  apiBase: string;
-}
-
 export interface StreamEvent {
-  type: 'thinking' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'session_created';
-  content: string;
-  session_id: string;
+  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage';
+  content?: string;
+  token_count?: number;
+  context_usage?: number;
 }
 
 export interface WSMessage {
-  session_id?: string;
   content: string;
 }
