@@ -92,7 +92,7 @@ function Sidebar() {
       <div className="flex-1 flex flex-col items-center justify-center px-4">
         <div className="w-40 h-40 rounded-2xl overflow-hidden bg-[var(--color-cream)] shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
           <img
-            src="/app/totoro-new.gif"
+            src="/app/totoro.gif"
             alt="龙猫"
             className="w-full h-full object-cover"
           />
