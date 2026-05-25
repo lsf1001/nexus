@@ -11,7 +11,7 @@ function Sidebar() {
   const setModelName = useStore((s) => s.setModelName);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  const apiUrl = 'http://localhost:8000/api';
+  const apiUrl = 'http://localhost:8000/app/api';
 
   useEffect(() => {
     fetch(`${apiUrl}/models`)

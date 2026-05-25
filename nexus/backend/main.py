@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
 import logging
 import re
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import CONFIG
 from .agent import create_agent
@@ -11,6 +13,22 @@ from .models_config import load_models, get_active_model, set_active_model
 _agent = None
 
 logging.basicConfig(level=logging.INFO)
+
+
+def _get_frontend_path() -> Path:
+    """获取前端构建目录路径。"""
+    # 安装目录下的 frontend
+    nexus_home = Path.home() / ".nexus"
+    frontend_path = nexus_home / "frontend" / "dist"
+    if frontend_path.exists():
+        return nexus_home / "frontend" / "dist"
+
+    # 开发模式：项目目录下的 frontend
+    project_frontend = Path(__file__).parent.parent.parent / "frontend" / "dist"
+    if project_frontend.exists():
+        return project_frontend
+
+    return None
 
 
 def _create_agent_with_model(model_config: dict | None = None):
@@ -46,6 +64,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 挂载前端静态文件（挂载到 /app 路径避免与 API 冲突）
+frontend_path = _get_frontend_path()
+if frontend_path:
+    app.mount("/app", StaticFiles(directory=str(frontend_path), html=True), name="static")
+    # 根路径重定向到 /app
+    @app.get("/")
+    async def root_redirect():
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(url="/app", status_code=302)
 
 
 @app.get(f"{API_PREFIX}/")

@@ -87,12 +87,29 @@ fi
 log_success "uv 已就绪"
 
 # ---------------------------------------------------------------------------
+# 构建前端
+# ---------------------------------------------------------------------------
+ORIG_DIR="$(pwd)"
+if [ -d "$(dirname "$0")/frontend" ]; then
+  log_info "构建前端..."
+  cd "$(dirname "$0")/frontend"
+  if command -v npm >/dev/null 2>&1; then
+    npm install --silent 2>/dev/null || true
+    npm run build --silent 2>/dev/null || npm run build
+    log_success "前端构建完成"
+  else
+    log_warn "npm 未安装，跳过前端构建"
+  fi
+  cd "$ORIG_DIR"
+fi
+
+# ---------------------------------------------------------------------------
 # 安装依赖
 # ---------------------------------------------------------------------------
 log_info "安装 Nexus 依赖..."
 
-# 创建虚拟环境
-uv venv "$NEXUS_HOME/.venv"
+# 创建虚拟环境（如果已存在则清除）
+uv venv "$NEXUS_HOME/.venv" --clear
 
 # 安装依赖
 uv pip install --python "$NEXUS_HOME/.venv/bin/python" \
@@ -101,6 +118,8 @@ uv pip install --python "$NEXUS_HOME/.venv/bin/python" \
   langchain-openai \
   langchain-community \
   duckduckgo-search \
+  ddgs \
+  wikipedia \
   aiosqlite \
   pydantic \
   python-dotenv
@@ -112,7 +131,21 @@ log_success "依赖安装完成"
 # ---------------------------------------------------------------------------
 if [ -d "$(dirname "$0")/nexus" ]; then
   log_info "复制应用代码..."
+  # 先删除旧的（如果是目录）
+  rm -rf "$NEXUS_HOME/nexus"
   cp -r "$(dirname "$0")/nexus" "$NEXUS_HOME/nexus"
+fi
+
+# ---------------------------------------------------------------------------
+# 复制前端构建
+# ---------------------------------------------------------------------------
+if [ -d "$(dirname "$0")/frontend/dist" ]; then
+  log_info "复制前端..."
+  mkdir -p "$NEXUS_HOME/frontend"
+  cp -r "$(dirname "$0")/frontend/dist" "$NEXUS_HOME/frontend/"
+  log_success "前端已复制到 $NEXUS_HOME/frontend/dist"
+elif [ -d "$NEXUS_HOME/frontend/dist" ]; then
+  log_success "前端已存在"
 fi
 
 # ---------------------------------------------------------------------------
@@ -139,7 +172,7 @@ fi
 # ---------------------------------------------------------------------------
 # 创建启动脚本
 # ---------------------------------------------------------------------------
-cat > "$NEXUS_HOME/nexus" << NEXUS_SCRIPT
+cat > "$NEXUS_HOME/run" << NEXUS_SCRIPT
 #!/usr/bin/env bash
 # Nexus 启动脚本
 
@@ -151,16 +184,16 @@ cd "\$NEXUS_HOME/nexus"
 exec uvicorn backend.main:app --host 0.0.0.0 --port 8000
 NEXUS_SCRIPT
 
-chmod +x "$NEXUS_HOME/nexus"
+chmod +x "$NEXUS_HOME/run"
 
 # 创建符号链接到 ~/.local/bin
 mkdir -p "$HOME/.local/bin"
-ln -sf "$NEXUS_HOME/nexus" "$HOME/.local/bin/nexus"
+ln -sf "$NEXUS_HOME/run" "$HOME/.local/bin/nexus"
 
 log_success "安装完成!"
 echo ""
 echo "启动 Nexus: nexus"
-echo "或直接运行: $NEXUS_HOME/nexus"
+echo "或直接运行: $NEXUS_HOME/run"
 echo ""
 echo "首次使用请设置 API Key:"
 echo "export MiniMax_API_KEY='your-key'"

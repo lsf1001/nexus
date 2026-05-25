@@ -19,7 +19,7 @@ function ChatArea() {
   const setWsError = useStore((s) => s.setWsError);
   const setModelName = useStore((s) => s.setModelName);
 
-  const wsUrl = 'ws://localhost:8000/api/ws';
+  const wsUrl = 'ws://localhost:8000/app/api/ws';
   const apiUrl = 'http://localhost:8000/api';
 
   useEffect(() => {
@@ -65,7 +65,7 @@ function ChatArea() {
         case 'final': {
           if (messagesRef.current.length > 0) {
             const lastIdx = messagesRef.current.length - 1;
-            messagesRef.current[lastIdx].content = data.content;
+            messagesRef.current[lastIdx].content = data.content || '';
             setDisplayMessages([...messagesRef.current]);
           }
           setIsLoading(false);
@@ -76,7 +76,7 @@ function ChatArea() {
           break;
         }
         case 'error': {
-          setWsError(data.content);
+          setWsError(data.content || null);
           setIsLoading(false);
           break;
         }
@@ -118,6 +118,7 @@ function ChatArea() {
       id: crypto.randomUUID(),
       role: 'user',
       content: messageContent,
+      createdAt: new Date(),
     };
     messagesRef.current.push(userMsg);
     setDisplayMessages([...messagesRef.current]);
@@ -126,6 +127,7 @@ function ChatArea() {
       id: crypto.randomUUID(),
       role: 'assistant',
       content: '',
+      createdAt: new Date(),
     };
     messagesRef.current.push(assistantMsg);
     setDisplayMessages([...messagesRef.current]);
