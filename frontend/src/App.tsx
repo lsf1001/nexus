@@ -1,4 +1,4 @@
-import { Sidebar } from './components/Sidebar';
+import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 
 function App() {

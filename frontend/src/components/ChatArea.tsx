@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { ChatBubble } from './ChatBubble';
+import ChatBubble from './ChatBubble';
 import type { StreamEvent, WSMessage, Message } from '../types';
 
 function ChatArea() {
