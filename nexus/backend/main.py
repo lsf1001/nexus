@@ -1,113 +1,143 @@
 from contextlib import asynccontextmanager
+import logging
+import re
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 from .config import CONFIG
-from .database import init_db
 from .agent import create_agent
-from .session import create_session, get_conversation_history, add_message, get_session_settings
 
-# 全局智能体实例
 _agent = None
+
+logging.basicConfig(level=logging.INFO)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动时初始化，关闭时清理。"""
     global _agent
-    await init_db()
     _agent = create_agent()
-    print("✓ Nexus Backend 已初始化")
+    print("✓ Nexus Backend 已初始化 (DeepAgents StoreBackend)")
     yield
     print("✗ Nexus Backend 关闭中")
 
 
 app = FastAPI(title="Nexus Backend", lifespan=lifespan)
 
+API_PREFIX = "/api"
 
-@app.get("/")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get(f"{API_PREFIX}/")
 async def root():
-    return {"message": "Nexus Backend", "version": "1.0.0"}
+    return {"message": "Nexus Backend", "version": "1.0.0", "backend": "DeepAgents StoreBackend"}
 
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
+@app.websocket(f"{API_PREFIX}/ws")
+async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-
-    # 如果未提供 session_id，创建新会话
-    if not session_id:
-        session_id = await create_session()
-        await websocket.send_json({"type": "session_created", "session_id": session_id})
-
-    settings = await get_session_settings(session_id)
-    show_thinking = settings.get("show_thinking", True)
 
     try:
         while True:
-            # 接收客户端消息
             data = await websocket.receive_json()
             user_content = data.get("content", "")
 
             if not user_content:
                 continue
 
-            # 保存用户消息
-            await add_message(session_id, "user", user_content)
-
-            # 获取对话历史
-            history = await get_conversation_history(session_id)
-
-            # 添加当前消息
-            history.append({"role": "user", "content": user_content})
-
-            # 通过智能体流式处理
-            thinking_buffer = ""
+            full_response = ""
+            tool_calls = []
 
             try:
                 for chunk in _agent.stream(
-                    {"messages": history},
+                    {"messages": [{"role": "user", "content": user_content}]},
                     stream_mode="updates"
                 ):
                     if not isinstance(chunk, dict):
                         continue
 
-                    # 从 chunk 中提取 AI 消息内容
-                    model_data = chunk.get("model")
-                    if model_data and isinstance(model_data, dict):
-                        messages = model_data.get("messages", [])
-                        for msg in messages:
-                            if hasattr(msg, "content") and msg.content:
-                                content = msg.content
-                                if content.strip():
-                                    if show_thinking:
-                                        await websocket.send_json({
-                                            "type": "thinking",
-                                            "content": content,
-                                            "session_id": session_id
-                                        })
-                                    thinking_buffer += content
+                    if "model" in chunk:
+                        model_data = chunk.get("model")
+                        if model_data and isinstance(model_data, dict):
+                            messages = model_data.get("messages", [])
+                            for msg in messages:
+                                msg_content = getattr(msg, "content", "") or ""
+                                if msg_content:
+                                    full_response += msg_content
 
-                # 发送最终响应
-                final_content = thinking_buffer.strip() if thinking_buffer else ""
-                if final_content:
+                    elif "tool_call" in chunk:
+                        tool_name = chunk.get("tool_call", {}).get("name", "未知工具")
+                        await websocket.send_json({
+                            "type": "thinking",
+                            "content": f"[调用工具] {tool_name}",
+                        })
+
+                    elif "tool_result" in chunk:
+                        result = chunk.get("tool_result", "")
+                        await websocket.send_json({
+                            "type": "thinking",
+                            "content": f"[工具返回] {str(result)[:100]}...",
+                        })
+
+                normalized = full_response.replace('<think>', '<thinking>').replace('</think>', '</thinking>')
+
+                chinese_chars = len(re.findall(r'[一-鿿]', normalized))
+                english_chars = len(re.findall(r'[a-zA-Z]', normalized))
+                other_chars = len(normalized) - chinese_chars - english_chars
+                estimated_tokens = int(chinese_chars * 2.5 + english_chars * 0.25 + other_chars * 0.5)
+                context_usage = min(int((estimated_tokens / 200000) * 100), 100)
+
+                await websocket.send_json({
+                    "type": "token_usage",
+                    "content": "",
+                    "token_count": estimated_tokens,
+                    "context_usage": context_usage
+                })
+
+                thinking_parts = re.findall(r'<thinking>(.*?)</thinking>', normalized, flags=re.DOTALL)
+                response_text = re.sub(r'<thinking>.*?</thinking>', '', normalized, flags=re.DOTALL).strip()
+                thinking_text = '\n'.join(thinking_parts)
+
+                if thinking_parts:
+                    all_thinking = '\n'.join(part.strip() for part in thinking_parts)
+                    await websocket.send_json({
+                        "type": "thinking",
+                        "content": all_thinking,
+                    })
+
+                if response_text:
+                    chunk_size = 3
+                    for i in range(0, len(response_text), chunk_size):
+                        chunk = response_text[i:i+chunk_size]
+                        await websocket.send_json({
+                            "type": "chunk",
+                            "content": chunk,
+                        })
+
                     await websocket.send_json({
                         "type": "final",
-                        "content": final_content,
-                        "session_id": session_id
+                        "content": response_text,
                     })
-                    await add_message(session_id, "assistant", final_content, thinking_buffer)
 
                 await websocket.send_json({
                     "type": "done",
                     "content": "",
-                    "session_id": session_id
                 })
 
             except Exception as e:
+                error_msg = str(e)
+                logging.error(f"Agent error: {error_msg}")
                 await websocket.send_json({
                     "type": "error",
-                    "content": str(e),
-                    "session_id": session_id
+                    "content": error_msg,
                 })
 
     except WebSocketDisconnect:
-        print(f"客户端断开连接: {session_id}")
+        print("客户端断开连接")
