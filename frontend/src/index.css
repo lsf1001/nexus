@@ -1,1 +1,89 @@
 @import "tailwindcss";
+
+@theme {
+  /* 龙猫森林绿配色 */
+  --color-forest-start: #2D5A3D;
+  --color-forest-end: #1E3D2A;
+  --color-moss: #4A7C59;
+  --color-moss-light: #A8C69F;
+  --color-cream: #FAF6F0;
+  --color-cream-dark: #F5EDE0;
+  --color-wood: #E8D5B7;
+  --color-text-dark: #4A3F2F;
+  --color-text-muted: #7A6A5A;
+  --color-border: #E8DCC8;
+}
+
+/* 龙猫主题渐变背景 */
+.forest-gradient {
+  background: linear-gradient(180deg, var(--color-forest-start) 0%, var(--color-forest-end) 100%);
+}
+
+/* 龙猫 GIF 容器 */
+.totoro-mascot {
+  position: absolute;
+  bottom: 60px;
+  right: 15px;
+  text-align: center;
+}
+
+.totoro-mascot img {
+  width: 65px;
+  height: 65px;
+  object-fit: contain;
+}
+
+/* Toggle 开关样式 */
+.toggle-switch {
+  width: 40px;
+  height: 22px;
+  background: var(--color-moss);
+  border-radius: 11px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.toggle-switch.off {
+  background: #9CA3AF;
+}
+
+.toggle-switch::after {
+  content: '';
+  width: 18px;
+  height: 18px;
+  background: var(--color-wood);
+  border-radius: 50%;
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  transition: transform 0.2s;
+}
+
+.toggle-switch.off::after {
+  transform: translateX(-20px);
+}
+
+/* 消息气泡圆角 */
+.bubble-user {
+  background: var(--color-wood) !important;
+  color: var(--color-text-dark);
+  border-radius: 16px 4px 16px 16px;
+}
+
+.bubble-assistant {
+  background: var(--color-cream-dark) !important;
+  color: var(--color-text-dark);
+  border-radius: 4px 16px 16px 16px;
+}
+
+/* 思考过程样式 */
+.thinking-block {
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: rgba(74, 124, 89, 0.08);
+  border-left: 3px solid var(--color-moss);
+  border-radius: 0 8px 8px 0;
+  font-size: 12px;
+  color: #5A6B52;
+}
