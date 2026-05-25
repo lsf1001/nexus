@@ -1,0 +1,10 @@
+[      28ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://0.0.0.0:8000/app/totoro-new.gif:0
+[   11750ms] TypeError: crypto.randomUUID is not a function
+    at h (http://0.0.0.0:8000/app/assets/index-gG-4JKDc.js:22:16152)
+    at onKeyDown (http://0.0.0.0:8000/app/assets/index-gG-4JKDc.js:22:18425)
+    at yd (http://0.0.0.0:8000/app/assets/index-gG-4JKDc.js:8:126050)
+    at http://0.0.0.0:8000/app/assets/index-gG-4JKDc.js:8:131043
+    at ln (http://0.0.0.0:8000/app/assets/index-gG-4JKDc.js:8:15077)
+    at wd (http://0.0.0.0:8000/app/assets/index-gG-4JKDc.js:8:127277)
+    at up (http://0.0.0.0:8000/app/assets/index-gG-4JKDc.js:9:28439)
+    at cp (http://0.0.0.0:8000/app/assets/index-gG-4JKDc.js:9:28261)

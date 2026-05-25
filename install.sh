@@ -201,7 +201,7 @@ if [ -z "\$MiniMax_API_KEY" ]; then
 fi
 
 cd "\$NEXUS_HOME/nexus"
-exec uvicorn backend.main:app --host 0.0.0.0 --port 8000
+exec uvicorn backend.main:app --host 0.0.0.0 --port 30000
 NEXUS_SCRIPT
 
 chmod +x "$NEXUS_HOME/run"
@@ -229,4 +229,5 @@ else
   echo ""
   echo "启动 Nexus: nexus"
   echo "或直接运行: $NEXUS_HOME/run"
+echo "默认端口: 30000"
 fi
