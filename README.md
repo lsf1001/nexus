@@ -39,13 +39,24 @@ nexus/
 
 ## 快速开始
 
-### 1. 环境要求
+### 一键安装
 
-- Node.js 18+
+```bash
+curl -fsSL https://.../install.sh | bash
+```
+
+安装后运行：
+```bash
+nexus
+```
+
+### 环境要求
+
 - Python 3.11+
+- Node.js 18+ (前端开发需要)
 - MiniMax API Key
 
-### 2. 配置环境变量
+### 配置环境变量
 
 ```bash
 export MiniMax_API_KEY="your-api-key-here"
@@ -54,7 +65,7 @@ export MODEL_NAME="MiniMax-M2.7"                        # 可选，默认 MiniMa
 export MODEL_TEMPERATURE="0.7"                         # 可选，默认 0.7
 ```
 
-### 3. 本地开发
+### 本地开发
 
 **后端：**
 
@@ -82,8 +93,6 @@ npm run dev
 ```
 
 访问 http://localhost:5173
-
-### 4. Docker 部署
 
 ```bash
 # 构建并启动
