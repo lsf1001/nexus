@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 from langchain_openai import ChatOpenAI
 from deepagents import create_deep_agent
-from deepagents.backends.langgraph import StoreBackend
+from deepagents.backends.store import StoreBackend
 
 from .config import CONFIG
 
