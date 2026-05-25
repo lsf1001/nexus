@@ -180,6 +180,26 @@ export NEXUS_HOME="$NEXUS_HOME"
 export PATH="$NEXUS_HOME/.venv/bin:$PATH"
 export PYTHONPATH="$NEXUS_HOME/nexus:\$PYTHONPATH"
 
+# 检查 API Key（环境变量优先，否则从配置文件）
+if [ -z "\$MiniMax_API_KEY" ]; then
+  API_KEY=\$(grep '"api_key":' "\$NEXUS_HOME/models.json" 2>/dev/null | sed 's/.*"api_key": *"\([^"]*\)".*/\1/')
+  if [ -n "\$API_KEY" ]; then
+    export MiniMax_API_KEY="\$API_KEY"
+  else
+    echo "错误: 请先设置 MiniMax API Key"
+    echo ""
+    echo "方式一：环境变量（推荐）"
+    echo "  export MiniMax_API_KEY='your-key'"
+    echo "  \$0"
+    echo ""
+    echo "方式二：编辑配置文件"
+    echo "  nano ~/.nexus/models.json"
+    echo ""
+    echo "获取 API Key: https://platform.minimaxi.com/"
+    exit 1
+  fi
+fi
+
 cd "\$NEXUS_HOME/nexus"
 exec uvicorn backend.main:app --host 0.0.0.0 --port 8000
 NEXUS_SCRIPT
@@ -190,10 +210,23 @@ chmod +x "$NEXUS_HOME/run"
 mkdir -p "$HOME/.local/bin"
 ln -sf "$NEXUS_HOME/run" "$HOME/.local/bin/nexus"
 
-log_success "安装完成!"
-echo ""
-echo "启动 Nexus: nexus"
-echo "或直接运行: $NEXUS_HOME/run"
-echo ""
-echo "首次使用请设置 API Key:"
-echo "export MiniMax_API_KEY='your-key'"
+# 检查 API Key 是否已配置
+if [ -z "${MiniMax_API_KEY:-}" ] && ! grep -q '"api_key": "[^"]' "$NEXUS_HOME/models.json" 2>/dev/null; then
+  echo ""
+  log_warn "请先设置 MiniMax API Key"
+  echo ""
+  echo "方式一：环境变量（临时）"
+  echo "  export MiniMax_API_KEY='your-key'"
+  echo ""
+  echo "方式二：写入配置文件"
+  echo "  nano ~/.nexus/models.json"
+  echo ""
+  echo "获取 API Key: https://platform.minimaxi.com/"
+  echo ""
+  echo "设置完成后启动: nexus"
+else
+  log_success "安装完成!"
+  echo ""
+  echo "启动 Nexus: nexus"
+  echo "或直接运行: $NEXUS_HOME/run"
+fi
