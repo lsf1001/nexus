@@ -50,6 +50,8 @@ nexus/
 ```bash
 export MiniMax_API_KEY="your-api-key-here"
 export MiniMax_API_BASE="https://api.minimaxi.com/v1"  # 可选，默认值
+export MODEL_NAME="MiniMax-M2.7"                        # 可选，默认 MiniMax-M2.7
+export MODEL_TEMPERATURE="0.7"                         # 可选，默认 0.7
 ```
 
 ### 3. 本地开发
@@ -64,6 +66,8 @@ pip install -r requirements.txt
 
 # 设置环境变量
 export MiniMax_API_KEY="your-api-key"
+export MODEL_NAME="MiniMax-M2.7"        # 可选
+export MODEL_TEMPERATURE="0.7"         # 可选
 
 # 启动后端
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload

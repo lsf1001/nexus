@@ -40,6 +40,16 @@ async def root():
     return {"message": "Nexus Backend", "version": "1.0.0", "status": "running"}
 
 
+@app.get(f"{API_PREFIX}/model")
+async def get_model_info():
+    """获取当前配置的模型信息。"""
+    return {
+        "model_name": CONFIG["model_name"],
+        "temperature": CONFIG["temperature"],
+        "api_base": CONFIG["minimax_api_base"],
+    }
+
+
 @app.websocket(f"{API_PREFIX}/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()

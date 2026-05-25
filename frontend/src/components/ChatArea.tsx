@@ -13,11 +13,14 @@ function ChatArea() {
   const isLoading = useStore((s) => s.isLoading);
   const wsConnected = useStore((s) => s.wsConnected);
   const showThinking = useStore((s) => s.showThinking);
+  const modelName = useStore((s) => s.modelName);
   const setIsLoading = useStore((s) => s.setIsLoading);
   const setWsConnected = useStore((s) => s.setWsConnected);
   const setWsError = useStore((s) => s.setWsError);
+  const setModelName = useStore((s) => s.setModelName);
 
   const wsUrl = 'ws://localhost:8000/api/ws';
+  const apiUrl = 'http://localhost:8000/api';
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl);
@@ -88,6 +91,18 @@ function ChatArea() {
     };
   }, []);
 
+  // 获取模型信息
+  useEffect(() => {
+    fetch(`${apiUrl}/model`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.model_name) {
+          setModelName(data.model_name);
+        }
+      })
+      .catch(console.error);
+  }, []);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [displayMessages, isLoading]);
@@ -130,7 +145,7 @@ function ChatArea() {
     <div className="flex-1 flex flex-col bg-[var(--color-cream)]">
       {/* Header */}
       <div className="h-[50px] border-b border-[var(--color-border)] px-5 flex items-center justify-between">
-        <span className="text-sm text-[var(--color-text-muted)]">MiniMax-M2.7</span>
+        <span className="text-sm text-[var(--color-text-muted)]">{modelName}</span>
         <div className="flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[var(--color-moss)]' : 'bg-gray-400'}`} />
           <span className={`text-xs ${wsConnected ? 'text-[var(--color-moss)]' : 'text-gray-500'}`}>

@@ -70,10 +70,10 @@ _CACHED_PROMPT: str | None = None
 def get_llm() -> ChatOpenAI:
     """创建 MiniMax 配置的 ChatOpenAI 实例。"""
     return ChatOpenAI(
-        model="MiniMax-M2.7",
+        model=CONFIG["model_name"],
         openai_api_key=CONFIG["minimax_api_key"],
         openai_api_base=CONFIG["minimax_api_base"],
-        temperature=0.7,
+        temperature=CONFIG["temperature"],
     )
 
 

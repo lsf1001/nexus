@@ -8,6 +8,8 @@ def load_config() -> dict:
     config = {
         "minimax_api_key": os.environ.get("MiniMax_API_KEY", ""),
         "minimax_api_base": os.environ.get("MiniMax_API_BASE", "https://api.minimaxi.com/v1"),
+        "model_name": os.environ.get("MODEL_NAME", "MiniMax-M2.7"),
+        "temperature": float(os.environ.get("MODEL_TEMPERATURE", "0.7")),
         "database_url": os.environ.get("DATABASE_URL", "./nexus.db"),
         "server_host": os.environ.get("SERVER_HOST", "0.0.0.0"),
         "server_port": int(os.environ.get("SERVER_PORT", "8000")),
