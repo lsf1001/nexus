@@ -19,7 +19,7 @@ function ChatArea() {
   const setWsError = useStore((s) => s.setWsError);
   const setModelName = useStore((s) => s.setModelName);
 
-  const wsUrl = 'ws://localhost:8000/app/api/ws';
+  const wsUrl = 'ws://localhost:8000/api/ws';
   const apiUrl = 'http://localhost:8000/api';
 
   useEffect(() => {

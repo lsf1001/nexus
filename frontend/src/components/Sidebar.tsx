@@ -11,7 +11,7 @@ function Sidebar() {
   const setModelName = useStore((s) => s.setModelName);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  const apiUrl = 'http://localhost:8000/app/api';
+  const apiUrl = 'http://localhost:8000/api';
 
   useEffect(() => {
     fetch(`${apiUrl}/models`)
@@ -92,7 +92,7 @@ function Sidebar() {
       <div className="flex-1 flex flex-col items-center justify-center px-4">
         <div className="w-40 h-40 rounded-2xl overflow-hidden bg-[var(--color-cream)] shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
           <img
-            src="/totoro-new.gif"
+            src="/app/totoro-new.gif"
             alt="龙猫"
             className="w-full h-full object-cover"
           />
