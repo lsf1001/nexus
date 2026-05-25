@@ -45,7 +45,8 @@ function ChatArea() {
         case 'thinking': {
           if (messagesRef.current.length > 0) {
             const lastIdx = messagesRef.current.length - 1;
-            messagesRef.current[lastIdx].thinking = (messagesRef.current[lastIdx].thinking || '') + data.content;
+            messagesRef.current[lastIdx].thinking =
+              (messagesRef.current[lastIdx].thinking || '') + data.content;
             setDisplayMessages([...messagesRef.current]);
           }
           break;
@@ -128,30 +129,28 @@ function ChatArea() {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-white">
-      <div className="border-b border-gray-200 px-4 py-2 flex items-center justify-between">
-        <span className="text-sm text-gray-600">MiniMax-M2.7</span>
-        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showThinking}
-            onChange={(e) => setShowThinking(e.target.checked)}
-            className="w-4 h-4 rounded border-gray-300"
-          />
-          显示思考
-        </label>
+    <div className="flex-1 flex flex-col bg-[var(--color-cream)]">
+      {/* Header */}
+      <div className="h-[50px] border-b border-[var(--color-border)] px-5 flex items-center justify-between">
+        <span className="text-sm text-[var(--color-text-muted)]">MiniMax-M2.7</span>
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 bg-[var(--color-moss)] rounded-full" />
+          <span className="text-xs text-[var(--color-moss)]">已连接</span>
+        </div>
       </div>
 
+      {/* 连接断开提示 */}
       {!wsConnected && (
         <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-600">
           连接已断开，请刷新页面重新连接
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-4">
+      {/* 消息区域 */}
+      <div className="flex-1 overflow-y-auto p-5">
         {displayMessages.length === 0 && !isLoading ? (
-          <div className="flex items-center justify-center h-full text-gray-400">
-            <div className="text-center">
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center text-[var(--color-text-muted)]">
               <p className="text-lg">Nexus 智能助手</p>
               <p className="text-sm mt-2">输入消息开始对话</p>
             </div>
@@ -163,11 +162,20 @@ function ChatArea() {
         )}
         {isLoading && (
           <div className="flex justify-start mb-4">
-            <div className="bg-gray-100 px-4 py-3 rounded-lg">
+            <div className="bg-[var(--color-cream-dark)] px-4 py-3 rounded-lg">
               <div className="flex gap-1">
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <span
+                  className="w-2 h-2 bg-[var(--color-moss)] rounded-full animate-bounce"
+                  style={{ animationDelay: '0ms' }}
+                />
+                <span
+                  className="w-2 h-2 bg-[var(--color-moss)] rounded-full animate-bounce"
+                  style={{ animationDelay: '150ms' }}
+                />
+                <span
+                  className="w-2 h-2 bg-[var(--color-moss)] rounded-full animate-bounce"
+                  style={{ animationDelay: '300ms' }}
+                />
               </div>
             </div>
           </div>
@@ -175,7 +183,8 @@ function ChatArea() {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="border-t border-gray-200 p-4">
+      {/* 输入区域 */}
+      <div className="p-4 border-t border-[var(--color-border)]">
         <div className="flex items-center gap-2">
           <input
             type="text"
@@ -184,14 +193,14 @@ function ChatArea() {
             onKeyDown={handleKeyDown}
             placeholder={wsConnected ? '输入消息...' : '连接中...'}
             disabled={!wsConnected || isLoading}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+            className="flex-1 px-4 py-3 border border-[var(--color-border)] rounded-3xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-moss)] disabled:bg-gray-100"
           />
           <button
             onClick={handleSend}
             disabled={!wsConnected || !input.trim() || isLoading}
-            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            className="w-11 h-11 bg-[var(--color-moss)] text-white rounded-full hover:bg-[var(--color-forest-start)] disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center text-lg"
           >
-            发送
+            ➤
           </button>
         </div>
       </div>
