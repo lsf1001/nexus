@@ -67,13 +67,18 @@ def _build_system_prompt() -> str:
 _CACHED_PROMPT: str | None = None
 
 
-def get_llm() -> ChatOpenAI:
-    """创建 MiniMax 配置的 ChatOpenAI 实例。"""
+def get_llm(
+    model_name: str | None = None,
+    api_key: str | None = None,
+    api_base: str | None = None,
+    temperature: float | None = None,
+) -> ChatOpenAI:
+    """创建 ChatOpenAI 实例。"""
     return ChatOpenAI(
-        model=CONFIG["model_name"],
-        openai_api_key=CONFIG["minimax_api_key"],
-        openai_api_base=CONFIG["minimax_api_base"],
-        temperature=CONFIG["temperature"],
+        model=model_name or CONFIG["model_name"],
+        openai_api_key=api_key or CONFIG["minimax_api_key"],
+        openai_api_base=api_base or CONFIG["minimax_api_base"],
+        temperature=temperature if temperature is not None else CONFIG["temperature"],
     )
 
 
@@ -96,7 +101,12 @@ def get_project_root() -> Path:
     return Path(__file__).parent.parent
 
 
-def create_agent() -> Any:
+def create_agent(
+    model_name: str | None = None,
+    api_key: str | None = None,
+    api_base: str | None = None,
+    temperature: float | None = None,
+) -> Any:
     """创建带完整 Nexus 能力的智能体。"""
     from .tools import TOOLS
 
@@ -108,7 +118,7 @@ def create_agent() -> Any:
     backend = StoreBackend(store=memory_store)
 
     return create_deep_agent(
-        model=get_llm(),
+        model=get_llm(model_name, api_key, api_base, temperature),
         tools=TOOLS,
         system_prompt=get_system_prompt(),
         backend=backend,

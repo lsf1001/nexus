@@ -6,17 +6,30 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import CONFIG
 from .agent import create_agent
+from .models_config import load_models, get_active_model, set_active_model
 
 _agent = None
 
 logging.basicConfig(level=logging.INFO)
 
 
+def _create_agent_with_model(model_config: dict | None = None):
+    """使用指定模型配置创建 Agent。"""
+    if model_config is None:
+        model_config = get_active_model()
+    return create_agent(
+        model_name=model_config.get("name", "MiniMax-M2.7") if model_config else "MiniMax-M2.7",
+        api_key=model_config.get("api_key", CONFIG["minimax_api_key"]) if model_config else CONFIG["minimax_api_key"],
+        api_base=model_config.get("api_base", CONFIG["minimax_api_base"]) if model_config else CONFIG["minimax_api_base"],
+        temperature=model_config.get("temperature", 0.7) if model_config else 0.7,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动时初始化，关闭时清理。"""
     global _agent
-    _agent = create_agent()
+    _agent = _create_agent_with_model()
     print("✓ Nexus Backend 已初始化")
     yield
     print("✗ Nexus Backend 关闭中")
@@ -42,11 +55,49 @@ async def root():
 
 @app.get(f"{API_PREFIX}/model")
 async def get_model_info():
-    """获取当前配置的模型信息。"""
+    """获取当前激活的模型信息。"""
+    active = get_active_model()
+    if active:
+        return {
+            "model_name": active.get("name", "MiniMax-M2.7"),
+            "temperature": active.get("temperature", 0.7),
+            "api_base": active.get("api_base", CONFIG["minimax_api_base"]),
+            "id": active.get("id"),
+        }
     return {
         "model_name": CONFIG["model_name"],
         "temperature": CONFIG["temperature"],
         "api_base": CONFIG["minimax_api_base"],
+    }
+
+
+@app.get(f"{API_PREFIX}/models")
+async def get_models():
+    """获取所有模型列表。"""
+    config = load_models()
+    return config.get("models", [])
+
+
+@app.post(f"{API_PREFIX}/models/switch")
+async def switch_model(body: dict):
+    """切换当前激活的模型。"""
+    global _agent
+    model_id = body.get("id")
+    if not model_id:
+        return {"error": "缺少模型ID"}
+
+    active = set_active_model(model_id)
+    if not active:
+        return {"error": "模型不存在"}
+
+    # 重新创建 Agent
+    _agent = _create_agent_with_model(active)
+    return {
+        "success": True,
+        "active_model": {
+            "id": active.get("id"),
+            "name": active.get("name"),
+        }
     }
 
 

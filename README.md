@@ -118,12 +118,39 @@ docker-compose down
 
 点击侧边栏的开关按钮，可以开启或关闭 AI 思考过程的显示。
 
+### 模型切换
+
+点击侧边栏顶部的模型下拉菜单，可以切换不同模型配置。
+
+## 模型配置
+
+模型配置存储在 `~/.nexus/models.json`：
+
+```json
+{
+  "models": [
+    {
+      "id": "default",
+      "name": "MiniMax-M2.7",
+      "api_key": "your-api-key",
+      "api_base": "https://api.minimaxi.com/v1",
+      "temperature": 0.7,
+      "is_active": true
+    }
+  ]
+}
+```
+
+添加新模型：直接编辑 `~/.nexus/models.json` 文件，添加新的模型配置。
+
 ## API 接口
 
-| 接口 | 方法 | 说明 |
-|------|------|------|
-| `/api/` | GET | 健康检查 |
-| `/api/ws` | WebSocket | 对话 WebSocket |
+| 接口              | 方法        | 说明           |
+| --------------- | --------- | ------------ |
+| `/api/`         | GET       | 健康检查         |
+| `/api/models`   | GET       | 获取模型列表      |
+| `/api/models/switch` | POST   | 切换当前模型      |
+| `/api/ws`       | WebSocket | 对话 WebSocket |
 
 ### WebSocket 对话
 
