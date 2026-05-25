@@ -8,7 +8,6 @@ function ChatArea() {
   const messagesRef = useRef<Message[]>([]);
   const [displayMessages, setDisplayMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [showThinking, setShowThinking] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const isLoading = useStore((s) => s.isLoading);
@@ -17,9 +16,7 @@ function ChatArea() {
   const setWsConnected = useStore((s) => s.setWsConnected);
   const setWsError = useStore((s) => s.setWsError);
 
-  const wsUrl = import.meta.env.DEV
-    ? 'ws://localhost:8000/api/ws'
-    : 'ws://localhost:8000/api/ws';
+  const wsUrl = 'ws://localhost:8000/api/ws';
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl);
@@ -134,14 +131,16 @@ function ChatArea() {
       <div className="h-[50px] border-b border-[var(--color-border)] px-5 flex items-center justify-between">
         <span className="text-sm text-[var(--color-text-muted)]">MiniMax-M2.7</span>
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 bg-[var(--color-moss)] rounded-full" />
-          <span className="text-xs text-[var(--color-moss)]">已连接</span>
+          <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[var(--color-moss)]' : 'bg-red-500'}`} />
+          <span className={`text-xs ${wsConnected ? 'text-[var(--color-moss)]' : 'text-red-500'}`}>
+            {wsConnected ? '已连接' : '未连接'}
+          </span>
         </div>
       </div>
 
       {/* 连接断开提示 */}
       {!wsConnected && (
-        <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-600">
+        <div className="bg-gray-100 border-b border-gray-200 px-4 py-2 text-sm text-gray-600">
           连接已断开，请刷新页面重新连接
         </div>
       )}
@@ -157,7 +156,7 @@ function ChatArea() {
           </div>
         ) : (
           displayMessages.map((msg) => (
-            <ChatBubble key={msg.id} message={msg} showThinking={showThinking} />
+            <ChatBubble key={msg.id} message={msg} />
           ))
         )}
         {isLoading && (
