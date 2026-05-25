@@ -11,6 +11,9 @@ def load_config() -> dict:
         "database_url": os.environ.get("DATABASE_URL", "./nexus.db"),
         "server_host": os.environ.get("SERVER_HOST", "0.0.0.0"),
         "server_port": int(os.environ.get("SERVER_PORT", "8000")),
+        "default_save_path": os.environ.get("DEFAULT_SAVE_PATH", str(Path.home() / "Documents" / "Nexus")),
+        "tavily_api_key": os.environ.get("TAVILY_API_KEY", ""),
+        "openweathermap_api_key": os.environ.get("OPENWEATHERMAP_API_KEY", ""),
     }
 
     # 如果环境变量未设置，从 ~/.claude/settings.json 读取
