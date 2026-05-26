@@ -18,22 +18,6 @@ def load_config() -> dict:
         "openweathermap_api_key": os.environ.get("OPENWEATHERMAP_API_KEY", ""),
     }
 
-    # 如果环境变量未设置，从 ~/.claude/settings.json 读取
-    if not config["minimax_api_key"]:
-        settings_path = Path.home() / ".claude" / "settings.json"
-        if settings_path.exists():
-            try:
-                with open(settings_path) as f:
-                    settings = json.load(f)
-                # 首先尝试 MiniMax 专用 key，如果没有则使用 ANTHROPIC_AUTH_TOKEN
-                config["minimax_api_key"] = (
-                    settings.get("env", {}).get("MINIMAX_API_KEY") or
-                    settings.get("env", {}).get("MiniMax_API_KEY") or
-                    settings.get("env", {}).get("ANTHROPIC_AUTH_TOKEN", "")
-                )
-            except Exception:
-                pass
-
     return config
 
 
