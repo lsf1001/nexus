@@ -19,6 +19,19 @@ def load_config() -> dict:
         "ws_token": os.environ.get("NEXUS_WS_TOKEN", "nexus-default-token"),
     }
 
+    # 从 config.json 加载安全配置
+    config_path = Path.home() / ".nexus" / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                file_config = json.load(f)
+            # 合并 security 配置
+            if "security" in file_config:
+                if "ws_token" in file_config["security"]:
+                    config["ws_token"] = file_config["security"]["ws_token"]
+        except (json.JSONDecodeError, IOError):
+            pass
+
     return config
 
 
