@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
+import ModelConfigModal from './ModelConfigModal';
 
 interface SidebarProps {
   onError?: (message: string) => void;
@@ -14,6 +15,7 @@ function Sidebar({ onError }: SidebarProps) {
   const setCurrentModelId = useStore((s) => s.setCurrentModelId);
   const setModelName = useStore((s) => s.setModelName);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [showModelConfig, setShowModelConfig] = useState(false);
 
   const apiUrl = `${window.location.protocol}//${window.location.host}/api`;
 
@@ -96,6 +98,13 @@ function Sidebar({ onError }: SidebarProps) {
             )}
           </div>
         </div>
+        {/* 配置按钮 */}
+        <button
+          onClick={() => setShowModelConfig(true)}
+          className="w-full mt-2 px-3 py-1.5 text-xs text-[var(--color-moss-light)] hover:text-white transition-colors"
+        >
+          ⚙️ 配置模型
+        </button>
       </div>
 
       {/* 龙猫 GIF 区域 - 占据上方大空间 */}
@@ -125,6 +134,8 @@ function Sidebar({ onError }: SidebarProps) {
           </div>
         </div>
       </div>
+
+      <ModelConfigModal isOpen={showModelConfig} onClose={() => setShowModelConfig(false)} />
     </div>
   );
 }

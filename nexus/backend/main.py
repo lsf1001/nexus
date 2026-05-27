@@ -3,14 +3,15 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from .config import CONFIG
 from .agent import create_agent
-from .models_config import load_models, get_active_model, set_active_model
+from .models_config import load_models, get_active_model, set_active_model, save_models
 from .mcp import load_all_mcp_tools
 from .models import SwitchModelRequest, SwitchModelResponse
 
@@ -178,6 +179,114 @@ async def switch_model(body: SwitchModelRequest):
             "name": target.get("name"),
         }
     )
+
+
+class CreateModelRequest(BaseModel):
+    """创建模型请求。"""
+    id: str = Field(..., min_length=1, description="模型ID")
+    name: str = Field(default="New Model", description="模型名称")
+    api_key: str = Field(default="", description="API密钥")
+    api_base: str = Field(default="https://api.minimaxi.com/v1", description="API端点")
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="温度参数")
+
+
+class UpdateModelRequest(BaseModel):
+    """更新模型请求。"""
+    name: Optional[str] = Field(default=None, description="模型名称")
+    api_key: Optional[str] = Field(default=None, description="API密钥")
+    api_base: Optional[str] = Field(default=None, description="API端点")
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0, description="温度参数")
+
+
+@app.post(f"{API_PREFIX}/models")
+async def create_model(body: CreateModelRequest):
+    """创建新模型。"""
+    config = load_models()
+
+    # 检查 ID 是否已存在
+    for model in config.get("models", []):
+        if model.get("id") == body.id:
+            return {"success": False, "error": f"模型 ID '{body.id}' 已存在"}
+
+    new_model = {
+        "id": body.id,
+        "name": body.name,
+        "api_key": body.api_key,
+        "api_base": body.api_base,
+        "temperature": body.temperature,
+        "is_active": False,
+    }
+    config["models"].append(new_model)
+    save_models(config)
+
+    return {"success": True, "model": new_model}
+
+
+@app.put(f"{API_PREFIX}/models/{{model_id}}")
+async def update_model(model_id: str, body: UpdateModelRequest):
+    """更新模型配置。"""
+    config = load_models()
+
+    # 查找模型
+    target = None
+    for model in config.get("models", []):
+        if model.get("id") == model_id:
+            target = model
+            break
+
+    if not target:
+        return {"success": False, "error": "模型不存在"}
+
+    # 更新字段
+    if body.name is not None:
+        target["name"] = body.name
+    if body.api_key is not None:
+        target["api_key"] = body.api_key
+    if body.api_base is not None:
+        target["api_base"] = body.api_base
+    if body.temperature is not None:
+        target["temperature"] = body.temperature
+
+    save_models(config)
+    return {"success": True, "model": target}
+
+
+@app.delete(f"{API_PREFIX}/models/{{model_id}}")
+async def delete_model(model_id: str):
+    """删除模型。"""
+    global _agent
+
+    config = load_models()
+    models = config.get("models", [])
+
+    # 检查是否是最后一个模型
+    if len(models) <= 1:
+        return {"success": False, "error": "至少需要保留一个模型"}
+
+    # 查找要删除的模型
+    target = None
+    for model in models:
+        if model.get("id") == model_id:
+            target = model
+            break
+
+    if not target:
+        return {"success": False, "error": "模型不存在"}
+
+    # 如果删除的是激活的模型，需要切换到另一个
+    if target.get("is_active"):
+        # 激活另一个模型
+        for model in models:
+            if model.get("id") != model_id and model.get("api_key"):
+                set_active_model(model["id"])
+                _agent = _create_agent_with_model(model, _mcp_tools)
+                break
+
+    # 删除模型
+    config["models"] = [m for m in models if m.get("id") != model_id]
+    save_models(config)
+
+    return {"success": True}
 
 
 def _estimate_tokens(text: str) -> tuple[int, int]:
