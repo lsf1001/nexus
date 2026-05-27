@@ -184,9 +184,10 @@ function ModelConfigModal({ isOpen, onClose }: ModelConfigModalProps) {
           <h2 className="text-lg font-semibold text-white">模型配置</h2>
           <button
             onClick={onClose}
-            className="text-white/70 hover:text-white text-2xl leading-none"
+            className="w-8 h-8 flex items-center justify-center text-white hover:bg-white/20 rounded-lg transition-colors text-xl font-bold"
+            aria-label="关闭"
           >
-            ×
+            ✕
           </button>
         </div>
 
