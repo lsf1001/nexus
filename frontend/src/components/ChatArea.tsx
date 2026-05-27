@@ -1,45 +1,47 @@
 import { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import ChatBubble from './ChatBubble';
+import totoroGif from '../assets/totoro.gif';
 import type { StreamEvent, WSMessage, Message } from '../types';
 
-function ChatArea() {
+interface ChatAreaProps {
+  onConnectedChange?: (connected: boolean) => void;
+}
+
+function ChatArea({ onConnectedChange }: ChatAreaProps) {
   const wsRef = useRef<WebSocket | null>(null);
   const messagesRef = useRef<Message[]>([]);
   const [displayMessages, setDisplayMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const isLoading = useStore((s) => s.isLoading);
   const wsConnected = useStore((s) => s.wsConnected);
   const showThinking = useStore((s) => s.showThinking);
-  const modelName = useStore((s) => s.modelName);
   const setIsLoading = useStore((s) => s.setIsLoading);
   const setWsConnected = useStore((s) => s.setWsConnected);
-  const setWsError = useStore((s) => s.setWsError);
-  const setModelName = useStore((s) => s.setModelName);
-  const setCurrentModelId = useStore((s) => s.setCurrentModelId);
 
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsToken = 'nexus-default-token';
-  const wsUrl = `${wsProtocol}//${window.location.host}/api/ws?token=${wsToken}`;
-  const apiUrl = `${window.location.protocol}//${window.location.host}/api`;
+  const wsUrl = `${wsProtocol}//${window.location.host}/api/ws?token=nexus-default-token`;
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
-    ws.onerror = () => {
-      setWsConnected(false);
-      setWsError('连接错误');
-    };
-
     ws.onopen = () => {
       setWsConnected(true);
+      onConnectedChange?.(true);
     };
 
     ws.onclose = () => {
       setWsConnected(false);
+      onConnectedChange?.(false);
+    };
+
+    ws.onerror = () => {
+      setWsConnected(false);
+      onConnectedChange?.(false);
     };
 
     ws.onmessage = (event) => {
@@ -79,11 +81,7 @@ function ChatArea() {
           break;
         }
         case 'error': {
-          setWsError(data.content || null);
           setIsLoading(false);
-          break;
-        }
-        case 'token_usage': {
           break;
         }
       }
@@ -92,21 +90,6 @@ function ChatArea() {
     return () => {
       ws.close();
     };
-  }, []);
-
-  // 获取模型信息并同步状态
-  useEffect(() => {
-    fetch(`${apiUrl}/model`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.model_name) {
-          setModelName(data.model_name);
-        }
-        if (data.id) {
-          setCurrentModelId(data.id);
-        }
-      })
-      .catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -149,82 +132,110 @@ function ChatArea() {
     }
   };
 
+  const insertPrompt = (text: string) => {
+    setInput(text);
+    inputRef.current?.focus();
+  };
+
   return (
-    <div className="flex-1 flex flex-col bg-[var(--color-cream)]">
-      {/* Header */}
-      <div className="h-[50px] border-b border-[var(--color-border)] px-5 flex items-center justify-between">
-        <span className="text-sm text-[var(--color-text-muted)]">{modelName}</span>
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[var(--color-moss)]' : 'bg-gray-400'}`} />
-          <span className={`text-xs ${wsConnected ? 'text-[var(--color-moss)]' : 'text-gray-500'}`}>
-            {wsConnected ? '已连接' : '未连接'}
-          </span>
-        </div>
-      </div>
-
-      {/* 连接断开提示 */}
-      {!wsConnected && (
-        <div className="bg-gray-100 border-b border-gray-200 px-4 py-2 text-sm text-gray-600">
-          连接已断开，请刷新页面重新连接
-        </div>
-      )}
-
+    <div className="flex-1 flex flex-col bg-[#faf8f5]">
       {/* 消息区域 */}
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto">
         {displayMessages.length === 0 && !isLoading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center text-[var(--color-text-muted)]">
-              <p className="text-lg">Nexus 智能助手</p>
-              <p className="text-sm mt-2">输入消息开始对话</p>
+          /* 欢迎界面 */
+          <div className="flex flex-col items-center justify-center h-full px-4">
+            {/* 龙猫 */}
+            <div className="mb-8">
+              <img
+                src={totoroGif}
+                alt="龙猫"
+                className="w-32 h-32 rounded-3xl object-cover shadow-lg"
+              />
+            </div>
+
+            {/* 标题 */}
+            <h2 className="text-2xl font-medium text-[#2d4a3a] mb-2">你好，我是 Nexus</h2>
+            <p className="text-[#6b7c6b] mb-8">我可以帮你解答问题、编写代码、分析数据...</p>
+
+            {/* 快捷提示 */}
+            <div className="grid grid-cols-2 gap-3 w-full max-w-md">
+              <button
+                onClick={() => insertPrompt('帮我写一段 Python 代码')}
+                className="p-4 rounded-2xl bg-white border border-[#e0dcd4] text-left hover:shadow-md hover:border-[#8fbc8f] transition-all"
+              >
+                <div className="text-sm font-medium mb-1 text-[#2d4a3a]">写代码</div>
+                <div className="text-xs text-[#6b7c6b]">Python、JavaScript...</div>
+              </button>
+              <button
+                onClick={() => insertPrompt('帮我分析这份数据')}
+                className="p-4 rounded-2xl bg-white border border-[#e0dcd4] text-left hover:shadow-md hover:border-[#8fbc8f] transition-all"
+              >
+                <div className="text-sm font-medium mb-1 text-[#2d4a3a]">分析数据</div>
+                <div className="text-xs text-[#6b7c6b]">Excel、CSV、JSON...</div>
+              </button>
+              <button
+                onClick={() => insertPrompt('解释一下这个概念')}
+                className="p-4 rounded-2xl bg-white border border-[#e0dcd4] text-left hover:shadow-md hover:border-[#8fbc8f] transition-all"
+              >
+                <div className="text-sm font-medium mb-1 text-[#2d4a3a]">知识问答</div>
+                <div className="text-xs text-[#6b7c6b]">解释概念、回答问题...</div>
+              </button>
+              <button
+                onClick={() => insertPrompt('帮我写一篇文章')}
+                className="p-4 rounded-2xl bg-white border border-[#e0dcd4] text-left hover:shadow-md hover:border-[#8fbc8f] transition-all"
+              >
+                <div className="text-sm font-medium mb-1 text-[#2d4a3a]">写作助手</div>
+                <div className="text-xs text-[#6b7c6b]">文章、邮件、报告...</div>
+              </button>
             </div>
           </div>
         ) : (
-          displayMessages.map((msg) => (
-            <ChatBubble key={msg.id} message={msg} showThinking={showThinking} />
-          ))
-        )}
-        {isLoading && (
-          <div className="flex justify-start mb-4">
-            <div className="bg-[var(--color-cream-dark)] px-4 py-3 rounded-lg">
-              <div className="flex gap-1">
-                <span
-                  className="w-2 h-2 bg-[var(--color-moss)] rounded-full animate-bounce"
-                  style={{ animationDelay: '0ms' }}
-                />
-                <span
-                  className="w-2 h-2 bg-[var(--color-moss)] rounded-full animate-bounce"
-                  style={{ animationDelay: '150ms' }}
-                />
-                <span
-                  className="w-2 h-2 bg-[var(--color-moss)] rounded-full animate-bounce"
-                  style={{ animationDelay: '300ms' }}
-                />
+          /* 对话消息 */
+          <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+            {displayMessages.map((msg) => (
+              <ChatBubble key={msg.id} message={msg} showThinking={showThinking} />
+            ))}
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-white px-4 py-3 rounded-2xl border border-[#e0dcd4]">
+                  <div className="flex gap-1">
+                    <span className="w-2 h-2 bg-[#4a7c59] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-2 h-2 bg-[#4a7c59] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-2 h-2 bg-[#4a7c59] rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
       {/* 输入区域 */}
-      <div className="p-4 border-t border-[var(--color-border)]">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={wsConnected ? '输入消息...' : '连接中...'}
-            disabled={!wsConnected || isLoading}
-            className="flex-1 px-4 py-3 border border-[var(--color-border)] rounded-3xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-moss)] disabled:bg-gray-100"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!wsConnected || !input.trim() || isLoading}
-            className="w-11 h-11 bg-[var(--color-moss)] text-white rounded-full hover:bg-[var(--color-forest-start)] disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center text-lg"
-          >
-            ➤
-          </button>
+      <div className="p-4 border-t border-[#e0dcd4] bg-white">
+        <div className="max-w-3xl mx-auto">
+          <div className="flex items-end gap-3 bg-[#faf8f5] rounded-2xl border border-[#e0dcd4] px-4 py-3 focus-within:border-[#4a7c59] focus-within:shadow-sm transition-all">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={wsConnected ? '输入消息...' : '连接中...'}
+              disabled={!wsConnected || isLoading}
+              rows={1}
+              className="flex-1 bg-transparent resize-none focus:outline-none text-[#2d4a3a] placeholder-[#6b7c6b] disabled:text-[#999]"
+            />
+            <button
+              onClick={handleSend}
+              disabled={!wsConnected || !input.trim() || isLoading}
+              className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#2d4a3a] to-[#4a7c59] text-white flex items-center justify-center hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
+            </button>
+          </div>
+          <p className="text-center text-xs text-[#999] mt-2">Enter 发送，Shift + Enter 换行</p>
         </div>
       </div>
     </div>
