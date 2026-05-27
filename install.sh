@@ -111,18 +111,27 @@ log_info "安装 Nexus 依赖..."
 # 创建虚拟环境（如果已存在则清除）
 uv venv "$NEXUS_HOME/.venv" --clear
 
-# 安装依赖
-uv pip install --python "$NEXUS_HOME/.venv/bin/python" \
-  fastapi uvicorn[standard] \
-  deepagents==0.5.3 \
-  langchain-openai \
-  langchain-community \
-  duckduckgo-search \
-  ddgs \
-  wikipedia \
-  aiosqlite \
-  pydantic \
-  python-dotenv
+# 从 pyproject.toml 安装
+if [ -f "$(dirname "$0")/pyproject.toml" ]; then
+  log_info "从 pyproject.toml 安装..."
+  uv pip install --python "$NEXUS_HOME/.venv/bin/python" -e "$(dirname "$0")"
+else
+  # 直接安装依赖列表
+  uv pip install --python "$NEXUS_HOME/.venv/bin/python" \
+    fastapi "uvicorn[standard]" \
+    "deepagents==0.5.3" \
+    langchain-openai \
+    langchain-community \
+    duckduckgo-search \
+    ddgs \
+    wikipedia \
+    aiosqlite \
+    pydantic \
+    python-dotenv \
+    typer \
+    rich \
+    beautifulsoup4
+fi
 
 log_success "依赖安装完成"
 
@@ -170,45 +179,18 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-# 创建启动脚本
+# 创建 CLI 入口
 # ---------------------------------------------------------------------------
-cat > "$NEXUS_HOME/run" << NEXUS_SCRIPT
-#!/usr/bin/env bash
-# Nexus 启动脚本
+log_info "创建 CLI 入口..."
 
-export NEXUS_HOME="$NEXUS_HOME"
-export PATH="$NEXUS_HOME/.venv/bin:$PATH"
-export PYTHONPATH="$NEXUS_HOME/nexus:\$PYTHONPATH"
+# 使用 pyproject.toml 的入口点
+"$NEXUS_HOME/.venv/bin/pip" install -e "$(dirname "$0")" --quiet 2>/dev/null || true
 
-# 检查 API Key（环境变量优先，否则从配置文件）
-if [ -z "\$MiniMax_API_KEY" ]; then
-  API_KEY=\$(grep '"api_key":' "\$NEXUS_HOME/models.json" 2>/dev/null | sed 's/.*"api_key": *"\([^"]*\)".*/\1/')
-  if [ -n "\$API_KEY" ]; then
-    export MiniMax_API_KEY="\$API_KEY"
-  else
-    echo "错误: 请先设置 MiniMax API Key"
-    echo ""
-    echo "方式一：环境变量（推荐）"
-    echo "  export MiniMax_API_KEY='your-key'"
-    echo "  \$0"
-    echo ""
-    echo "方式二：编辑配置文件"
-    echo "  nano ~/.nexus/models.json"
-    echo ""
-    echo "获取 API Key: https://platform.minimaxi.com/"
-    exit 1
-  fi
-fi
-
-cd "\$NEXUS_HOME/nexus"
-exec uvicorn backend.main:app --host 0.0.0.0 --port 30000
-NEXUS_SCRIPT
-
-chmod +x "$NEXUS_HOME/run"
-
-# 创建符号链接到 ~/.local/bin
+# 创建符号链接到 ~/.local/bin（备用）
 mkdir -p "$HOME/.local/bin"
-ln -sf "$NEXUS_HOME/run" "$HOME/.local/bin/nexus"
+ln -sf "$NEXUS_HOME/.venv/bin/nexus" "$HOME/.local/bin/nexus" 2>/dev/null || true
+
+log_success "CLI 入口创建完成"
 
 # 检查 API Key 是否已配置
 if [ -z "${MiniMax_API_KEY:-}" ] && ! grep -q '"api_key": "[^"]' "$NEXUS_HOME/models.json" 2>/dev/null; then
@@ -227,7 +209,12 @@ if [ -z "${MiniMax_API_KEY:-}" ] && ! grep -q '"api_key": "[^"]' "$NEXUS_HOME/mo
 else
   log_success "安装完成!"
   echo ""
-  echo "启动 Nexus: nexus"
-  echo "或直接运行: $NEXUS_HOME/run"
-echo "默认端口: 30000"
+  echo "使用方式:"
+  echo "  nexus              # 启动网关（向前兼容）"
+  echo "  nexus gateway run  # 前台运行"
+  echo "  nexus gateway start # 后台启动"
+  echo "  nexus gateway stop  # 停止"
+  echo "  nexus gateway status # 查看状态"
+  echo ""
+  echo "默认端口: 30000"
 fi

@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 
-function Sidebar() {
+interface SidebarProps {
+  onError?: (message: string) => void;
+}
+
+function Sidebar({ onError }: SidebarProps) {
   const showThinking = useStore((s) => s.showThinking);
   const setShowThinking = useStore((s) => s.setShowThinking);
   const models = useStore((s) => s.models);
@@ -11,7 +15,7 @@ function Sidebar() {
   const setModelName = useStore((s) => s.setModelName);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  const apiUrl = 'http://localhost:30000/api';
+  const apiUrl = `${window.location.protocol}//${window.location.host}/api`;
 
   useEffect(() => {
     fetch(`${apiUrl}/models`)
@@ -39,6 +43,12 @@ function Sidebar() {
         setCurrentModelId(data.active_model.id);
         setModelName(data.active_model.name);
         setIsDropdownOpen(false);
+      } else {
+        const msg = data.error || '切换模型失败';
+        if (onError) {
+          onError(msg);
+        }
+        console.error(msg);
       }
     } catch (err) {
       console.error('切换模型失败:', err);
@@ -92,7 +102,7 @@ function Sidebar() {
       <div className="flex-1 flex flex-col items-center justify-center px-4">
         <div className="w-40 h-40 rounded-2xl overflow-hidden bg-[var(--color-cream)] shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
           <img
-            src="/app/totoro.gif"
+            src={currentModel?.api_key ? '/app/totoro.gif' : '/app/totoro_static.png'}
             alt="龙猫"
             className="w-full h-full object-cover"
           />

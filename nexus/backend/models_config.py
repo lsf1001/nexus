@@ -27,7 +27,7 @@ def load_models() -> dict[str, Any]:
     try:
         with open(MODELS_FILE) as f:
             return json.load(f)
-    except Exception:
+    except (json.JSONDecodeError, OSError):
         return {"models": []}
 
 

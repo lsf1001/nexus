@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nexus"
+version = "1.0.0"
+description = "Nexus - AI 助手平台"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "deepagents==0.5.3",
+    "langchain-openai",
+    "langchain-community",
+    "duckduckgo-search",
+    "ddgs",
+    "wikipedia",
+    "aiosqlite",
+    "pydantic",
+    "python-dotenv",
+    "typer[all]",
+    "rich",
+    "beautifulsoup4",
+]
+
+[project.scripts]
+nexus = "nexus.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["nexus"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

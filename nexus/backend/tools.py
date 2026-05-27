@@ -69,20 +69,28 @@ def yandex_search(query: str) -> str:
         query: 搜索查询词
     """
     try:
+        from bs4 import BeautifulSoup
+
         url = f"https://yandex.com/search/site/?searchid=1&text={query}&web=1&l=10"
         headers = {"User-Agent": "Mozilla/5.0"}
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.status_code == 200:
-            # 简单提取搜索结果片段
-            return f"Yandex搜索结果：{resp.text[:500]}"
+            soup = BeautifulSoup(resp.text, "html.parser")
+            snippets = []
+            for tag in soup.find_all(["p", "span", "div"], limit=10):
+                text = tag.get_text(strip=True)
+                if len(text) > 20:
+                    snippets.append(text)
+            if snippets:
+                return "Yandex搜索结果：\n" + "\n".join(snippets[:5])
+            return "Yandex搜索结果：未找到相关内容"
         return f"Yandex搜索失败：HTTP {resp.status_code}"
-    except Exception as e:
+    except requests.RequestException as e:
         return f"Yandex搜索错误：{str(e)}"
 
 
 # 搜索工具
 web_search = DuckDuckGoSearchRun(name="web_search", description="搜索网络信息（国外服务，可能超时）")
-from langchain_community.utilities.wikipedia import WikipediaAPIWrapper
 wikipedia = WikipediaQueryRun(name="wikipedia", api_wrapper=WikipediaAPIWrapper())
 
 # 文件管理工具

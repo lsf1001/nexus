@@ -18,9 +18,12 @@ function ChatArea() {
   const setWsConnected = useStore((s) => s.setWsConnected);
   const setWsError = useStore((s) => s.setWsError);
   const setModelName = useStore((s) => s.setModelName);
+  const setCurrentModelId = useStore((s) => s.setCurrentModelId);
 
-  const wsUrl = 'ws://localhost:30000/api/ws';
-  const apiUrl = 'http://localhost:30000/api';
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsToken = 'nexus-default-token';
+  const wsUrl = `${wsProtocol}//${window.location.host}/api/ws?token=${wsToken}`;
+  const apiUrl = `${window.location.protocol}//${window.location.host}/api`;
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl);
@@ -91,13 +94,16 @@ function ChatArea() {
     };
   }, []);
 
-  // 获取模型信息
+  // 获取模型信息并同步状态
   useEffect(() => {
     fetch(`${apiUrl}/model`)
       .then(res => res.json())
       .then(data => {
         if (data.model_name) {
           setModelName(data.model_name);
+        }
+        if (data.id) {
+          setCurrentModelId(data.id);
         }
       })
       .catch(console.error);

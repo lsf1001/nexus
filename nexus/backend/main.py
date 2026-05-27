@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 import logging
+import os
 import re
 from pathlib import Path
+from typing import Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -9,13 +11,17 @@ from fastapi.staticfiles import StaticFiles
 from .config import CONFIG
 from .agent import create_agent
 from .models_config import load_models, get_active_model, set_active_model
+from .mcp import load_all_mcp_tools
+from .models import SwitchModelRequest, SwitchModelResponse
 
 _agent = None
+_mcp_tools: list[Any] = []
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-def _get_frontend_path() -> Path:
+def _get_frontend_path() -> Path | None:
     """获取前端构建目录路径。"""
     # 安装目录下的 frontend
     nexus_home = Path.home() / ".nexus"
@@ -31,26 +37,45 @@ def _get_frontend_path() -> Path:
     return None
 
 
-def _create_agent_with_model(model_config: dict | None = None):
+def _create_agent_with_model(model_config: dict | None = None, mcp_tools: list[Any] | None = None):
     """使用指定模型配置创建 Agent。"""
     if model_config is None:
         model_config = get_active_model()
+
+    if not model_config:
+        return None
+
+    api_key = model_config.get("api_key") or CONFIG.get("minimax_api_key", "")
+    api_base = model_config.get("api_base") or CONFIG.get("minimax_api_base", "https://api.minimaxi.com/v1")
+    model_name = model_config.get("name", "MiniMax-M2.7")
+    temperature = model_config.get("temperature", 0.7)
+
+    if not api_key:
+        return None
+
     return create_agent(
-        model_name=model_config.get("name", "MiniMax-M2.7") if model_config else "MiniMax-M2.7",
-        api_key=model_config.get("api_key", CONFIG["minimax_api_key"]) if model_config else CONFIG["minimax_api_key"],
-        api_base=model_config.get("api_base", CONFIG["minimax_api_base"]) if model_config else CONFIG["minimax_api_base"],
-        temperature=model_config.get("temperature", 0.7) if model_config else 0.7,
+        model_name=model_name,
+        api_key=api_key,
+        api_base=api_base,
+        temperature=temperature,
+        mcp_tools=mcp_tools or [],
     )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动时初始化，关闭时清理。"""
-    global _agent
-    _agent = _create_agent_with_model()
-    print("✓ Nexus Backend 已初始化")
+    global _agent, _mcp_tools
+    # 检查是否启用 MCP（通过环境变量控制）
+    if os.environ.get("NEXUS_ENABLE_MCP", "true").lower() == "true":
+        _mcp_tools = await load_all_mcp_tools()
+    else:
+        _mcp_tools = []
+        logger.info("MCP 功能已禁用")
+    _agent = _create_agent_with_model(mcp_tools=_mcp_tools)
+    logger.info(f"Nexus Backend 已初始化 (MCP 工具: {len(_mcp_tools)} 个)")
     yield
-    print("✗ Nexus Backend 关闭中")
+    logger.info("Nexus Backend 关闭中")
 
 
 app = FastAPI(title="Nexus Backend", lifespan=lifespan)
@@ -81,6 +106,16 @@ async def root():
     return {"message": "Nexus Backend", "version": "1.0.0", "status": "running"}
 
 
+@app.get("/health")
+async def health_check():
+    """健康检查端点（供 Docker 和外部监控使用）。"""
+    return {
+        "status": "healthy",
+        "version": "1.0.0",
+        "timestamp": int(__import__("time").time()),
+    }
+
+
 @app.get(f"{API_PREFIX}/model")
 async def get_model_info():
     """获取当前激活的模型信息。"""
@@ -106,31 +141,69 @@ async def get_models():
     return config.get("models", [])
 
 
-@app.post(f"{API_PREFIX}/models/switch")
-async def switch_model(body: dict):
+@app.post(f"{API_PREFIX}/models/switch", response_model=SwitchModelResponse)
+async def switch_model(body: SwitchModelRequest):
     """切换当前激活的模型。"""
     global _agent
-    model_id = body.get("id")
-    if not model_id:
-        return {"error": "缺少模型ID"}
+    model_id = body.id
 
-    active = set_active_model(model_id)
-    if not active:
-        return {"error": "模型不存在"}
+    # 先加载配置，找到目标模型
+    config = load_models()
+    target = None
+    for model in config.get("models", []):
+        if model.get("id") == model_id:
+            target = model
+            break
 
-    # 重新创建 Agent
-    _agent = _create_agent_with_model(active)
-    return {
-        "success": True,
-        "active_model": {
-            "id": active.get("id"),
-            "name": active.get("name"),
+    if not target:
+        return SwitchModelResponse(success=False, error="模型不存在")
+
+    # 检查 api_key 是否配置（检查后再设置激活状态）
+    api_key = target.get("api_key")
+    if not api_key:
+        return SwitchModelResponse(success=False, error=f"模型 {target.get('name')} 未配置 API Key，无法使用")
+
+    # 设置激活状态
+    set_active_model(model_id)
+
+    # 重新创建 Agent（保留 MCP 工具）
+    _agent = _create_agent_with_model(target, _mcp_tools)
+    if _agent is None:
+        return SwitchModelResponse(success=False, error=f"模型 {target.get('name')} 配置无效，无法使用")
+
+    return SwitchModelResponse(
+        success=True,
+        active_model={
+            "id": target.get("id"),
+            "name": target.get("name"),
         }
-    }
+    )
+
+
+def _estimate_tokens(text: str) -> tuple[int, int]:
+    """估算 token 数量和上下文使用率。
+
+    Args:
+        text: 文本内容
+
+    Returns:
+        (token_count, context_usage_percent)
+    """
+    chinese_chars = len(re.findall(r'[一-鿿]', text))
+    english_chars = len(re.findall(r'[a-zA-Z]', text))
+    other_chars = len(text) - chinese_chars - english_chars
+    estimated_tokens = int(chinese_chars * 2.5 + english_chars * 0.25 + other_chars * 0.5)
+    context_usage = min(int((estimated_tokens / 200000) * 100), 100)
+    return estimated_tokens, context_usage
 
 
 @app.websocket(f"{API_PREFIX}/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    token = websocket.query_params.get("token")
+    if token != CONFIG.get("ws_token", ""):
+        await websocket.close(code=4001, reason="未授权")
+        return
+
     await websocket.accept()
 
     # 维护对话历史
@@ -148,10 +221,9 @@ async def websocket_endpoint(websocket: WebSocket):
             conversation_history.append({"role": "user", "content": user_content})
 
             full_response = ""
-            tool_calls = []
 
             try:
-                for chunk in _agent.stream(
+                async for chunk in _agent.astream(
                     {"messages": conversation_history},
                     stream_mode="updates"
                 ):
@@ -183,11 +255,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 normalized = full_response.replace('<think>', '<thinking>').replace('</think>', '</thinking>')
 
-                chinese_chars = len(re.findall(r'[一-鿿]', normalized))
-                english_chars = len(re.findall(r'[a-zA-Z]', normalized))
-                other_chars = len(normalized) - chinese_chars - english_chars
-                estimated_tokens = int(chinese_chars * 2.5 + english_chars * 0.25 + other_chars * 0.5)
-                context_usage = min(int((estimated_tokens / 200000) * 100), 100)
+                estimated_tokens, context_usage = _estimate_tokens(normalized)
 
                 await websocket.send_json({
                     "type": "token_usage",
@@ -232,11 +300,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
             except Exception as e:
                 error_msg = str(e)
-                logging.error(f"Agent error: {error_msg}")
+                logger.error(f"Agent error: {error_msg}")
                 await websocket.send_json({
                     "type": "error",
                     "content": error_msg,
                 })
 
     except WebSocketDisconnect:
-        print("客户端断开连接")
+        logger.info("客户端断开连接")

@@ -2,37 +2,41 @@ import re
 from pathlib import Path
 from typing import Any
 from langchain_openai import ChatOpenAI
-from langgraph.store.memory import InMemoryStore
 from deepagents import create_deep_agent
-from deepagents.backends.store import StoreBackend
 
 from .config import CONFIG
 
 
-# 扫描提示词注入模式
+# 预编译正则表达式，提升扫描性能
 _INJECTION_PATTERNS = [
-    (r"ignore\s+(previous|all|above|prior)\s+instructions", "prompt_injection"),
-    (r"do\s+not\s+tell\s+the\s+user", "deception_hide"),
-    (r"disregard\s+(your|all|any)\s+(instructions|rules|guidelines)", "disregard_rules"),
+    re.compile(r"ignore\s+(previous|all|above|prior)\s+instructions", re.IGNORECASE),
+    re.compile(r"do\s+not\s+tell\s+the\s+user", re.IGNORECASE),
+    re.compile(r"disregard\s+(your|all|any)\s+(instructions|rules|guidelines)", re.IGNORECASE),
 ]
 
 
 def _scan_content(content: str) -> str:
     """扫描并阻止提示词注入内容。"""
-    for pattern, pid in _INJECTION_PATTERNS:
-        if re.search(pattern, content, re.IGNORECASE):
-            return f"[拦截: 内容包含潜在提示词注入 ({pid})]"
+    for pattern in _INJECTION_PATTERNS:
+        if pattern.search(content):
+            return "[拦截: 内容包含潜在提示词注入]"
     return content
 
 
+# 缓存 AGENTS.md 内容
+_AGENTS_CACHE: str | None = None
+
+
 def _load_identity() -> str:
-    """从 AGENTS.md 加载身份配置。"""
-    agents_path = Path(__file__).parent.parent / ".nexus" / "AGENTS.md"
-    if agents_path.exists():
-        content = agents_path.read_text(encoding="utf-8").strip()
-        if content:
-            return _scan_content(content)
-    return ""
+    """从 AGENTS.md 加载身份配置（带缓存）。"""
+    global _AGENTS_CACHE
+    if _AGENTS_CACHE is None:
+        agents_path = Path(__file__).parent.parent / ".nexus" / "AGENTS.md"
+        if agents_path.exists():
+            _AGENTS_CACHE = agents_path.read_text(encoding="utf-8").strip()
+        else:
+            _AGENTS_CACHE = ""
+    return _scan_content(_AGENTS_CACHE) if _AGENTS_CACHE else ""
 
 
 def _build_system_prompt() -> str:
@@ -106,27 +110,44 @@ def create_agent(
     api_key: str | None = None,
     api_base: str | None = None,
     temperature: float | None = None,
+    mcp_tools: list[Any] | None = None,
 ) -> Any:
-    """创建带完整 Nexus 能力的智能体。"""
+    """创建带完整 Nexus 能力的智能体。
+
+    Args:
+        model_name: 模型名称
+        api_key: API 密钥
+        api_base: API 端点
+        temperature: 温度参数
+        mcp_tools: MCP 服务器加载的工具列表
+    """
     from .tools import TOOLS
+    from deepagents.backends.filesystem import FilesystemBackend
 
     project_root = get_project_root()
     agents_md = project_root / ".nexus" / "AGENTS.md"
     skills_dir = project_root / ".nexus" / "skills"
 
-    memory_store = InMemoryStore()
-    backend = StoreBackend(store=memory_store)
+    # 使用 FilesystemBackend 作为主 backend，支持 skills 加载
+    # 注意：skills 路径使用相对路径，因为 FilesystemBackend 在 virtual_mode 下
+    # 会把传入的路径当作虚拟路径处理，最终会基于 root_dir + 虚拟路径拼接
+    fs_backend = FilesystemBackend(root_dir=project_root, virtual_mode=True)
+
+    # 合并 MCP 工具和内置工具
+    all_tools = list(TOOLS)
+    if mcp_tools:
+        all_tools.extend(mcp_tools)
 
     return create_deep_agent(
         model=get_llm(model_name, api_key, api_base, temperature),
-        tools=TOOLS,
+        tools=all_tools,
         system_prompt=get_system_prompt(),
-        backend=backend,
+        backend=fs_backend,
         memory=[
             str(agents_md),
         ],
         skills=[
-            str(skills_dir),
+            ".nexus/skills",  # 相对路径，相对于 project_root
         ] if skills_dir.exists() else [],
     )
 

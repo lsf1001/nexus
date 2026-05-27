@@ -16,6 +16,7 @@ def load_config() -> dict:
         "default_save_path": os.environ.get("DEFAULT_SAVE_PATH", str(Path.home() / "Documents" / "Nexus")),
         "tavily_api_key": os.environ.get("TAVILY_API_KEY", ""),
         "openweathermap_api_key": os.environ.get("OPENWEATHERMAP_API_KEY", ""),
+        "ws_token": os.environ.get("NEXUS_WS_TOKEN", "nexus-default-token"),
     }
 
     return config
