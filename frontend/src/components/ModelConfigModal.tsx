@@ -184,7 +184,7 @@ function ModelConfigModal({ isOpen, onClose }: ModelConfigModalProps) {
           <h2 className="text-lg font-semibold text-white">模型配置</h2>
           <button
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center bg-white/20 hover:bg-white/40 text-white rounded-full transition-colors text-lg font-bold"
+            className="w-8 h-8 flex items-center justify-center bg-[var(--color-moss)] hover:bg-[var(--color-moss-dark)] text-white rounded-full transition-colors text-lg font-bold"
             aria-label="关闭"
           >
             ✕
