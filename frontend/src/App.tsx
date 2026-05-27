@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import ChatArea from './components/ChatArea';
 import ModelConfigModal from './components/ModelConfigModal';
-import totoroGif from './assets/totoro.gif';
 
 function App() {
   const [showModelConfig, setShowModelConfig] = useState(false);
@@ -24,12 +23,7 @@ function App() {
     <div className="flex flex-col h-screen bg-[#faf8f5]">
       {/* 顶部导航 */}
       <header className="flex items-center justify-between px-6 py-4 bg-white/80 backdrop-blur-md border-b border-[#e8e4dc]">
-        <div className="flex items-center gap-3">
-          <img
-            src={totoroGif}
-            alt="龙猫"
-            className="w-10 h-10 rounded-xl object-cover shadow-sm"
-          />
+        <div className="flex items-center gap-2">
           <span className="text-lg font-semibold text-[#2d4a3a] tracking-tight">Nexus</span>
         </div>
 
