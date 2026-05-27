@@ -1,20 +1,61 @@
 @import "tailwindcss";
 
 @theme {
-  --color-forest-start: #2D5A3D;
-  --color-forest-end: #1E3D2A;
-  --color-moss: #4A7C59;
+  --color-forest-start: #1a3d2a;
+  --color-forest-end: #0f2618;
+  --color-moss: #4a7c59;
   --color-moss-dark: #3A6249;
-  --color-moss-light: #A8C69F;
-  --color-cream: #FAF6F0;
-  --color-cream-dark: #F5EDE0;
-  --color-wood: #E8D5B7;
-  --color-text-dark: #4A3F2F;
-  --color-text-muted: #7A6A5A;
-  --color-border: #E8DCC8;
+  --color-moss-light: #8fbc8f;
+  --color-cream: #faf8f5;
+  --color-cream-dark: #f0ebe3;
+  --color-wood: #d4a574;
+  --color-text-dark: #2c3e2d;
+  --color-text-muted: #5a6b52;
+  --color-border: #c8d4c0;
   --color-toggle-off: #9CA3AF;
   --color-moss-rgb: 74, 124, 89;
-  --color-thinking-text: #5A6B52;
+  --color-thinking-text: #4a5d42;
+}
+
+/* 宫崎骏森林背景 */
+body {
+  background: linear-gradient(180deg, #2d5a3d 0%, #1a3d2a 40%, #0f2618 100%);
+  min-height: 100vh;
+  position: relative;
+}
+
+/* 森林光影效果 */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background:
+    /* 顶部光晕 */
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(139, 195, 74, 0.15) 0%, transparent 60%),
+    /* 左侧树叶光斑 */
+    radial-gradient(circle at 10% 30%, rgba(139, 195, 74, 0.08) 0%, transparent 40%),
+    radial-gradient(circle at 5% 60%, rgba(139, 195, 74, 0.06) 0%, transparent 30%),
+    /* 右侧树叶光斑 */
+    radial-gradient(circle at 90% 20%, rgba(74, 124, 89, 0.1) 0%, transparent 35%),
+    radial-gradient(circle at 95% 70%, rgba(74, 124, 89, 0.08) 0%, transparent 25%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 底部深色过渡 */
+body::after {
+  content: '';
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 30%;
+  background: linear-gradient(to top, rgba(15, 38, 24, 0.5) 0%, transparent 100%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 /* 龙猫主题渐变背景 */
@@ -22,53 +63,81 @@
   background: linear-gradient(180deg, var(--color-forest-start) 0%, var(--color-forest-end) 100%);
 }
 
+/* 主内容区域 - 确保在背景之上 */
+#root > div,
+.flex.flex-col.h-screen {
+  position: relative;
+  z-index: 1;
+}
+
 /* 消息气泡圆角 */
 .bubble-user {
-  background: var(--color-wood) !important;
-  color: var(--color-text-dark);
-  border-radius: 16px 4px 16px 16px;
+  background: linear-gradient(135deg, #4a7c59 0%, #2d4a3a 100%) !important;
+  color: white !important;
+  border-radius: 20px 20px 6px 20px;
 }
 
 .bubble-assistant {
-  background: var(--color-cream-dark) !important;
-  color: var(--color-text-dark);
-  border-radius: 4px 16px 16px 16px;
+  background: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: blur(8px);
+  color: #2c3e2d !important;
+  border-radius: 20px 20px 20px 6px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
 /* 思考过程样式 */
 .thinking-block {
   margin-top: 8px;
-  padding: 10px 14px;
-  background: rgba(var(--color-moss-rgb), 0.08);
-  border-left: 3px solid var(--color-moss);
-  border-radius: 0 8px 8px 0;
-  font-size: 12px;
-  color: var(--color-thinking-text);
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(74, 124, 89, 0.15) 0%, rgba(45, 74, 58, 0.1) 100%);
+  border-left: 3px solid #8fbc8f;
+  border-radius: 0 12px 12px 0;
+  font-size: 13px;
+  color: #4a5d42;
 }
 
 /* Prose 样式调整 */
 .prose {
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.7;
 }
 
 .prose code {
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(45, 74, 58, 0.1);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
 }
 
 .prose pre {
-  background: #1a1a25;
-  color: #e8e8ed;
-  padding: 12px 16px;
-  border-radius: 8px;
+  background: linear-gradient(135deg, #1a3d2a 0%, #0f2618 100%);
+  color: #c8d4c0;
+  padding: 16px 20px;
+  border-radius: 12px;
   overflow-x: auto;
   font-size: 13px;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .prose pre code {
   background: none;
   padding: 0;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(45, 74, 58, 0.1);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #4a7c59 0%, #2d4a3a 100%);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #5a8c69 0%, #3d5a4a 100%);
 }

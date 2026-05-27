@@ -138,7 +138,7 @@ function ChatArea({ onConnectedChange }: ChatAreaProps) {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[#faf8f5]">
+    <div className="flex-1 flex flex-col bg-transparent">
       {/* 消息区域 */}
       <div className="flex-1 overflow-y-auto">
         {displayMessages.length === 0 && !isLoading ? (
@@ -149,43 +149,43 @@ function ChatArea({ onConnectedChange }: ChatAreaProps) {
               <img
                 src={totoroGif}
                 alt="龙猫"
-                className="w-32 h-32 rounded-3xl object-cover shadow-lg"
+                className="w-40 h-40 rounded-3xl object-cover shadow-xl ring-4 ring-white/20"
               />
             </div>
 
             {/* 标题 */}
-            <h2 className="text-2xl font-medium text-[#2d4a3a] mb-2">你好，我是 Nexus</h2>
-            <p className="text-[#6b7c6b] mb-8">我可以帮你解答问题、编写代码、分析数据...</p>
+            <h2 className="text-2xl font-medium text-white mb-2 drop-shadow-lg">你好，我是 Nexus</h2>
+            <p className="text-[#a8c69f] mb-8 drop-shadow">我可以帮你解答问题、编写代码、分析数据...</p>
 
             {/* 快捷提示 */}
             <div className="grid grid-cols-2 gap-3 w-full max-w-md">
               <button
                 onClick={() => insertPrompt('帮我写一段 Python 代码')}
-                className="p-4 rounded-2xl bg-white border border-[#e0dcd4] text-left hover:shadow-md hover:border-[#8fbc8f] transition-all"
+                className="p-4 rounded-2xl bg-white/90 backdrop-blur border border-white/30 text-left hover:bg-white hover:shadow-lg hover:scale-105 transition-all"
               >
                 <div className="text-sm font-medium mb-1 text-[#2d4a3a]">写代码</div>
-                <div className="text-xs text-[#6b7c6b]">Python、JavaScript...</div>
+                <div className="text-xs text-[#5a6b52]">Python、JavaScript...</div>
               </button>
               <button
                 onClick={() => insertPrompt('帮我分析这份数据')}
-                className="p-4 rounded-2xl bg-white border border-[#e0dcd4] text-left hover:shadow-md hover:border-[#8fbc8f] transition-all"
+                className="p-4 rounded-2xl bg-white/90 backdrop-blur border border-white/30 text-left hover:bg-white hover:shadow-lg hover:scale-105 transition-all"
               >
                 <div className="text-sm font-medium mb-1 text-[#2d4a3a]">分析数据</div>
-                <div className="text-xs text-[#6b7c6b]">Excel、CSV、JSON...</div>
+                <div className="text-xs text-[#5a6b52]">Excel、CSV、JSON...</div>
               </button>
               <button
                 onClick={() => insertPrompt('解释一下这个概念')}
-                className="p-4 rounded-2xl bg-white border border-[#e0dcd4] text-left hover:shadow-md hover:border-[#8fbc8f] transition-all"
+                className="p-4 rounded-2xl bg-white/90 backdrop-blur border border-white/30 text-left hover:bg-white hover:shadow-lg hover:scale-105 transition-all"
               >
                 <div className="text-sm font-medium mb-1 text-[#2d4a3a]">知识问答</div>
-                <div className="text-xs text-[#6b7c6b]">解释概念、回答问题...</div>
+                <div className="text-xs text-[#5a6b52]">解释概念、回答问题...</div>
               </button>
               <button
                 onClick={() => insertPrompt('帮我写一篇文章')}
-                className="p-4 rounded-2xl bg-white border border-[#e0dcd4] text-left hover:shadow-md hover:border-[#8fbc8f] transition-all"
+                className="p-4 rounded-2xl bg-white/90 backdrop-blur border border-white/30 text-left hover:bg-white hover:shadow-lg hover:scale-105 transition-all"
               >
                 <div className="text-sm font-medium mb-1 text-[#2d4a3a]">写作助手</div>
-                <div className="text-xs text-[#6b7c6b]">文章、邮件、报告...</div>
+                <div className="text-xs text-[#5a6b52]">文章、邮件、报告...</div>
               </button>
             </div>
           </div>
@@ -197,7 +197,7 @@ function ChatArea({ onConnectedChange }: ChatAreaProps) {
             ))}
             {isLoading && (
               <div className="flex justify-start">
-                <div className="bg-white px-4 py-3 rounded-2xl border border-[#e0dcd4]">
+                <div className="bg-white/90 backdrop-blur px-4 py-3 rounded-2xl border border-white/30 shadow-lg">
                   <div className="flex gap-1">
                     <span className="w-2 h-2 bg-[#4a7c59] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                     <span className="w-2 h-2 bg-[#4a7c59] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -212,9 +212,9 @@ function ChatArea({ onConnectedChange }: ChatAreaProps) {
       </div>
 
       {/* 输入区域 */}
-      <div className="p-4 border-t border-[#e0dcd4] bg-white">
+      <div className="p-4 border-t border-white/30 bg-white/80 backdrop-blur-md">
         <div className="max-w-3xl mx-auto">
-          <div className="flex items-end gap-3 bg-[#faf8f5] rounded-2xl border border-[#e0dcd4] px-4 py-3 focus-within:border-[#4a7c59] focus-within:shadow-sm transition-all">
+          <div className="flex items-end gap-3 bg-white/90 backdrop-blur rounded-2xl border border-white/50 px-4 py-3 focus-within:border-[#4a7c59] focus-within:shadow-lg transition-all">
             <textarea
               ref={inputRef}
               value={input}
@@ -228,14 +228,14 @@ function ChatArea({ onConnectedChange }: ChatAreaProps) {
             <button
               onClick={handleSend}
               disabled={!wsConnected || !input.trim() || isLoading}
-              className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#2d4a3a] to-[#4a7c59] text-white flex items-center justify-center hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#2d4a3a] to-[#4a7c59] text-white flex items-center justify-center hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
               </svg>
             </button>
           </div>
-          <p className="text-center text-xs text-[#999] mt-2">Enter 发送，Shift + Enter 换行</p>
+          <p className="text-center text-xs text-[#a8c69f] mt-2 drop-shadow">Enter 发送，Shift + Enter 换行</p>
         </div>
       </div>
     </div>

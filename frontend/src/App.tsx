@@ -20,9 +20,9 @@ function App() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-[#faf8f5]">
+    <div className="flex flex-col h-screen">
       {/* 顶部导航 */}
-      <header className="flex items-center justify-between px-6 py-4 bg-white/80 backdrop-blur-md border-b border-[#e8e4dc]">
+      <header className="flex items-center justify-between px-6 py-4 bg-white/80 backdrop-blur-md border-b border-white/30">
         <div className="flex items-center gap-2">
           <span className="text-lg font-semibold text-[#2d4a3a] tracking-tight">Nexus</span>
         </div>
