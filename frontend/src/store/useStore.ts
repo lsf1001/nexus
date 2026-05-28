@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { Message } from '../types';
 
 interface Model {
   id: string;
@@ -18,6 +19,8 @@ interface AppState {
   modelName: string;
   models: Model[];
   currentModelId: string | null;
+  darkMode: boolean;
+  conversationMessages: Message[];
 
   setInput: (input: string) => void;
   setIsLoading: (loading: boolean) => void;
@@ -27,6 +30,9 @@ interface AppState {
   setModelName: (name: string) => void;
   setModels: (models: Model[]) => void;
   setCurrentModelId: (id: string | null) => void;
+  setDarkMode: (dark: boolean) => void;
+  setConversationMessages: (messages: Message[]) => void;
+  clearConversationMessages: () => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -38,6 +44,8 @@ export const useStore = create<AppState>((set) => ({
   modelName: 'MiniMax-M2.7',
   models: [],
   currentModelId: null,
+  darkMode: false,
+  conversationMessages: [],
 
   setInput: (input) => set({ input }),
   setIsLoading: (loading) => set({ isLoading: loading }),
@@ -47,4 +55,7 @@ export const useStore = create<AppState>((set) => ({
   setModelName: (name) => set({ modelName: name }),
   setModels: (models) => set({ models }),
   setCurrentModelId: (id) => set({ currentModelId: id }),
+  setDarkMode: (dark) => set({ darkMode: dark }),
+  setConversationMessages: (messages) => set({ conversationMessages: messages }),
+  clearConversationMessages: () => set({ conversationMessages: [] }),
 }));

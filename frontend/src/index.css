@@ -17,106 +17,50 @@
   --color-thinking-text: #4a5d42;
 }
 
-/* 宫崎骏森林背景 */
+/* 默认浅色森林主题 */
 body {
-  background: linear-gradient(180deg, #2d5a3d 0%, #1a3d2a 40%, #0f2618 100%);
-  min-height: 100vh;
-  position: relative;
+  background: #f5f7f2;
+  color: #1a1a1a;
 }
 
-/* 森林光影效果 */
-body::before {
-  content: '';
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background:
-    /* 顶部光晕 */
-    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(139, 195, 74, 0.15) 0%, transparent 60%),
-    /* 左侧树叶光斑 */
-    radial-gradient(circle at 10% 30%, rgba(139, 195, 74, 0.08) 0%, transparent 40%),
-    radial-gradient(circle at 5% 60%, rgba(139, 195, 74, 0.06) 0%, transparent 30%),
-    /* 右侧树叶光斑 */
-    radial-gradient(circle at 90% 20%, rgba(74, 124, 89, 0.1) 0%, transparent 35%),
-    radial-gradient(circle at 95% 70%, rgba(74, 124, 89, 0.08) 0%, transparent 25%);
-  pointer-events: none;
-  z-index: 0;
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 6px;
 }
 
-/* 底部深色过渡 */
-body::after {
-  content: '';
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 30%;
-  background: linear-gradient(to top, rgba(15, 38, 24, 0.5) 0%, transparent 100%);
-  pointer-events: none;
-  z-index: 0;
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-/* 龙猫主题渐变背景 */
-.forest-gradient {
-  background: linear-gradient(180deg, var(--color-forest-start) 0%, var(--color-forest-end) 100%);
+::-webkit-scrollbar-thumb {
+  background: #c8d4c0;
+  border-radius: 3px;
 }
 
-/* 主内容区域 - 确保在背景之上 */
-#root > div,
-.flex.flex-col.h-screen {
-  position: relative;
-  z-index: 1;
-}
-
-/* 消息气泡圆角 */
-.bubble-user {
-  background: linear-gradient(135deg, #4a7c59 0%, #2d4a3a 100%) !important;
-  color: white !important;
-  border-radius: 20px 20px 6px 20px;
-}
-
-.bubble-assistant {
-  background: rgba(255, 255, 255, 0.92) !important;
-  backdrop-filter: blur(8px);
-  color: #2c3e2d !important;
-  border-radius: 20px 20px 20px 6px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-}
-
-/* 思考过程样式 */
-.thinking-block {
-  margin-top: 8px;
-  padding: 12px 16px;
-  background: linear-gradient(135deg, rgba(74, 124, 89, 0.15) 0%, rgba(45, 74, 58, 0.1) 100%);
-  border-left: 3px solid #8fbc8f;
-  border-radius: 0 12px 12px 0;
-  font-size: 13px;
-  color: #4a5d42;
+::-webkit-scrollbar-thumb:hover {
+  background: #a8b8a0;
 }
 
 /* Prose 样式调整 */
 .prose {
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 1.6;
 }
 
 .prose code {
-  background: rgba(45, 74, 58, 0.1);
+  background: rgba(74, 124, 89, 0.1);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
 }
 
 .prose pre {
-  background: linear-gradient(135deg, #1a3d2a 0%, #0f2618 100%);
-  color: #c8d4c0;
+  background: #2d4a3a;
+  color: #e5e5e5;
   padding: 16px 20px;
-  border-radius: 12px;
+  border-radius: 8px;
   overflow-x: auto;
   font-size: 13px;
-  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .prose pre code {
@@ -124,20 +68,20 @@ body::after {
   padding: 0;
 }
 
-/* 滚动条样式 */
-::-webkit-scrollbar {
-  width: 8px;
+/* 深色模式 */
+.dark {
+  background: #0a0a0a;
+  color: #e5e5e5;
 }
 
-::-webkit-scrollbar-track {
-  background: rgba(45, 74, 58, 0.1);
+.dark ::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
 }
 
-::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #4a7c59 0%, #2d4a3a 100%);
-  border-radius: 4px;
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #3a3a3a;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #5a8c69 0%, #3d5a4a 100%);
+.dark .prose pre {
+  background: #0f0f0f;
 }

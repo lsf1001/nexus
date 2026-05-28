@@ -1,6 +1,7 @@
 import datetime
 import requests
 from pathlib import Path
+from typing import Optional, List
 from langchain_core.tools import tool as langchain_tool
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_community.tools.wikipedia.tool import WikipediaQueryRun
@@ -15,6 +16,27 @@ from langchain_community.tools.file_management import (
 from langchain_community.utilities.wikipedia import WikipediaAPIWrapper
 
 from .config import CONFIG
+from .memory import MemoryService, EvolutionService, CATEGORY_PREFERENCE, CATEGORY_KNOWLEDGE, CATEGORY_CONTEXT
+
+# 全局服务实例
+_memory_service: Optional[MemoryService] = None
+_evolution_service: Optional[EvolutionService] = None
+
+
+def get_memory_service() -> MemoryService:
+    """获取记忆服务实例（延迟初始化）。"""
+    global _memory_service
+    if _memory_service is None:
+        _memory_service = MemoryService()
+    return _memory_service
+
+
+def get_evolution_service() -> EvolutionService:
+    """获取进化服务实例（延迟初始化）。"""
+    global _evolution_service
+    if _evolution_service is None:
+        _evolution_service = EvolutionService(get_memory_service())
+    return _evolution_service
 
 
 def _get_save_path(filename: str, path: str | None) -> Path:
@@ -128,6 +150,87 @@ def list_dir(path: str | None = None) -> str:
 
     return "\n".join(files)
 
+
+# ============================================================================
+# 记忆工具
+# ============================================================================
+
+@langchain_tool
+def save_memory(category: str, key: str, value: str) -> str:
+    """保存记忆。
+
+    用于保存用户偏好、知识或重要信息，方便后续会话使用。
+
+    Args:
+        category: 分类，取值：preference(偏好), knowledge(知识), context(上下文)
+        key: 记忆键，用于标识这条记忆
+        value: 记忆内容，要保存的具体信息
+    """
+    ms = get_memory_service()
+    result = ms.save_memory(category=category, key=key, value=value, memory_type="explicit")
+    return f"已保存记忆：[{category}] {key} = {value}"
+
+
+@langchain_tool
+def read_memory(category: Optional[str] = None) -> str:
+    """读取已保存的记忆。
+
+    Args:
+        category: 可选，筛选特定分类的记忆（preference/knowledge/context）
+    """
+    ms = get_memory_service()
+    memories = ms.list_memory(category=category)
+
+    if not memories:
+        return "没有找到记忆"
+
+    lines = ["已保存的记忆："]
+    for m in memories:
+        lines.append(f"- [{m['category']}] {m['key']}: {m['value']}")
+
+    return "\n".join(lines)
+
+
+@langchain_tool
+def search_memory(keyword: str, limit: int = 5) -> str:
+    """搜索记忆。
+
+    通过关键词搜索相关记忆内容。
+
+    Args:
+        keyword: 搜索关键词
+        limit: 返回数量限制，默认5条
+    """
+    ms = get_memory_service()
+    results = ms.search_memory(keyword=keyword, limit=limit)
+
+    if not results:
+        return f"未找到包含「{keyword}」的记忆"
+
+    lines = [f"找到 {len(results)} 条相关记忆："]
+    for m in results:
+        lines.append(f"- [{m['category']}] {m['key']}: {m['value']}")
+
+    return "\n".join(lines)
+
+
+@langchain_tool
+def delete_memory(memory_id: str, hard: bool = False) -> str:
+    """删除记忆。
+
+    Args:
+        memory_id: 记忆 ID
+        hard: 是否彻底删除（True=彻底删除，False=软删除）
+    """
+    ms = get_memory_service()
+    success = ms.delete_memory(memory_id, hard=hard)
+
+    if success:
+        action = "彻底删除" if hard else "已删除"
+        return f"记忆 {action}"
+    return "记忆不存在或已删除"
+
+
 TOOLS = [
     get_current_date,
     write_file,  # 自定义的写文件工具
@@ -140,4 +243,9 @@ TOOLS = [
     copy_file,
     move_file,
     delete_file,
+    # 记忆工具
+    save_memory,
+    read_memory,
+    search_memory,
+    delete_memory,
 ]

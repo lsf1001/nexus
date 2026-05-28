@@ -2,9 +2,11 @@ from contextlib import asynccontextmanager
 import logging
 import os
 import re
+import threading
+import uuid
 from pathlib import Path
 from typing import Any, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -17,6 +19,7 @@ from .models import SwitchModelRequest, SwitchModelResponse
 
 _agent = None
 _mcp_tools: list[Any] = []
+_agent_lock = threading.RLock()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -168,9 +171,13 @@ async def switch_model(body: SwitchModelRequest):
     set_active_model(model_id)
 
     # 重新创建 Agent（保留 MCP 工具）
-    _agent = _create_agent_with_model(target, _mcp_tools)
-    if _agent is None:
+    new_agent = _create_agent_with_model(target, _mcp_tools)
+    if new_agent is None:
         return SwitchModelResponse(success=False, error=f"模型 {target.get('name')} 配置无效，无法使用")
+
+    with _agent_lock:
+        global _agent
+        _agent = new_agent
 
     return SwitchModelResponse(
         success=True,
@@ -279,7 +286,10 @@ async def delete_model(model_id: str):
         for model in models:
             if model.get("id") != model_id and model.get("api_key"):
                 set_active_model(model["id"])
-                _agent = _create_agent_with_model(model, _mcp_tools)
+                new_agent = _create_agent_with_model(model, _mcp_tools)
+                with _agent_lock:
+                    global _agent
+                    _agent = new_agent
                 break
 
     # 删除模型
@@ -332,7 +342,9 @@ async def websocket_endpoint(websocket: WebSocket):
             full_response = ""
 
             try:
-                async for chunk in _agent.astream(
+                with _agent_lock:
+                    agent = _agent
+                async for chunk in agent.astream(
                     {"messages": conversation_history},
                     stream_mode="updates"
                 ):
@@ -417,3 +429,45 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         logger.info("客户端断开连接")
+
+
+# ========== 微信通道 API ==========
+
+@app.post(f"{API_PREFIX}/channels/wechat/qr")
+async def wechat_qr_login():
+    """获取微信登录二维码"""
+    from .channels.wechat import wechat_qr_login as do_qr_login
+    try:
+        result = await do_qr_login()
+        return result
+    except Exception as e:
+        logger.error(f"WeChat QR login failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get(f"{API_PREFIX}/channels/wechat/status/{{session_key}}")
+async def wechat_qr_status(session_key: str, timeout_ms: int = 10000):
+    """获取微信登录二维码状态"""
+    from .channels.wechat import wait_qr_scan
+    try:
+        result = await wait_qr_scan(session_key, timeout_ms=timeout_ms)
+        return result
+    except Exception as e:
+        logger.error(f"WeChat QR status check failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get(f"{API_PREFIX}/channels")
+async def get_channels():
+    """获取所有通道状态"""
+    from .channels import ChannelRegistry
+    registry: ChannelRegistry = request.app.state.channel_registry
+    channels = []
+    for ch in registry.list_all():
+        channels.append({
+            "id": ch.id,
+            "type": ch.type.value if hasattr(ch.type, "value") else str(ch.type),
+            "status": ch.status.value if hasattr(ch.status, "value") else str(ch.status),
+            "enabled": True,
+        })
+    return {"channels": channels}

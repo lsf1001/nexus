@@ -6,6 +6,21 @@ export interface Message {
   createdAt: Date;
 }
 
+export interface Conversation {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: Date;
+  updatedAt: string;
+}
+
+export interface SessionResponse {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface StreamEvent {
   type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage';
   content?: string;
@@ -15,4 +30,6 @@ export interface StreamEvent {
 
 export interface WSMessage {
   content: string;
+  session_id?: string;
+  title?: string;  // 用于创建新会话时传递标题
 }

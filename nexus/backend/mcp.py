@@ -25,7 +25,12 @@ def find_mcp_config() -> list[dict[str, Any]]:
     """
     configs = []
 
-    # 用户级配置
+    # 用户级配置（新版：~/.nexus/mcp/config.json）
+    nexus_mcp = Path.home() / ".nexus" / "mcp" / "config.json"
+    if nexus_mcp.exists():
+        configs.append(nexus_mcp)
+
+    # 用户级配置（旧版：~/.mcp.json，兼容）
     user_mcp = Path.home() / ".mcp.json"
     if user_mcp.exists():
         configs.append(user_mcp)

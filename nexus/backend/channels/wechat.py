@@ -1,0 +1,728 @@
+"""微信通道 - 原生实现直接接入微信服务器。
+
+参考 @tencent-weixin/openclaw-weixin 插件的完整实现，不依赖 OpenClaw。
+"""
+
+import asyncio
+import base64
+import io
+import json
+import logging
+import os
+import random
+import struct
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Optional
+
+import httpx
+
+from .base import (
+    Channel,
+    ChannelConfig,
+    ChannelMessage,
+    ChannelStatus,
+    ChannelType,
+    MessageType,
+)
+
+logger = logging.getLogger(__name__)
+
+# 常量
+DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000
+DEFAULT_API_TIMEOUT_MS = 15_000
+DEFAULT_CONFIG_TIMEOUT_MS = 10_000
+FIXED_BASE_URL = "https://ilinkai.weixin.qq.com"
+CHANNEL_VERSION = "2.4.4"
+DEFAULT_ILINK_BOT_TYPE = "3"
+QR_LONG_POLL_TIMEOUT_MS = 35_000
+ACTIVE_LOGIN_TTL_MS = 5 * 60 * 1000
+
+
+# ========== 账号管理 ==========
+
+@dataclass
+class WeixinAccount:
+    """微信账号数据"""
+    account_id: str
+    user_id: str
+    token: str
+    base_url: str = ""
+    cdn_base_url: str = "https://novac2c.cdn.weixin.qq.com/c2c"
+
+
+@dataclass
+class QRSession:
+    """二维码登录会话"""
+    session_key: str
+    qrcode: str
+    qrcode_url: str
+    started_at: float = field(default_factory=time.time)
+    status: str = "wait"
+    bot_token: Optional[str] = None
+    ilink_bot_id: Optional[str] = None
+    ilink_user_id: Optional[str] = None
+    base_url: str = ""
+    current_api_base_url: str = FIXED_BASE_URL
+    pending_verify_code: Optional[str] = None
+
+
+# 全局状态（带线程锁保护）
+_active_logins: dict[str, QRSession] = {}
+_accounts: dict[str, WeixinAccount] = {}
+_context_tokens: dict[str, str] = {}  # account_id:user_id -> context_token
+_global_lock = threading.RLock()
+
+
+def _get_state_dir() -> Path:
+    """获取状态存储目录"""
+    state_dir = Path.home() / ".nexus" / "weixin"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return state_dir
+
+
+def _resolve_account_index_path() -> Path:
+    return _get_state_dir() / "accounts.json"
+
+
+def _resolve_account_file_path(account_id: str) -> Path:
+    return _get_state_dir() / "accounts" / f"{account_id}.json"
+
+
+def _resolve_context_token_file_path(account_id: str) -> Path:
+    return _get_state_dir() / "accounts" / f"{account_id}.context-tokens.json"
+
+
+def _normalize_account_id(raw_id: str) -> str:
+    """将原始 account ID 转换为文件系统安全的格式"""
+    return raw_id.replace("@im.bot", "-im-bot").replace("@im.wechat", "-im-wechat")
+
+
+def _list_indexed_weixin_account_ids() -> list[str]:
+    """返回所有注册的账号 ID"""
+    try:
+        path = _resolve_account_index_path()
+        if not path.exists():
+            return []
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, str) and x.strip()]
+    except Exception:
+        pass
+    return []
+
+
+def _register_weixin_account_id(account_id: str) -> None:
+    """注册账号 ID 到索引"""
+    existing = _list_indexed_weixin_account_ids()
+    if account_id in existing:
+        return
+    updated = existing + [account_id]
+    path = _resolve_account_index_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(updated, f, ensure_ascii=False, indent=2)
+
+
+def _save_account(account: WeixinAccount) -> None:
+    """保存账号到磁盘（token 仅做简单编码，非真正加密）。"""
+    account_dir = _get_state_dir() / "accounts"
+    account_dir.mkdir(parents=True, exist_ok=True)
+    file_path = _resolve_account_file_path(account.account_id)
+
+    encoded_token = base64.b64encode(account.token.encode()).decode()
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "token": encoded_token,
+            "savedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "baseUrl": account.base_url,
+            "userId": account.user_id,
+        }, f, ensure_ascii=False, indent=2)
+
+    os.chmod(file_path, 0o600)
+
+
+def _load_account(account_id: str) -> Optional[WeixinAccount]:
+    """从磁盘加载账号"""
+    file_path = _resolve_account_file_path(account_id)
+    if not file_path.exists():
+        return None
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        encoded_token = data.get("token", "")
+        decoded_token = base64.b64decode(encoded_token.encode()).decode()
+
+        return WeixinAccount(
+            account_id=account_id,
+            user_id=data.get("userId", ""),
+            token=decoded_token,
+            base_url=data.get("baseUrl", ""),
+        )
+    except Exception as e:
+        logger.error(f"Failed to load account {account_id}: {e}")
+        return None
+
+
+def _save_context_tokens(account_id: str) -> None:
+    """保存 context tokens 到磁盘"""
+    file_path = _resolve_context_token_file_path(account_id)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    tokens = {}
+    prefix = f"{account_id}:"
+    for k, v in _context_tokens.items():
+        if k.startswith(prefix):
+            tokens[k[len(prefix):]] = v
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(tokens, f, ensure_ascii=False)
+
+
+def _restore_context_tokens(account_id: str) -> None:
+    """从磁盘恢复 context tokens"""
+    file_path = _resolve_context_token_file_path(account_id)
+    if not file_path.exists():
+        return
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            tokens = json.load(f)
+        for user_id, token in tokens.items():
+            _context_tokens[f"{account_id}:{user_id}"] = token
+        logger.info(f"Restored {len(tokens)} context tokens for account={account_id}")
+    except Exception as e:
+        logger.warn(f"Failed to restore context tokens: {e}")
+
+
+def _set_context_token(account_id: str, user_id: str, token: str) -> None:
+    """设置 context token"""
+    key = f"{account_id}:{user_id}"
+    _context_tokens[key] = token
+
+
+def _get_context_token(account_id: str, user_id: str) -> Optional[str]:
+    """获取 context token"""
+    return _context_tokens.get(f"{account_id}:{user_id}")
+
+
+def _generate_client_id() -> str:
+    """生成客户端消息ID"""
+    return f"nexus-weixin-{uuid.uuid4().hex[:16]}"
+
+
+def _random_wechat_uin() -> str:
+    """生成随机 UIN"""
+    uint32 = random.getrandbits(32)
+    return base64.b64encode(str(uint32).encode()).decode()
+
+
+def _build_headers(token: Optional[str] = None) -> dict:
+    """构建请求头"""
+    headers = {
+        "Content-Type": "application/json",
+        "iLink-App-Id": "",
+        "iLink-App-ClientVersion": "0x00020004",
+        "X-WECHAT-UIN": _random_wechat_uin(),
+    }
+    if token and token.strip():
+        headers["Authorization"] = f"Bearer {token.strip()}"
+    return headers
+
+
+def _build_base_info() -> dict:
+    """构建 base_info"""
+    return {
+        "channel_version": CHANNEL_VERSION,
+        "bot_agent": "Nexus",
+    }
+
+
+# ========== API 调用 ==========
+
+async def _api_get_fetch(base_url: str, endpoint: str, timeout_ms: int = 15000) -> str:
+    """GET 请求"""
+    url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+    headers = {
+        "AuthorizationType": "ilink_bot_token",
+        "X-WECHAT-UIN": _random_wechat_uin(),
+    }
+    async with httpx.AsyncClient(timeout=timeout_ms / 1000) as client:
+        response = await client.get(url, headers=headers)
+        if not response.is_success:
+            raise Exception(f"GET {url} failed: {response.status_code}")
+        return response.text
+
+
+async def _api_post_fetch(base_url: str, endpoint: str, body: dict, token: Optional[str] = None, timeout_ms: int = 15000) -> str:
+    """POST JSON 请求"""
+    url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+    headers = _build_headers(token)
+    async with httpx.AsyncClient(timeout=timeout_ms / 1000) as client:
+        response = await client.post(url, json=body, headers=headers)
+        if not response.is_success:
+            raise Exception(f"POST {url} failed: {response.status_code}")
+        return response.text
+
+
+async def _fetch_qrcode(api_base_url: str, bot_type: str = DEFAULT_ILINK_BOT_TYPE) -> dict:
+    """获取二维码"""
+    local_token_list = _get_local_bot_token_list()
+    raw = await _api_post_fetch(
+        api_base_url,
+        f"/ilink/bot/get_bot_qrcode?bot_type={bot_type}",
+        body={"local_token_list": local_token_list},
+        timeout_ms=30000,
+    )
+    return json.loads(raw)
+
+
+async def _poll_qr_status(api_base_url: str, qrcode: str, verify_code: str = "") -> dict:
+    """轮询二维码状态"""
+    endpoint = f"/ilink/bot/get_qrcode_status?qrcode={qrcode}"
+    if verify_code:
+        endpoint += f"&verify_code={verify_code}"
+    try:
+        raw = await _api_get_fetch(api_base_url, endpoint, timeout_ms=QR_LONG_POLL_TIMEOUT_MS)
+        return json.loads(raw)
+    except Exception as e:
+        if "AbortError" in str(e) or "timeout" in str(e).lower():
+            return {"status": "wait"}
+        raise
+
+
+def _get_local_bot_token_list() -> list[str]:
+    """获取本地已登录账号的 token 列表"""
+    tokens = []
+    for account_id in _list_indexed_weixin_account_ids():
+        data = _load_account(account_id)
+        if data and data.token:
+            tokens.append(data.token)
+    return tokens[:10]
+
+
+def _is_login_fresh(login: QRSession) -> bool:
+    """检查会话是否新鲜"""
+    return time.time() - login.started_at < ACTIVE_LOGIN_TTL_MS
+
+
+def _purge_expired_logins() -> None:
+    """清理过期的登录会话"""
+    with _global_lock:
+        for sid in list(_active_logins.keys()):
+            if not _is_login_fresh(_active_logins[sid]):
+                del _active_logins[sid]
+
+
+# ========== 消息类型定义 ==========
+
+class MessageItemType:
+    NONE = 0
+    TEXT = 1
+    IMAGE = 2
+    VOICE = 3
+    FILE = 4
+    VIDEO = 5
+
+
+class MessageTypeEnum:
+    NONE = 0
+    USER = 1
+    BOT = 2
+
+
+class MessageState:
+    NEW = 0
+    GENERATING = 1
+    FINISH = 2
+
+
+# ========== 消息发送 ==========
+
+async def _send_message(base_url: str, token: str, to_user: str, text: str, context_token: Optional[str] = None) -> str:
+    """发送文本消息"""
+    client_id = _generate_client_id()
+    item_list = [{"type": MessageItemType.TEXT, "text_item": {"text": text}}]
+    body = {
+        "msg": {
+            "from_user_id": "",
+            "to_user_id": to_user,
+            "client_id": client_id,
+            "message_type": MessageTypeEnum.BOT,
+            "message_state": MessageState.FINISH,
+            "item_list": item_list,
+            "context_token": context_token,
+        },
+        "base_info": _build_base_info(),
+    }
+    raw = await _api_post_fetch(base_url, "/ilink/bot/sendmessage", body, token, DEFAULT_API_TIMEOUT_MS)
+    return client_id
+
+
+# ========== 独立 QR 登录流程 ==========
+
+async def wechat_qr_login() -> dict:
+    """启动 QR 登录流程"""
+    session_key = str(uuid.uuid4())
+    _purge_expired_logins()
+
+    try:
+        data = await _fetch_qrcode(FIXED_BASE_URL, DEFAULT_ILINK_BOT_TYPE)
+        qrcode = data.get("qrcode", "")
+        qrcode_url = data.get("qrcode_img_content", "")
+
+        session = QRSession(
+            session_key=session_key,
+            qrcode=qrcode,
+            qrcode_url=qrcode_url,
+        )
+        with _global_lock:
+            _active_logins[session_key] = session
+
+        return {
+            "qrcode_url": qrcode_url,
+            "qrcode": qrcode,
+            "session_key": session_key,
+        }
+    except Exception as e:
+        logger.error(f"QR login failed: {e}")
+        return {"error": str(e)}
+
+
+async def wait_qr_scan(session_key: str, timeout_ms: int = 480000) -> dict:
+    """等待二维码扫描"""
+    with _global_lock:
+        session = _active_logins.get(session_key)
+    if not session:
+        return {"connected": False, "message": "No active login session"}
+
+    with _global_lock:
+        if not _is_login_fresh(session):
+            del _active_logins[session_key]
+            return {"connected": False, "message": "QR code expired, please get a new one"}
+
+    deadline = time.time() + timeout_ms / 1000
+    refresh_count = 0
+    max_refresh = 3
+
+    while time.time() < deadline:
+        try:
+            data = await _poll_qr_status(session.current_api_base_url, session.qrcode, session.pending_verify_code or "")
+            status = data.get("status", "wait")
+            with _global_lock:
+                session.status = status
+
+            if status == "wait":
+                await asyncio.sleep(1)
+            elif status == "confirmed":
+                bot_token = data.get("bot_token", "")
+                ilink_bot_id = data.get("ilink_bot_id", "")
+                ilink_user_id = data.get("ilink_user_id", "")
+                base_url = data.get("baseurl", "") or FIXED_BASE_URL
+
+                if not ilink_bot_id:
+                    return {"connected": False, "message": "Login confirmed but ilink_bot_id missing"}
+
+                normalized_id = _normalize_account_id(ilink_bot_id)
+                account = WeixinAccount(
+                    account_id=normalized_id,
+                    user_id=ilink_user_id or "",
+                    token=bot_token,
+                    base_url=base_url,
+                )
+                with _global_lock:
+                    _accounts[normalized_id] = account
+                _save_account(account)
+                _register_weixin_account_id(normalized_id)
+
+                with _global_lock:
+                    del _active_logins[session_key]
+
+                return {
+                    "connected": True,
+                    "bot_token": bot_token,
+                    "account_id": normalized_id,
+                    "user_id": ilink_user_id,
+                    "base_url": base_url,
+                    "message": "Login successful",
+                }
+            elif status == "expired":
+                refresh_count += 1
+                if refresh_count > max_refresh:
+                    with _global_lock:
+                        del _active_logins[session_key]
+                    return {"connected": False, "message": "QR code expired multiple times"}
+                await asyncio.sleep(1)
+            elif status == "need_verifycode":
+                # 需要输入验证码（暂时不支持交互式输入）
+                await asyncio.sleep(1)
+            elif status == "scaned_but_redirect":
+                redirect_host = data.get("redirect_host")
+                if redirect_host:
+                    session.current_api_base_url = f"https://{redirect_host}"
+                await asyncio.sleep(1)
+            else:
+                await asyncio.sleep(1)
+        except Exception as e:
+            logger.error(f"Poll error: {e}")
+            await asyncio.sleep(1)
+
+    del _active_logins[session_key]
+    return {"connected": False, "message": "Login timeout"}
+
+
+# ========== WeChatChannel 实现 ==========
+
+class WeChatChannel(Channel):
+    """微信通道"""
+
+    def __init__(self, config: ChannelConfig, token: str = ""):
+        super().__init__(config)
+        self.token = token
+        self._http_client: Optional[httpx.AsyncClient] = None
+        self._poll_task: Optional[asyncio.Task] = None
+        self._running = False
+        self._account: Optional[WeixinAccount] = None
+        self._get_updates_buf: str = ""
+
+    @property
+    def base_url(self) -> str:
+        if self._account and self._account.base_url:
+            return self._account.base_url
+        return FIXED_BASE_URL
+
+    async def start(self) -> None:
+        """启动微信通道"""
+        self._update_state(status=ChannelStatus.STARTING)
+
+        # 加载账号
+        if self.token:
+            # 检查 token 是 account_id 还是 bot_token
+            normalized_id = _normalize_account_id(self.token)
+            existing_account = _load_account(normalized_id)
+
+            if existing_account:
+                # token 是 account_id，直接加载
+                self._account = existing_account
+            elif self.token and "@" in self.token:
+                # token 是 bot_token 格式 (如 2472693b153c@im.bot:xxx)
+                # 需要从所有账号中搜索匹配的 token
+                for acc_id in _list_indexed_weixin_account_ids():
+                    acc = _load_account(acc_id)
+                    if acc and acc.token == self.token:
+                        self._account = acc
+                        self.token = acc_id  # 更新为正确的 account_id
+                        break
+
+            if self._account:
+                _restore_context_tokens(self._account.account_id)
+                # 加载 sync buffer
+                sync_file = _get_state_dir() / "accounts" / f"{self._account.account_id}.sync.buf"
+                if sync_file.exists():
+                    self._get_updates_buf = sync_file.read_text()
+
+        if not self._account:
+            logger.warning("WeChat channel started without account")
+
+        # 通知服务器启动
+        self._http_client = httpx.AsyncClient(
+            base_url=self.base_url,
+            headers=_build_headers(self._account.token if self._account else None),
+            timeout=30.0,
+        )
+
+        try:
+            body = {"base_info": _build_base_info()}
+            await self._http_client.post("/ilink/bot/msg/notifystart", json=body)
+        except Exception as e:
+            logger.warn(f"notifyStart failed (ignored): {e}")
+
+        self._running = True
+        self._update_state(status=ChannelStatus.RUNNING, started_at=None)
+
+        # 启动长轮询
+        self._poll_task = asyncio.create_task(self._poll_messages())
+        logger.info(f"WeChat Channel {self.config.channel_id} started")
+
+    async def stop(self) -> None:
+        """停止微信通道"""
+        self._update_state(status=ChannelStatus.STOPPING)
+        self._running = False
+
+        if self._http_client and self._account:
+            try:
+                body = {"base_info": _build_base_info()}
+                await self._http_client.post("/ilink/bot/msg/notifystop", json=body)
+            except Exception as e:
+                logger.warn(f"notifyStop failed: {e}")
+
+        if self._poll_task:
+            self._poll_task.cancel()
+            try:
+                await self._poll_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._http_client:
+            await self._http_client.aclose()
+
+        self._update_state(status=ChannelStatus.STOPPED)
+        logger.info(f"WeChat Channel {self.config.channel_id} stopped")
+
+    async def send_message(self, message: ChannelMessage) -> None:
+        """发送消息"""
+        if not self._http_client or not self._account:
+            logger.error("Channel not properly initialized")
+            return
+
+        context_token = _get_context_token(self._account.account_id, message.user_id)
+
+        try:
+            await _send_message(
+                self.base_url,
+                self._account.token,
+                message.user_id,
+                message.content,
+                context_token,
+            )
+            logger.debug(f"Message sent to {message.user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send message: {e}")
+
+    async def _poll_messages(self) -> None:
+        """长轮询获取消息"""
+        poll_interval = 1.0
+
+        while self._running:
+            try:
+                if not self._http_client or not self._account:
+                    await asyncio.sleep(poll_interval)
+                    continue
+
+                body = {
+                    "get_updates_buf": self._get_updates_buf or "",
+                    "base_info": _build_base_info(),
+                }
+
+                try:
+                    response = await self._http_client.post(
+                        "/ilink/bot/getupdates",
+                        json=body,
+                        timeout=DEFAULT_LONG_POLL_TIMEOUT_MS / 1000,
+                    )
+                except Exception as e:
+                    logger.error(f"getUpdates error: {e}")
+                    await asyncio.sleep(poll_interval)
+                    continue
+
+                if response.status_code == 200:
+                    data = response.json()
+                    ret = data.get("ret", 0)
+                    errcode = data.get("errcode", 0)
+
+                    if ret == 0 or errcode == 0:
+                        msgs = data.get("msgs", [])
+                        for raw_msg in msgs:
+                            await self._handle_incoming_message(raw_msg)
+
+                        if data.get("get_updates_buf"):
+                            self._get_updates_buf = data["get_updates_buf"]
+                            # 保存 sync buffer
+                            sync_file = _get_state_dir() / "accounts" / f"{self._account.account_id}.sync.buf"
+                            sync_file.parent.mkdir(parents=True, exist_ok=True)
+                            sync_file.write_text(self._get_updates_buf)
+
+                        if data.get("longpolling_timeout_ms", 0) > 0:
+                            poll_interval = data["longpolling_timeout_ms"] / 1000
+                        else:
+                            poll_interval = 1.0
+                    elif errcode == -14:
+                        logger.warn("Session expired, waiting 5 min...")
+                        await asyncio.sleep(300)
+                    else:
+                        logger.warning(f"getUpdates errcode={errcode}")
+                        await asyncio.sleep(poll_interval)
+                else:
+                    logger.warning(f"getUpdates returned {response.status_code}")
+                    await asyncio.sleep(poll_interval)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Poll error: {e}")
+                await asyncio.sleep(poll_interval)
+
+    async def _handle_incoming_message(self, raw_msg: dict) -> None:
+        """处理收到的消息"""
+        try:
+            from_user = raw_msg.get("from_user_id", "")
+            content = self._extract_content(raw_msg)
+            context_token = raw_msg.get("context_token")
+
+            if context_token and from_user:
+                _set_context_token(self._account.account_id, from_user, context_token)
+                _save_context_tokens(self._account.account_id)
+
+            msg_type = self._get_message_type(raw_msg)
+
+            channel_msg = ChannelMessage(
+                channel_id=self.config.channel_id,
+                channel_type=ChannelType.WECHAT,
+                session_id=f"wechat:{from_user}",
+                user_id=from_user,
+                content=content,
+                message_type=msg_type,
+                raw_data=raw_msg,
+                reply_to=context_token,
+            )
+
+            await self._safe_handle_message(channel_msg)
+        except Exception as e:
+            logger.error(f"Error handling incoming message: {e}")
+
+    def _get_message_type(self, raw: dict) -> MessageType:
+        """获取消息类型"""
+        item_list = raw.get("item_list", [])
+        if not item_list:
+            return MessageType.TEXT
+
+        first_item = item_list[0]
+        item_type = first_item.get("type", 1)
+
+        type_map = {
+            1: MessageType.TEXT,
+            2: MessageType.IMAGE,
+            3: MessageType.VOICE,
+            4: MessageType.FILE,
+            5: MessageType.VIDEO,
+        }
+        return type_map.get(item_type, MessageType.TEXT)
+
+    def _extract_content(self, raw: dict) -> str:
+        """提取文本内容"""
+        item_list = raw.get("item_list", [])
+        for item in item_list:
+            if item.get("type") == MessageItemType.TEXT:
+                text = item.get("text_item", {}).get("text", "")
+                if text:
+                    return text
+            elif item.get("type") == MessageItemType.VOICE:
+                voice_text = item.get("voice_item", {}).get("text")
+                if voice_text:
+                    return voice_text
+        return ""
+
+    @staticmethod
+    def generate_qrcode_image(qrcode_url: str) -> bytes:
+        """生成二维码图片"""
+        try:
+            import qrcode
+            img = qrcode.make(qrcode_url)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+        except ImportError:
+            return b""
