@@ -1,5 +1,0 @@
-- generic [ref=e4]:
-  - generic [ref=e5]: ⚠️
-  - heading "应用出现错误" [level=2] [ref=e6]
-  - paragraph [ref=e7]: conversationId is not defined
-  - button "刷新页面" [ref=e8]
