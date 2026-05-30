@@ -27,3 +27,15 @@ logs/
 run/
 *.db
 *.log
+
+# Playwright test artifacts
+.playwright-mcp/
+_temp/
+*.png
+
+# Frontend
+frontend/package-lock.json
+
+# Local config
+.claude/settings.local.json
+.pytest_cache/
