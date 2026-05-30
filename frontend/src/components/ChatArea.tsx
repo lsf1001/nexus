@@ -115,6 +115,18 @@ function ChatArea({ resetTrigger, onConnectedChange, conversationId: _conversati
           setIsLoading(false);
           break;
         }
+        case 'wechat_message': {
+          // 处理微信消息
+          const wechatMsg: Message = {
+            id: crypto.randomUUID(),
+            role: 'user',
+            content: data.content || '',
+            createdAt: new Date(),
+          };
+          messagesRef.current.push(wechatMsg);
+          setConversationMessages([...messagesRef.current]);
+          break;
+        }
       }
     };
 

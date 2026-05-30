@@ -20,6 +20,9 @@ class LaunchdManager(DaemonManager):
         """生成 plist 内容。"""
         import os
         nexus_home = os.path.expanduser("~/.nexus")
+        # 确保目录存在
+        os.makedirs(nexus_home, exist_ok=True)
+        os.makedirs(os.path.join(nexus_home, "logs"), exist_ok=True)
         python_path = os.path.join(nexus_home, ".venv", "bin", "python")
         run_py = os.path.join(nexus_home, "nexus", "backend", "run.py")
 

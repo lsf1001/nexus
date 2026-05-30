@@ -43,14 +43,12 @@ class SessionManager:
 
     def __init__(self):
         """初始化会话管理器。"""
-        from .memory import MemoryService
         self._memory_service: Optional[MemoryService] = None
 
     @property
     def memory_service(self) -> MemoryService:
         """延迟加载记忆服务。"""
         if self._memory_service is None:
-            from .memory import MemoryService
             self._memory_service = MemoryService()
         return self._memory_service
 

@@ -1,0 +1,150 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e7]: "N"
+      - generic [ref=e8]: Nexus
+    - button "新建会话" [ref=e10]:
+      - img [ref=e11]
+      - text: 新建会话
+    - generic [ref=e13]:
+      - generic [ref=e14]: 历史会话
+      - generic [ref=e15]:
+        - generic [ref=e16] [cursor=pointer]:
+          - generic [ref=e17]: 帮我写一段 Python 代码
+          - generic [ref=e18]:
+            - generic [ref=e19]: 2026/5/27
+            - button [ref=e20]:
+              - img [ref=e21]
+        - generic [ref=e23] [cursor=pointer]:
+          - generic [ref=e24]: 帮我写一段 Python 代码
+          - generic [ref=e25]:
+            - generic [ref=e26]: 2026/5/27
+            - button [ref=e27]:
+              - img [ref=e28]
+        - generic [ref=e30] [cursor=pointer]:
+          - generic [ref=e31]: 帮我写一段 Python 代码
+          - generic [ref=e32]:
+            - generic [ref=e33]: 2026/5/27
+            - button [ref=e34]:
+              - img [ref=e35]
+        - generic [ref=e37] [cursor=pointer]:
+          - generic [ref=e38]: 帮我写一段 Python 代码
+          - generic [ref=e39]:
+            - generic [ref=e40]: 2026/5/27
+            - button [ref=e41]:
+              - img [ref=e42]
+        - generic [ref=e44] [cursor=pointer]:
+          - generic [ref=e45]: 帮我写一段 Python 代码
+          - generic [ref=e46]:
+            - generic [ref=e47]: 2026/5/27
+            - button [ref=e48]:
+              - img [ref=e49]
+        - generic [ref=e51] [cursor=pointer]:
+          - generic [ref=e52]: 帮我写一段 Python 代码
+          - generic [ref=e53]:
+            - generic [ref=e54]: 2026/5/27
+            - button [ref=e55]:
+              - img [ref=e56]
+        - generic [ref=e58] [cursor=pointer]:
+          - generic [ref=e59]: 帮我写一段 Python 代码
+          - generic [ref=e60]:
+            - generic [ref=e61]: 2026/5/27
+            - button [ref=e62]:
+              - img [ref=e63]
+        - generic [ref=e65] [cursor=pointer]:
+          - generic [ref=e66]: 帮我写一段 Python 代码
+          - generic [ref=e67]:
+            - generic [ref=e68]: 2026/5/27
+            - button [ref=e69]:
+              - img [ref=e70]
+        - generic [ref=e72] [cursor=pointer]:
+          - generic [ref=e73]: 帮我写一段 Python 代码
+          - generic [ref=e74]:
+            - generic [ref=e75]: 2026/5/27
+            - button [ref=e76]:
+              - img [ref=e77]
+        - generic [ref=e79] [cursor=pointer]:
+          - generic [ref=e80]: 帮我写一段 Python 代码
+          - generic [ref=e81]:
+            - generic [ref=e82]: 2026/5/27
+            - button [ref=e83]:
+              - img [ref=e84]
+        - generic [ref=e86] [cursor=pointer]:
+          - generic [ref=e87]: 帮我写一段 Python 代码
+          - generic [ref=e88]:
+            - generic [ref=e89]: 2026/5/27
+            - button [ref=e90]:
+              - img [ref=e91]
+        - generic [ref=e93] [cursor=pointer]:
+          - generic [ref=e94]: 帮我写一段 Python 代码
+          - generic [ref=e95]:
+            - generic [ref=e96]: 2026/5/27
+            - button [ref=e97]:
+              - img [ref=e98]
+        - generic [ref=e100] [cursor=pointer]:
+          - generic [ref=e101]: 帮我写一段 Python 代码
+          - generic [ref=e102]:
+            - generic [ref=e103]: 2026/5/27
+            - button [ref=e104]:
+              - img [ref=e105]
+        - generic [ref=e107] [cursor=pointer]:
+          - generic [ref=e108]: 帮我写一段 Python 代码
+          - generic [ref=e109]:
+            - generic [ref=e110]: 2026/5/27
+            - button [ref=e111]:
+              - img [ref=e112]
+        - generic [ref=e114] [cursor=pointer]:
+          - generic [ref=e115]: 帮我写一段 Python 代码
+          - generic [ref=e116]:
+            - generic [ref=e117]: 2026/5/27
+            - button [ref=e118]:
+              - img [ref=e119]
+        - generic [ref=e121] [cursor=pointer]:
+          - generic [ref=e122]: 帮我写一段 Python 代码
+          - generic [ref=e123]:
+            - generic [ref=e124]: 2026/5/27
+            - button [ref=e125]:
+              - img [ref=e126]
+        - generic [ref=e128] [cursor=pointer]:
+          - generic [ref=e129]: 帮我写一段 Python 代码
+          - generic [ref=e130]:
+            - generic [ref=e131]: 2026/5/27
+            - button [ref=e132]:
+              - img [ref=e133]
+    - button "模型配置" [ref=e136]:
+      - img [ref=e137]
+      - text: 模型配置
+  - generic [ref=e140]:
+    - banner [ref=e141]:
+      - generic [ref=e142]:
+        - button [ref=e143]:
+          - img [ref=e144]
+        - generic [ref=e146]: 聊天
+      - generic [ref=e147]:
+        - button "深色模式" [ref=e148]:
+          - img [ref=e149]
+        - generic [ref=e153]: 已连接
+    - generic [ref=e154]:
+      - generic [ref=e156]:
+        - img "龙猫" [ref=e158]
+        - heading "你好，我是 Nexus" [level=2] [ref=e159]
+        - paragraph [ref=e160]: 我可以帮你解答问题、编写代码、分析数据...
+        - generic [ref=e161]:
+          - button "写代码 Python、JavaScript..." [ref=e162]:
+            - generic [ref=e163]: 写代码
+            - generic [ref=e164]: Python、JavaScript...
+          - button "分析数据 Excel、CSV、JSON..." [ref=e165]:
+            - generic [ref=e166]: 分析数据
+            - generic [ref=e167]: Excel、CSV、JSON...
+          - button "知识问答 解释概念、回答问题..." [ref=e168]:
+            - generic [ref=e169]: 知识问答
+            - generic [ref=e170]: 解释概念、回答问题...
+          - button "写作助手 文章、邮件、报告..." [ref=e171]:
+            - generic [ref=e172]: 写作助手
+            - generic [ref=e173]: 文章、邮件、报告...
+      - generic [ref=e175]:
+        - generic [ref=e176]:
+          - textbox "输入消息..." [ref=e177]
+          - button [disabled] [ref=e178]:
+            - img [ref=e179]
+        - paragraph [ref=e181]: Enter 发送，Shift + Enter 换行

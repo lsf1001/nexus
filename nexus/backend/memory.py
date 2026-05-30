@@ -3,6 +3,7 @@
 融合设计：
 - MemoryService: 记忆服务（对 Agent 暴露的统一接口）
 - EvolutionService: 进化服务（自动学习和优化）
+- 使用 BM25 关键词检索
 - 使用 UnifiedStore 统一存储层
 """
 
@@ -10,6 +11,12 @@ import json
 import re
 import uuid
 from typing import Optional, Any
+
+try:
+    from rank_bm25 import BM25Okapi
+    BM25_AVAILABLE = True
+except ImportError:
+    BM25_AVAILABLE = False
 
 from .db import (
     save_memory as db_save_memory,
@@ -73,6 +80,30 @@ class MemoryService:
     def __init__(self):
         """初始化记忆服务。"""
         self.user_id = "default"
+        self._bm25: Optional[BM25Okapi] = None
+        self._bm25_memories: list[dict] = []
+        self._bm25_dirty = True
+
+    def _invalidate_bm25(self) -> None:
+        """标记 BM25 索引需要重建。"""
+        self._bm25_dirty = True
+
+    def _ensure_bm25(self) -> None:
+        """确保 BM25 索引已构建。"""
+        if not BM25_AVAILABLE:
+            return
+
+        if self._bm25_dirty or self._bm25 is None:
+            memories = db_list_user_memory()
+            if memories:
+                corpus = [f"{m['key']} {m['value']}" for m in memories]
+                tokenized = [doc.split() for doc in corpus]
+                self._bm25 = BM25Okapi(tokenized)
+                self._bm25_memories = memories
+            else:
+                self._bm25 = None
+                self._bm25_memories = []
+            self._bm25_dirty = False
 
     def save_memory(
         self,
@@ -100,7 +131,7 @@ class MemoryService:
         # session 类型需要 session_id
         full_key = f"{session_id}:{key}" if memory_type == MEMORY_TYPE_SESSION else key
 
-        return db_save_memory(
+        result = db_save_memory(
             memory_id=memory_id,
             memory_type=memory_type,
             category=category,
@@ -109,6 +140,11 @@ class MemoryService:
             metadata=metadata,
             expires_at=expires_at
         )
+
+        # 标记 BM25 需要重建
+        self._invalidate_bm25()
+
+        return result
 
     def get_memory(
         self,
@@ -130,14 +166,47 @@ class MemoryService:
         )
 
     def search_memory(self, keyword: str, memory_type: Optional[str] = None, limit: int = 10) -> list[dict]:
-        """搜索记忆（关键词匹配）。
+        """搜索记忆（BM25 关键词检索）。
 
         Args:
             keyword: 搜索关键词
             memory_type: 记忆类型过滤
             limit: 返回数量限制
         """
-        return db_search_memory(keyword, memory_type, limit)
+        # 如果 BM25 不可用，回退到数据库搜索
+        if not BM25_AVAILABLE:
+            return db_search_memory(keyword, memory_type, limit)
+
+        self._ensure_bm25()
+
+        if not self._bm25 or not self._bm25_memories:
+            return []
+
+        # BM25 检索
+        tokens = keyword.split()
+        scores = self._bm25.get_scores(tokens)
+
+        # 排序并筛选
+        ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
+
+        results = []
+        seen = set()
+        for idx, score in ranked:
+            if score <= 0:
+                break
+            mem = self._bm25_memories[idx]
+            # 类型过滤
+            if memory_type and mem.get("memory_type") != memory_type:
+                continue
+            # 去重
+            if mem["id"] in seen:
+                continue
+            seen.add(mem["id"])
+            results.append(mem)
+            if len(results) >= limit:
+                break
+
+        return results
 
     def build_context(self, session_id: str) -> str:
         """构建记忆上下文（用于注入 prompt）。
@@ -195,7 +264,10 @@ class MemoryService:
             memory_id: 记忆 ID
             hard: 是否硬删除
         """
-        return db_delete_memory(memory_id, hard)
+        result = db_delete_memory(memory_id, hard)
+        if result:
+            self._invalidate_bm25()
+        return result
 
     def list_memory(self, category: Optional[str] = None) -> list[dict]:
         """列出所有记忆。

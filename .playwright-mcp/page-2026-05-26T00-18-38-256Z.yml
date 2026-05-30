@@ -1,0 +1,24 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - heading "🌲 Nexus" [level=1] [ref=e6]
+    - generic [ref=e8]:
+      - generic [ref=e9]: 当前模型
+      - button "MiniMax-M2.7 ▼" [ref=e11]:
+        - generic [ref=e12]: MiniMax-M2.7
+        - generic [ref=e13]: ▼
+    - img "龙猫" [ref=e16]
+    - generic [ref=e18]:
+      - generic [ref=e19]: 显示思考过程
+      - generic [ref=e20]:
+        - button "切换显示思考" [ref=e21] [cursor=pointer]
+        - generic [ref=e22]: "ON"
+  - generic [ref=e23]:
+    - generic [ref=e24]:
+      - generic [ref=e25]: MiniMax-M2.7
+      - generic [ref=e28]: 已连接
+    - generic [ref=e31]:
+      - paragraph [ref=e32]: Nexus 智能助手
+      - paragraph [ref=e33]: 输入消息开始对话
+    - generic [ref=e35]:
+      - textbox "输入消息..." [ref=e36]
+      - button "➤" [disabled] [ref=e37]

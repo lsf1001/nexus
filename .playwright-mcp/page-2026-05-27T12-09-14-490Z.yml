@@ -1,0 +1,66 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e7]: "N"
+      - generic [ref=e8]: Nexus
+    - button "新建会话" [active] [ref=e10]:
+      - img [ref=e11]
+      - text: 新建会话
+    - generic [ref=e13]:
+      - generic [ref=e14]: 历史会话
+      - generic [ref=e107]:
+        - generic [ref=e108] [cursor=pointer]:
+          - generic [ref=e109]: 你好，测试消息
+          - generic [ref=e110]:
+            - generic [ref=e111]: Invalid Date
+            - button [ref=e112]:
+              - img [ref=e113]
+        - generic [ref=e115] [cursor=pointer]:
+          - generic [ref=e116]: 你好，测试消息
+          - generic [ref=e117]:
+            - generic [ref=e118]: Invalid Date
+            - button [ref=e119]:
+              - img [ref=e120]
+        - generic [ref=e122] [cursor=pointer]:
+          - generic [ref=e123]: 你好，测试消息
+          - generic [ref=e124]:
+            - generic [ref=e125]: Invalid Date
+            - button [ref=e126]:
+              - img [ref=e127]
+    - button "模型配置" [ref=e17]:
+      - img [ref=e18]
+      - text: 模型配置
+  - generic [ref=e21]:
+    - banner [ref=e22]:
+      - generic [ref=e23]:
+        - button [ref=e24]:
+          - img [ref=e25]
+        - generic [ref=e27]: 聊天
+      - generic [ref=e28]:
+        - button "深色模式" [ref=e84]:
+          - img [ref=e30]
+        - generic [ref=e34]: 已连接
+    - generic [ref=e35]:
+      - generic [ref=e37]:
+        - img "龙猫" [ref=e130]
+        - heading "你好，我是 Nexus" [level=2] [ref=e131]
+        - paragraph [ref=e132]: 我可以帮你解答问题、编写代码、分析数据...
+        - generic [ref=e133]:
+          - button "写代码 Python、JavaScript..." [ref=e134]:
+            - generic [ref=e135]: 写代码
+            - generic [ref=e136]: Python、JavaScript...
+          - button "分析数据 Excel、CSV、JSON..." [ref=e137]:
+            - generic [ref=e138]: 分析数据
+            - generic [ref=e139]: Excel、CSV、JSON...
+          - button "知识问答 解释概念、回答问题..." [ref=e140]:
+            - generic [ref=e141]: 知识问答
+            - generic [ref=e142]: 解释概念、回答问题...
+          - button "写作助手 文章、邮件、报告..." [ref=e143]:
+            - generic [ref=e144]: 写作助手
+            - generic [ref=e145]: 文章、邮件、报告...
+      - generic [ref=e56]:
+        - generic [ref=e57]:
+          - textbox "输入消息..." [ref=e58]
+          - button [disabled] [ref=e59]:
+            - img [ref=e60]
+        - paragraph [ref=e62]: Enter 发送，Shift + Enter 换行

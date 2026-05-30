@@ -1,0 +1,46 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - heading "🌲 Nexus" [level=1] [ref=e6]:
+      - generic [ref=e38]: 🌲 Nexus
+    - generic [ref=e8]:
+      - generic [ref=e39]: 当前模型
+      - generic [ref=e10]:
+        - button "MiniMax-M2.7 ▲" [ref=e70]:
+          - generic [ref=e40]: MiniMax-M2.7
+          - generic [ref=e71]: ▲
+        - generic [ref=e72]:
+          - button "MiniMax-M2.7 ✓" [ref=e73]:
+            - generic [ref=e74]: MiniMax-M2.7
+            - generic [ref=e75]: ✓
+          - button "DeepSeek-V4-Pro" [active] [ref=e76]:
+            - generic [ref=e77]: DeepSeek-V4-Pro
+    - img "龙猫" [ref=e16]
+    - generic [ref=e18]:
+      - generic [ref=e42]: 显示思考过程
+      - generic [ref=e20]:
+        - button "切换显示思考" [ref=e21] [cursor=pointer]
+        - generic [ref=e43]: 在
+  - generic [ref=e23]:
+    - generic [ref=e24]:
+      - generic [ref=e44]: MiniMax-M2.7
+      - generic [ref=e45]: 已连接
+    - generic [ref=e29]:
+      - paragraph [ref=e51]:
+        - generic [ref=e52]: 3+3等于多少？
+      - generic [ref=e54]:
+        - region "思考过程" [ref=e61]:
+          - generic [ref=e62]:
+            - generic [ref=e64]: 🌿
+            - generic [ref=e65]: 思考过程
+          - generic [ref=e67]: 用户提出了一个简单的数学问题：3+3 等于多少？
+        - paragraph [ref=e68]:
+          - generic [ref=e69]: "6"
+    - generic [ref=e35]:
+      - textbox "输入消息..." [ref=e36]
+      - button "➤" [disabled] [ref=e37]:
+        - generic [ref=e48]: ➤
+  - generic [ref=e79]:
+    - generic [ref=e81]: ⚠️
+    - generic [ref=e83]: 模型 DeepSeek-V4-Pro 未配置 API Key，无法使用
+    - button "确定" [ref=e84] [cursor=pointer]:
+      - generic [ref=e85]: 确定

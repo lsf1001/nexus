@@ -1,8 +1,9 @@
 {
   "mcpServers": {
-    "playwright": {
-      "command": "playwright-mcp",
-      "args": []
+    "filesystem": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-filesystem", "/Users/yxb/Documents"]
     }
   }
 }

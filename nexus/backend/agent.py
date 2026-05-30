@@ -24,11 +24,6 @@ from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
 from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemPermission
 from deepagents.middleware.memory import MemoryMiddleware
-from deepagents.middleware.summarization import (
-    SummarizationMiddleware,
-    SummarizationToolMiddleware,
-    create_summarization_middleware,
-)
 from deepagents.middleware.subagents import SubAgent, SubAgentMiddleware
 
 from .config import CONFIG
@@ -178,23 +173,6 @@ def _create_backend(project_root: Path) -> CompositeBackend:
     )
 
 
-def _create_middleware(project_root: Path) -> list[Any]:
-    """创建中间件列表。
-
-    集成：
-    - MemoryMiddleware: 记忆系统（从 AGENTS.md 加载）
-    - SummarizationMiddleware: 对话摘要压缩
-    """
-    agents_md = project_root / ".nexus" / "AGENTS.md"
-    memory_path = str(agents_md)
-
-    # 注意：memory 参数已经传递给 create_deep_agent，
-    # 这里不需要再添加 MemoryMiddleware
-    # create_deep_agent 内部会自动处理 memory 文件列表
-
-    return []
-
-
 def _create_permissions(project_root: Path) -> list:
     """创建文件系统权限规则。
 
@@ -272,6 +250,9 @@ def create_agent(
     if mcp_tools:
         all_tools.extend(mcp_tools)
 
+    # 创建 LLM 实例
+    llm = get_llm(model_name, api_key, api_base, temperature)
+
     # 创建 backend
     backend = _create_backend(project_root)
 
@@ -285,7 +266,7 @@ def create_agent(
     memory_files = [str(agents_md)] if agents_md.exists() else []
 
     return create_deep_agent(
-        model=get_llm(model_name, api_key, api_base, temperature),
+        model=llm,
         tools=all_tools,
         system_prompt=get_system_prompt(),
         backend=backend,

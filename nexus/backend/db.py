@@ -45,11 +45,18 @@ def init_db() -> None:
                 title TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                deleted_at TEXT
+                deleted_at TEXT,
+                channel TEXT DEFAULT 'main'
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_deleted_at ON sessions(deleted_at)")
+
+        # 迁移：添加 channel 列（如果不存在）
+        try:
+            conn.execute("ALTER TABLE sessions ADD COLUMN channel TEXT DEFAULT 'main'")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
 
         # 创建消息表
         conn.execute("""
@@ -129,13 +136,13 @@ def _migrate_deleted_at() -> None:
 # 会话管理
 # ============================================================================
 
-def create_session(session_id: str, title: Optional[str] = None) -> dict:
+def create_session(session_id: str, title: Optional[str] = None, channel: str = "main") -> dict:
     """创建新会话。"""
     now = datetime.now().isoformat()
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            (session_id, title, now, now)
+            "INSERT INTO sessions (id, title, created_at, updated_at, channel) VALUES (?, ?, ?, ?, ?)",
+            (session_id, title, now, now, channel)
         )
         # 初始化会话统计
         conn.execute(
@@ -146,7 +153,8 @@ def create_session(session_id: str, title: Optional[str] = None) -> dict:
             "id": session_id,
             "title": title,
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
+            "channel": channel,
         }
 
 
@@ -162,13 +170,40 @@ def get_session(session_id: str) -> Optional[dict]:
 
 
 def list_sessions(limit: int = 50) -> list[dict]:
-    """列出所有未删除会话，按更新时间倒序。"""
+    """列出所有未删除会话，按更新时间倒序。
+
+    微信会话按 account_id 分组，每组只返回最新一个。
+    """
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT * FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?",
-            (limit,)
+            "SELECT * FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC",
+            ()
         ).fetchall()
-        return [dict(row) for row in rows]
+
+    sessions = [dict(row) for row in rows]
+
+    # 微信会话按账户分组，每组只保留最新一个
+    wechat_sessions_by_account: dict[str, dict] = {}
+    main_sessions: list[dict] = []
+
+    for s in sessions:
+        if s.get("channel") == "wechat":
+            # 从标题提取 account_id（格式：微信 {account_id[:8]} {user_id[:8]}）
+            title = s.get("title", "")
+            parts = title.split()
+            if len(parts) >= 2:
+                acc_id = parts[1]
+            else:
+                acc_id = "unknown"
+            # 只保留每个账户的最新会话
+            if acc_id not in wechat_sessions_by_account:
+                wechat_sessions_by_account[acc_id] = s
+        else:
+            main_sessions.append(s)
+
+    # 合并结果
+    result = main_sessions + list(wechat_sessions_by_account.values())
+    return result[:limit]
 
 
 def list_deleted_sessions(limit: int = 50) -> list[dict]:

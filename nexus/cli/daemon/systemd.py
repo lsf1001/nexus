@@ -17,9 +17,12 @@ class SystemdManager(DaemonManager):
 
     def _generate_unit(self) -> str:
         """生成 systemd unit 文件内容。"""
-        nexus_home = Path.home() / ".nexus"
-        python_path = nexus_home / ".venv" / "bin" / "python"
-        nexus_path = nexus_home / "nexus"
+        import os
+        nexus_home = os.path.expanduser("~/.nexus")
+        os.makedirs(nexus_home, exist_ok=True)
+        os.makedirs(os.path.join(nexus_home, "logs"), exist_ok=True)
+        python_path = os.path.join(nexus_home, ".venv", "bin", "python")
+        run_py = os.path.join(nexus_home, "nexus", "backend", "run.py")
 
         return f"""[Unit]
 Description=Nexus Gateway
@@ -27,9 +30,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart={python_path} -m uvicorn nexus.backend.main:app --host 0.0.0.0 --port 30000
-WorkingDirectory={nexus_path}
-Environment=PATH={nexus_home}/.venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart={python_path} {run_py} --host 0.0.0.0 --port 30000
 Environment=NEXUS_HOME={nexus_home}
 Restart=on-failure
 RestartSec=5

@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexus</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --forest-dark: #1a2f23;
+      --forest-mid: #2d4a3a;
+      --forest-light: #4a7c59;
+      --moss: #8fbc8f;
+      --cream: #faf6f0;
+      --wood: #d4a574;
+      --text-dark: #2c3e2d;
+      --text-muted: #6b7c6b;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Noto Serif SC', serif;
+      background: linear-gradient(180deg, var(--cream) 0%, #f5f0e8 100%);
+      color: var(--text-dark);
+      min-height: 100vh;
+    }
+
+    /* 消息气泡 */
+    .bubble-user {
+      background: var(--forest-mid);
+      color: white;
+      border-radius: 24px 24px 6px 24px;
+    }
+
+    .bubble-assistant {
+      background: white;
+      border: 1px solid #e8e4dc;
+      border-radius: 24px 24px 24px 6px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    }
+
+    /* 思考过程 */
+    .thinking {
+      background: linear-gradient(135deg, var(--moss) 0%, var(--forest-light) 100%);
+      color: white;
+      border-radius: 16px;
+      padding: 12px 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      margin-bottom: 8px;
+    }
+
+    /* 输入框 */
+    .input-area {
+      background: white;
+      border: 2px solid transparent;
+      border-radius: 24px;
+      box-shadow: 0 4px 24px rgba(45, 74, 58, 0.12);
+      transition: all 0.3s ease;
+    }
+
+    .input-area:focus-within {
+      border-color: var(--forest-light);
+      box-shadow: 0 4px 32px rgba(45, 74, 58, 0.18);
+    }
+
+    /* 发送按钮 */
+    .send-btn {
+      background: linear-gradient(135deg, var(--forest-mid) 0%, var(--forest-light) 100%);
+      transition: all 0.3s ease;
+    }
+
+    .send-btn:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(45, 74, 58, 0.3);
+    }
+
+    .send-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* 龙猫样式 */
+    .totoro-container {
+      position: relative;
+    }
+
+    .totoro-shadow {
+      filter: drop-shadow(0 8px 16px rgba(45, 74, 58, 0.2));
+    }
+
+    /* 滚动条 */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--moss);
+      border-radius: 4px;
+    }
+
+    /* 打字动画 */
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    .cursor-blink {
+      animation: blink 1s infinite;
+    }
+
+    /* Logo */
+    .logo-text {
+      font-family: 'Noto Serif SC', serif;
+      background: linear-gradient(135deg, var(--forest-mid) 0%, var(--forest-light) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+  </style>
+</head>
+<body class="flex flex-col h-screen">
+  <!-- 顶部栏 -->
+  <header class="flex items-center justify-between px-6 py-4 bg-white/60 backdrop-blur-md border-b border-[#e8e4dc]">
+    <div class="flex items-center gap-3">
+      <div class="totoro-container">
+        <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNzVxcW9qNjNxcDR1YnIxaWUxcjlqN3Q2NnIwdXF4dGZhbHZsYSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/8m37RrcbJjp7YId9JO/giphy.gif" alt="龙猫" class="w-10 h-10 rounded-full object-cover totoro-shadow">
+      </div>
+      <div>
+        <h1 class="logo-text text-xl font-semibold tracking-tight">Nexus</h1>
+        <p class="text-xs text-[var(--text-muted)]">智能助手</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-4">
+      <!-- 模型选择 -->
+      <button class="flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--cream)] border border-[#e8e4dc] hover:border-[var(--forest-light)] transition-colors">
+        <span class="text-sm font-medium">MiniMax-M2.7</span>
+        <svg class="w-4 h-4 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+
+      <!-- 状态 -->
+      <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--forest-mid)]/10">
+        <div class="w-2 h-2 rounded-full bg-[var(--forest-light)] animate-pulse"></div>
+        <span class="text-xs font-medium text-[var(--forest-mid)]">已连接</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- 对话区域 -->
+  <main id="chatArea" class="flex-1 overflow-y-auto">
+    <div class="max-w-3xl mx-auto px-4 py-8 space-y-6">
+      <!-- 欢迎 -->
+      <div class="text-center py-12">
+        <div class="inline-block mb-6">
+          <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNzVxcW9qNjNxcDR1YnIxaWUxcjlqN3Q2NnIwdXF4dGZhbHZsYSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/8m37RrcbJjp7YId9JO/giphy.gif" alt="龙猫" class="w-20 h-20 rounded-2xl object-cover mx-auto shadow-lg">
+        </div>
+        <h2 class="text-2xl font-medium mb-2 text-[var(--text-dark)]">你好，我是 Nexus</h2>
+        <p class="text-[var(--text-muted)]">我可以帮你解答问题、编写代码、分析数据...</p>
+      </div>
+
+      <!-- 快捷提示 -->
+      <div class="grid grid-cols-2 gap-3">
+        <button onclick="insertPrompt('帮我写一段 Python 代码')" class="p-4 rounded-2xl bg-white border border-[#e8e4dc] text-left hover:shadow-md hover:border-[var(--moss)] transition-all group">
+          <div class="text-sm font-medium mb-1 group-hover:text-[var(--forest-mid)]">💻 写代码</div>
+          <div class="text-xs text-[var(--text-muted)]">Python、JavaScript...</div>
+        </button>
+        <button onclick="insertPrompt('帮我分析这份数据')" class="p-4 rounded-2xl bg-white border border-[#e8e4dc] text-left hover:shadow-md hover:border-[var(--moss)] transition-all group">
+          <div class="text-sm font-medium mb-1 group-hover:text-[var(--forest-mid)]">📊 分析数据</div>
+          <div class="text-xs text-[var(--text-muted)]">Excel、CSV、JSON...</div>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- 输入区域 -->
+  <footer class="px-4 pb-6 pt-2">
+    <div class="max-w-3xl mx-auto">
+      <div class="input-area flex items-end">
+        <textarea
+          id="inputField"
+          class="flex-1 px-5 py-4 bg-transparent resize-none focus:outline-none text-[var(--text-dark)] placeholder-[var(--text-muted)]"
+          rows="1"
+          placeholder="输入消息..."
+        ></textarea>
+        <button id="sendBtn" class="send-btn m-2 w-11 h-11 rounded-xl flex items-center justify-center text-white" disabled>
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
+        </button>
+      </div>
+      <p class="text-center text-xs text-[var(--text-muted)] mt-3">按 Enter 发送，Shift + Enter 换行</p>
+    </div>
+  </footer>
+
+  <script>
+    const inputField = document.getElementById('inputField');
+    const sendBtn = document.getElementById('sendBtn');
+
+    inputField.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+      sendBtn.disabled = !this.value.trim();
+    });
+
+    inputField.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (this.value.trim()) {
+          sendMessage(this.value.trim());
+          this.value = '';
+          this.style.height = 'auto';
+          sendBtn.disabled = true;
+        }
+      }
+    });
+
+    sendBtn.addEventListener('click', function() {
+      if (inputField.value.trim()) {
+        sendMessage(inputField.value.trim());
+        inputField.value = '';
+        inputField.style.height = 'auto';
+        sendBtn.disabled = true;
+      }
+    });
+
+    function insertPrompt(text) {
+      inputField.value = text;
+      inputField.dispatchEvent(new Event('input'));
+      inputField.focus();
+    }
+
+    function sendMessage(content) {
+      const chatArea = document.getElementById('chatArea');
+
+      // 用户消息
+      const userDiv = document.createElement('div');
+      userDiv.className = 'max-w-3xl mx-auto flex justify-end';
+      userDiv.innerHTML = `<div class="max-w-[80%] px-5 py-3 bubble-user">${escapeHtml(content)}</div>`;
+      chatArea.appendChild(userDiv);
+
+      // 助手消息
+      const assistantDiv = document.createElement('div');
+      assistantDiv.className = 'max-w-3xl mx-auto flex justify-start';
+      assistantDiv.innerHTML = `<div class="max-w-[80%] px-5 py-3 bubble-assistant"><span class="cursor-blink">●</span></div>`;
+      chatArea.appendChild(assistantDiv);
+
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

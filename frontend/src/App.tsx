@@ -1,25 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import ChatArea from './components/ChatArea';
 import ModelConfigModal from './components/ModelConfigModal';
+import WechatPluginModal from './components/WechatPluginModal';
 import { useStore } from './store/useStore';
-import type { Message, SessionResponse } from './types';
-
-interface Conversation {
-  id: string;
-  title: string;
-  messages: Message[];
-  createdAt: Date;
-  updatedAt: string;
-}
+import type { Message, SessionResponse, Conversation } from './types';
 
 function App() {
   const [showModelConfig, setShowModelConfig] = useState(false);
+  const [showWechatPlugin, setShowWechatPlugin] = useState(false);
   const [, setModelName] = useState('MiniMax-M2.7');
   const [wsConnected, setWsConnected] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [resetCounter, setResetCounter] = useState(0);
+  const [wechatConnected, setWechatConnected] = useState(false);
   const darkMode = useStore((s) => s.darkMode);
   const setDarkMode = useStore((s) => s.setDarkMode);
   const clearConversationMessages = useStore((s) => s.clearConversationMessages);
@@ -30,6 +25,21 @@ function App() {
     loadSessions();
     // 定时刷新会话列表（用于显示后端创建的新会话）
     const timer = setInterval(loadSessions, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // 定时检查微信连接状态
+  useEffect(() => {
+    const checkWechatStatus = () => {
+      fetch('/api/channels/wechat/bind')
+        .then(res => res.json())
+        .then((data: { bound: boolean; status?: string }) => {
+          setWechatConnected(data.bound && data.status === 'running');
+        })
+        .catch(() => setWechatConnected(false));
+    };
+    checkWechatStatus();
+    const timer = setInterval(checkWechatStatus, 10000);
     return () => clearInterval(timer);
   }, []);
 
@@ -47,6 +57,7 @@ function App() {
           messages: [],
           createdAt: new Date(c.created_at),
           updatedAt: c.updated_at,
+          channel: c.channel || 'main',
         })));
       })
       .catch(() => {});
@@ -166,12 +177,51 @@ function App() {
 
         {/* 历史会话 */}
         <div className="flex-1 overflow-y-auto px-3">
-          <div className={`text-xs uppercase px-3 py-2 ${darkMode ? 'text-gray-500' : 'text-[#6b7c6b]'}`}>历史会话</div>
-          {conversations.length === 0 ? (
-            <p className={`text-xs text-center py-4 ${darkMode ? 'text-gray-600' : 'text-[#a0a090]'}`}>暂无历史会话</p>
+          {/* 主会话 */}
+          <div className={`text-xs uppercase px-3 py-2 ${darkMode ? 'text-gray-500' : 'text-[#6b7c6b]'}`}>主会话</div>
+          {conversations.filter(c => c.channel !== 'wechat').length === 0 ? (
+            <p className={`text-xs text-center py-4 ${darkMode ? 'text-gray-600' : 'text-[#a0a090]'}`}>暂无主会话</p>
           ) : (
             <div className="space-y-1">
-              {conversations.map(conv => (
+              {conversations.filter(c => c.channel !== 'wechat').map(conv => (
+                <div
+                  key={conv.id}
+                  onClick={() => handleLoadConversation(conv)}
+                  className={`group px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+                    currentConversationId === conv.id
+                      ? darkMode ? 'bg-[#252525] text-white' : 'bg-[#e8ece5] text-[#2d4a3a]'
+                      : darkMode ? 'hover:bg-[#1a1a1a] text-gray-400' : 'hover:bg-[#f0f2ed] text-[#5a6b52]'
+                  }`}
+                >
+                  <div className="text-sm truncate">{conv.title}</div>
+                  <div className="flex items-center justify-between mt-1">
+                    <span className={`text-xs ${darkMode ? 'text-gray-600' : 'text-[#8a9a7a]'}`}>
+                      {new Date(conv.updatedAt || conv.createdAt).toLocaleDateString()}
+                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteConversation(conv.id);
+                      }}
+                      className={`opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity ${darkMode ? 'hover:bg-red-900/30 text-red-500' : 'hover:bg-red-100 text-red-500'}`}
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 微信会话 */}
+          <div className={`text-xs uppercase px-3 py-2 mt-3 ${darkMode ? 'text-gray-500' : 'text-[#6b7c6b]'}`}>微信会话</div>
+          {conversations.filter(c => c.channel === 'wechat').length === 0 ? (
+            <p className={`text-xs text-center py-4 ${darkMode ? 'text-gray-600' : 'text-[#a0a090]'}`}>暂无微信会话</p>
+          ) : (
+            <div className="space-y-1">
+              {conversations.filter(c => c.channel === 'wechat').map(conv => (
                 <div
                   key={conv.id}
                   onClick={() => handleLoadConversation(conv)}
@@ -216,6 +266,15 @@ function App() {
             </svg>
             模型配置
           </button>
+          <button
+            onClick={() => setShowWechatPlugin(true)}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${darkMode ? 'hover:bg-[#1a1a1a] text-gray-400' : 'hover:bg-[#f0f2ed] text-[#5a6b52]'}`}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21l4-4 4 4M3 4h18M4 4v16l3-3 3 3 3-3 3 3V4" />
+            </svg>
+            插件管理
+          </button>
         </div>
       </aside>
 
@@ -254,9 +313,17 @@ function App() {
             </button>
 
             {/* 连接状态 */}
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${darkMode ? 'bg-[#1a1a1a]' : 'bg-[#f0f2ed]'}`}>
-              <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#4a7c59] animate-pulse' : 'bg-gray-400'}`} />
-              <span className={`text-xs ${darkMode ? 'text-gray-400' : 'text-[#5a6b52]'}`}>{wsConnected ? '已连接' : '未连接'}</span>
+            <div className="flex items-center gap-2">
+              {/* WebSocket 连接 */}
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${darkMode ? 'bg-[#1a1a1a]' : 'bg-[#f0f2ed]'}`}>
+                <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#4a7c59] animate-pulse' : 'bg-gray-400'}`} />
+                <span className={`text-xs ${darkMode ? 'text-gray-400' : 'text-[#5a6b52]'}`}>{wsConnected ? '已连接' : '未连接'}</span>
+              </div>
+              {/* 微信连接 */}
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${darkMode ? 'bg-[#1a1a1a]' : 'bg-[#f0f2ed]'}`}>
+                <div className={`w-2 h-2 rounded-full ${wechatConnected ? 'bg-[#4a7c59] animate-pulse' : 'bg-gray-400'}`} />
+                <span className={`text-xs ${darkMode ? 'text-gray-400' : 'text-[#5a6b52]'}`}>微信 {wechatConnected ? '已连接' : '未连接'}</span>
+              </div>
             </div>
           </div>
         </header>
@@ -275,6 +342,15 @@ function App() {
         isOpen={showModelConfig}
         onClose={() => setShowModelConfig(false)}
         onModelChange={setModelName}
+      />
+
+      {/* 微信插件弹窗 */}
+      <WechatPluginModal
+        isOpen={showWechatPlugin}
+        onClose={() => setShowWechatPlugin(false)}
+        onSuccess={(accountId) => {
+          console.log('微信绑定成功:', accountId);
+        }}
       />
     </div>
   );

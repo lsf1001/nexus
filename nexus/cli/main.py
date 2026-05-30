@@ -71,10 +71,14 @@ def start(
     console = Console()
     manager = get_daemon_manager()
 
-    if manager.is_running() and not replace:
-        console.print(f"[yellow]网关已在运行中 (PID: {manager.get_pid()})[/yellow]")
-        console.print(f"使用 [cyan]nexus restart[/cyan] 重启")
-        return
+    if manager.is_running():
+        if replace:
+            console.print("[yellow]停止旧实例...[/yellow]")
+            manager.stop()
+        else:
+            console.print(f"[yellow]网关已在运行中 (PID: {manager.get_pid()})[/yellow]")
+            console.print(f"使用 [cyan]nexus restart[/cyan] 重启")
+            return
 
     manager.start()
     console.print(f"[green]✔ 网关已启动 (PID: {manager.get_pid()})[/green]")

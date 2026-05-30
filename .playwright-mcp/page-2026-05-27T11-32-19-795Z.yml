@@ -1,0 +1,72 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - text: 自动换行
+    - checkbox "自动换行" [ref=e5]
+  - table [ref=e6]:
+    - rowgroup [ref=e7]:
+      - row "1 <!doctype html>" [ref=e8]:
+        - cell "1" [ref=e9]
+        - cell "<!doctype html>" [ref=e10]
+      - row "2 <html lang=\"en\">" [ref=e11]:
+        - cell "2" [ref=e12]
+        - cell "<html lang=\"en\">" [ref=e13]:
+          - generic [ref=e14]: <html lang="en">
+      - row "3 <head>" [ref=e15]:
+        - cell "3" [ref=e16]
+        - cell "<head>" [ref=e17]
+      - row "4 <meta charset=\"UTF-8\" />" [ref=e18]:
+        - cell "4" [ref=e19]
+        - cell "<meta charset=\"UTF-8\" />" [ref=e20]:
+          - generic [ref=e21]: <meta charset="UTF-8" />
+      - row "5 <link rel=\"icon\" type=\"image/svg+xml\" href=\"/app/favicon.svg\" />" [ref=e22]:
+        - cell "5" [ref=e23]
+        - cell "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/app/favicon.svg\" />" [ref=e24]:
+          - generic [ref=e25]:
+            - text: <link rel="icon" type="image/svg+xml" href="
+            - link "/app/favicon.svg" [ref=e26] [cursor=pointer]:
+              - /url: /app/favicon.svg
+            - text: "\" />"
+      - row "6 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />" [ref=e27]:
+        - cell "6" [ref=e28]
+        - cell "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />" [ref=e29]:
+          - generic [ref=e30]: <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      - row "7 <title>frontend</title>" [ref=e31]:
+        - cell "7" [ref=e32]
+        - cell "<title>frontend</title>" [ref=e33]
+      - row "8 <script type=\"module\" crossorigin src=\"/app/assets/index-fVnjagKj.js\"></script>" [ref=e34]:
+        - cell "8" [ref=e35]
+        - cell "<script type=\"module\" crossorigin src=\"/app/assets/index-fVnjagKj.js\"></script>" [ref=e36]:
+          - generic [ref=e37]:
+            - text: <script type="module" crossorigin src="
+            - link "/app/assets/index-fVnjagKj.js" [ref=e38] [cursor=pointer]:
+              - /url: /app/assets/index-fVnjagKj.js
+            - text: "\">"
+          - text: </script>
+      - row "9 <link rel=\"stylesheet\" crossorigin href=\"/app/assets/index-Oay23aCn.css\">" [ref=e39]:
+        - cell "9" [ref=e40]
+        - cell "<link rel=\"stylesheet\" crossorigin href=\"/app/assets/index-Oay23aCn.css\">" [ref=e41]:
+          - generic [ref=e42]:
+            - text: <link rel="stylesheet" crossorigin href="
+            - link "/app/assets/index-Oay23aCn.css" [ref=e43] [cursor=pointer]:
+              - /url: /app/assets/index-Oay23aCn.css
+            - text: "\">"
+      - row "10 </head>" [ref=e44]:
+        - cell "10" [ref=e45]
+        - cell "</head>" [ref=e46]
+      - row "11 <body>" [ref=e47]:
+        - cell "11" [ref=e48]
+        - cell "<body>" [ref=e49]
+      - row "12 <div id=\"root\"></div>" [ref=e50]:
+        - cell "12" [ref=e51]
+        - cell "<div id=\"root\"></div>" [ref=e52]:
+          - generic [ref=e53]: <div id="root">
+          - text: </div>
+      - row "13 </body>" [ref=e54]:
+        - cell "13" [ref=e55]
+        - cell "</body>" [ref=e56]
+      - row "14 </html>" [ref=e57]:
+        - cell "14" [ref=e58]
+        - cell "</html>" [ref=e59]
+      - row "15" [ref=e60]:
+        - cell "15" [ref=e61]
+        - cell [ref=e62]

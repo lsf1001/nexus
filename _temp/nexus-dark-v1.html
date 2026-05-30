@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexus</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #12121a;
+      --bg-tertiary: #1a1a25;
+      --accent: #00ff88;
+      --accent-dim: #00ff8833;
+      --text-primary: #e8e8ed;
+      --text-secondary: #888899;
+      --border: #2a2a3a;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+      background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* 发光效果 */
+    .glow-text {
+      text-shadow: 0 0 20px var(--accent-dim), 0 0 40px var(--accent-dim);
+    }
+
+    .glow-border {
+      box-shadow: 0 0 15px var(--accent-dim), inset 0 0 15px var(--accent-dim);
+    }
+
+    .glow-button {
+      box-shadow: 0 0 20px var(--accent-dim);
+      transition: all 0.3s ease;
+    }
+
+    .glow-button:hover {
+      box-shadow: 0 0 30px var(--accent), 0 0 60px var(--accent-dim);
+      transform: translateY(-1px);
+    }
+
+    /* 消息气泡 */
+    .message-user {
+      background: linear-gradient(135deg, var(--accent) 0%, #00cc6a 100%);
+      color: #000;
+      border-radius: 20px 20px 4px 20px;
+    }
+
+    .message-assistant {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 20px 20px 20px 4px;
+    }
+
+    /* 输入框 */
+    .input-glow:focus {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--accent-dim), 0 0 30px var(--accent-dim);
+    }
+
+    /* 滚动条 */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+
+    /* 动画 */
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+
+    .typing-indicator span {
+      animation: pulse-glow 1.4s infinite;
+    }
+
+    .typing-indicator span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-indicator span:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    /* 龙猫剪影 - 科技风格 */
+    .totoro-silhouette {
+      opacity: 0.15;
+      filter: drop-shadow(0 0 20px var(--accent-dim));
+    }
+  </style>
+</head>
+<body class="flex flex-col h-screen">
+  <!-- 顶部栏 -->
+  <header class="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] bg-[var(--bg-primary)]/80 backdrop-blur-lg">
+    <div class="flex items-center gap-3">
+      <!-- Logo -->
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[#00cc6a] flex items-center justify-center glow-button">
+        <span class="text-black font-bold text-sm">N</span>
+      </div>
+      <span class="text-lg font-medium tracking-tight glow-text text-[var(--accent)]">Nexus</span>
+    </div>
+
+    <div class="flex items-center gap-4">
+      <!-- 模型选择 -->
+      <button id="modelBtn" class="flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--bg-tertiary)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors">
+        <span class="text-sm text-[var(--text-secondary)]">MiniMax-M2.7</span>
+        <svg class="w-4 h-4 text-[var(--text-secondary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+
+      <!-- 连接状态 -->
+      <div class="flex items-center gap-2">
+        <div class="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse"></div>
+        <span class="text-xs text-[var(--text-secondary)]">已连接</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- 对话区域 -->
+  <main id="chatArea" class="flex-1 overflow-y-auto px-4 py-8">
+    <div class="max-w-3xl mx-auto space-y-6">
+      <!-- 欢迎消息 -->
+      <div class="text-center py-12">
+        <div class="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-[var(--accent)]/20 to-transparent border border-[var(--accent)]/30 flex items-center justify-center glow-border">
+          <svg class="w-8 h-8 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+          </svg>
+        </div>
+        <h1 class="text-2xl font-medium mb-2">Nexus 智能助手</h1>
+        <p class="text-[var(--text-secondary)]">我可以帮你解答问题、编写代码、分析数据...</p>
+      </div>
+
+      <!-- 示例提示 -->
+      <div class="grid grid-cols-2 gap-3 px-4">
+        <button class="p-4 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)] text-left hover:border-[var(--accent)]/50 transition-colors group">
+          <div class="text-sm font-medium mb-1 group-hover:text-[var(--accent)]">帮我写一段 Python 代码</div>
+          <div class="text-xs text-[var(--text-secondary)]">读取文件并处理数据</div>
+        </button>
+        <button class="p-4 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)] text-left hover:border-[var(--accent)]/50 transition-colors group">
+          <div class="text-sm font-medium mb-1 group-hover:text-[var(--accent)]">解释量子计算原理</div>
+          <div class="text-xs text-[var(--text-secondary)]">用简单易懂的方式</div>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- 输入区域 -->
+  <footer class="px-4 pb-6 pt-2">
+    <div class="max-w-3xl mx-auto">
+      <div class="relative rounded-2xl bg-[var(--bg-tertiary)] border border-[var(--border)] glow-border overflow-hidden">
+        <textarea
+          id="inputField"
+          class="w-full px-5 py-4 bg-transparent text-[var(--text-primary)] placeholder-[var(--text-secondary)] resize-none focus:outline-none input-glow"
+          rows="1"
+          placeholder="输入消息..."
+        ></textarea>
+        <button
+          id="sendBtn"
+          class="absolute right-3 bottom-3 w-10 h-10 rounded-xl bg-gradient-to-br from-[var(--accent)] to-[#00cc6a] flex items-center justify-center text-black glow-button disabled:opacity-30 disabled:cursor-not-allowed"
+          disabled
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
+        </button>
+      </div>
+      <p class="text-center text-xs text-[var(--text-secondary)] mt-3">按 Enter 发送，Shift + Enter 换行</p>
+    </div>
+  </footer>
+
+  <script>
+    const inputField = document.getElementById('inputField');
+    const sendBtn = document.getElementById('sendBtn');
+
+    // 自动调整高度
+    inputField.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+      sendBtn.disabled = !this.value.trim();
+    });
+
+    // 发送消息
+    inputField.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (this.value.trim()) {
+          sendMessage(this.value.trim());
+          this.value = '';
+          this.style.height = 'auto';
+          sendBtn.disabled = true;
+        }
+      }
+    });
+
+    sendBtn.addEventListener('click', function() {
+      if (inputField.value.trim()) {
+        sendMessage(inputField.value.trim());
+        inputField.value = '';
+        inputField.style.height = 'auto';
+        sendBtn.disabled = true;
+      }
+    });
+
+    function sendMessage(content) {
+      const chatArea = document.getElementById('chatArea');
+      const maxW = 'max-w-3xl';
+      const mx = 'mx-auto';
+
+      // 添加用户消息
+      const userMsg = document.createElement('div');
+      userMsg.className = `${mx} ${maxW} flex justify-end`;
+      userMsg.innerHTML = `
+        <div class="max-w-[80%] px-5 py-3 message-user">
+          ${escapeHtml(content)}
+        </div>
+      `;
+      chatArea.appendChild(userMsg);
+
+      // 添加助手消息占位
+      const assistantMsg = document.createElement('div');
+      assistantMsg.className = `${mx} ${maxW} flex justify-start`;
+      assistantMsg.innerHTML = `
+        <div class="max-w-[80%] px-5 py-3 message-assistant">
+          <div class="typing-indicator flex gap-1">
+            <span class="w-2 h-2 rounded-full bg-[var(--accent)]"></span>
+            <span class="w-2 h-2 rounded-full bg-[var(--accent)]"></span>
+            <span class="w-2 h-2 rounded-full bg-[var(--accent)]"></span>
+          </div>
+        </div>
+      `;
+      chatArea.appendChild(assistantMsg);
+
+      // 滚动到底部
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

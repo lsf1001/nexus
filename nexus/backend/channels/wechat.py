@@ -75,6 +75,60 @@ _active_logins: dict[str, QRSession] = {}
 _accounts: dict[str, WeixinAccount] = {}
 _context_tokens: dict[str, str] = {}  # account_id:user_id -> context_token
 _global_lock = threading.RLock()
+_active_channel: Optional["WeChatChannel"] = None  # 当前活跃的微信通道
+
+
+def get_active_wechat_channel() -> Optional["WeChatChannel"]:
+    """获取当前活跃的微信通道"""
+    return _active_channel
+
+
+def _set_active_channel(channel: "WeChatChannel") -> None:
+    """设置当前活跃的微信通道"""
+    global _active_channel
+    _active_channel = channel
+
+
+def _clear_active_channel() -> None:
+    """清除当前活跃的微信通道"""
+    global _active_channel
+    _active_channel = None
+
+
+def _check_token_valid(account_id: str) -> bool:
+    """检查 token 是否有效（通过 notifyStart 检测）"""
+    try:
+        account = _load_account(account_id)
+        if not account:
+            return False
+        body = {"base_info": _build_base_info()}
+        resp = httpx.post(
+            f"{account.base_url or FIXED_BASE_URL}/ilink/bot/msg/notifystart",
+            json=body,
+            headers=_build_headers(account.token),
+            timeout=10.0,
+        )
+        data = resp.json()
+        errcode = data.get("errcode", 0)
+        return errcode == 0
+    except httpx.RequestError:
+        return False
+
+
+def _delete_account(account_id: str) -> None:
+    """删除账号数据"""
+    import shutil
+    account_file = _resolve_account_file_path(account_id)
+    if account_file.exists():
+        account_file.unlink()
+    # 更新索引
+    existing = _list_indexed_weixin_account_ids()
+    if account_id in existing:
+        existing.remove(account_id)
+        path = _resolve_account_index_path()
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2)
+    logger.info(f"Deleted account: {account_id}")
 
 
 def _get_state_dir() -> Path:
@@ -111,7 +165,7 @@ def _list_indexed_weixin_account_ids() -> list[str]:
             data = json.load(f)
         if isinstance(data, list):
             return [x for x in data if isinstance(x, str) and x.strip()]
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return []
 
@@ -215,17 +269,32 @@ def _generate_client_id() -> str:
 
 
 def _random_wechat_uin() -> str:
-    """生成随机 UIN"""
+    """生成随机 UIN (OpenClaw 兼容)"""
     uint32 = random.getrandbits(32)
     return base64.b64encode(str(uint32).encode()).decode()
 
 
+def _build_client_version(version: str) -> int:
+    """构建客户端版本号 (OpenClaw 兼容)
+
+    uint32 encoded as 0x00MMNNPP
+    High 8 bits fixed to 0; remaining bits: major<<16 | minor<<8 | patch.
+    e.g. "1.0.11" -> 0x0001000B = 65547
+    """
+    parts = version.split(".")
+    major = int(parts[0]) if len(parts) > 0 and parts[0].isdigit() else 0
+    minor = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    patch = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+    return ((major & 0xff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff)
+
+
 def _build_headers(token: Optional[str] = None) -> dict:
-    """构建请求头"""
+    """构建请求头 (OpenClaw 兼容)"""
     headers = {
         "Content-Type": "application/json",
-        "iLink-App-Id": "",
-        "iLink-App-ClientVersion": "0x00020004",
+        "iLink-App-Id": "bot",
+        "iLink-App-ClientVersion": str(_build_client_version(CHANNEL_VERSION)),
+        "AuthorizationType": "ilink_bot_token",
         "X-WECHAT-UIN": _random_wechat_uin(),
     }
     if token and token.strip():
@@ -234,10 +303,10 @@ def _build_headers(token: Optional[str] = None) -> dict:
 
 
 def _build_base_info() -> dict:
-    """构建 base_info"""
+    """构建 base_info (OpenClaw 兼容)"""
     return {
         "channel_version": CHANNEL_VERSION,
-        "bot_agent": "Nexus",
+        "bot_agent": "OpenClaw",
     }
 
 
@@ -342,6 +411,37 @@ class MessageState:
 
 # ========== 消息发送 ==========
 
+async def _get_config(base_url: str, token: str, ilink_user_id: str, context_token: str = "") -> dict:
+    """获取用户配置（包括 typing_ticket）"""
+    body = {
+        "ilink_user_id": ilink_user_id,
+        "context_token": context_token,
+        "base_info": _build_base_info(),
+    }
+    raw = await _api_post_fetch(base_url, "/ilink/bot/getconfig", body, token, DEFAULT_CONFIG_TIMEOUT_MS)
+    return json.loads(raw)
+
+
+async def _send_typing(base_url: str, token: str, to_user: str, typing_ticket: str = "", context_token: str = "") -> str:
+    """发送正在输入状态"""
+    # 如果没有 typing_ticket，先获取
+    if not typing_ticket:
+        try:
+            config = await _get_config(base_url, token, to_user, context_token)
+            typing_ticket = config.get("typing_ticket", "")
+        except Exception:
+            typing_ticket = ""
+
+    body = {
+        "ilink_user_id": to_user,
+        "typing_ticket": typing_ticket,
+        "status": 1,  # 1=typing
+        "base_info": _build_base_info(),
+    }
+    raw = await _api_post_fetch(base_url, "/ilink/bot/sendtyping", body, token, DEFAULT_CONFIG_TIMEOUT_MS)
+    return raw
+
+
 async def _send_message(base_url: str, token: str, to_user: str, text: str, context_token: Optional[str] = None) -> str:
     """发送文本消息"""
     client_id = _generate_client_id()
@@ -438,6 +538,23 @@ async def wait_qr_scan(session_key: str, timeout_ms: int = 480000) -> dict:
                 _save_account(account)
                 _register_weixin_account_id(normalized_id)
 
+                # 创建微信通道并启动
+                global _active_channel
+                config = ChannelConfig(
+                    channel_id=f"wechat:{normalized_id}",
+                    channel_type=ChannelType.WECHAT,
+                    name=f"WeChat ({normalized_id[:8]}...)",
+                    settings={"account_id": normalized_id},
+                )
+                from .wechat import WeChatChannel as WCH
+                _active_channel = WCH(config, token=normalized_id)
+                await _active_channel.start()
+
+                # 立即设置消息回调
+                from nexus.backend.main import _handle_wechat_message
+                _active_channel.on_message(_handle_wechat_message)
+                logger.info(f"Callback set for channel {_active_channel.config.channel_id}")
+
                 with _global_lock:
                     del _active_logins[session_key]
 
@@ -474,6 +591,44 @@ async def wait_qr_scan(session_key: str, timeout_ms: int = 480000) -> dict:
     return {"connected": False, "message": "Login timeout"}
 
 
+# ========== Session Guard (OpenClaw 兼容) ==========
+# 错误码 -14 表示 session 过期，暂停 1 小时
+
+SESSION_EXPIRED_ERRCODE = -14
+SESSION_PAUSE_DURATION_MS = 60 * 60 * 1000  # 1 小时
+_pause_until_map: dict[str, float] = {}
+
+
+def _pause_session(account_id: str) -> None:
+    """暂停会话 1 小时"""
+    until = time.time() + SESSION_PAUSE_DURATION_MS / 1000
+    _pause_until_map[account_id] = until
+    logger.debug(f"session-guard: paused accountId={account_id} until={time.ctime(until)}")
+
+
+def _is_session_paused(account_id: str) -> bool:
+    """检查会话是否暂停"""
+    until = _pause_until_map.get(account_id)
+    if until is None:
+        return False
+    if time.time() >= until:
+        del _pause_until_map[account_id]
+        return False
+    return True
+
+
+def _get_remaining_pause_ms(account_id: str) -> float:
+    """获取剩余暂停时间（毫秒）"""
+    until = _pause_until_map.get(account_id)
+    if until is None:
+        return 0
+    remaining = (until - time.time()) * 1000
+    if remaining <= 0:
+        del _pause_until_map[account_id]
+        return 0
+    return remaining
+
+
 # ========== WeChatChannel 实现 ==========
 
 class WeChatChannel(Channel):
@@ -487,6 +642,7 @@ class WeChatChannel(Channel):
         self._running = False
         self._account: Optional[WeixinAccount] = None
         self._get_updates_buf: str = ""
+        self._on_message_callback = None
 
     @property
     def base_url(self) -> str:
@@ -496,13 +652,16 @@ class WeChatChannel(Channel):
 
     async def start(self) -> None:
         """启动微信通道"""
+        logger.debug(f"WeChatChannel.start() called with token={self.token[:20] if self.token else 'None'}...")
         self._update_state(status=ChannelStatus.STARTING)
 
         # 加载账号
         if self.token:
             # 检查 token 是 account_id 还是 bot_token
             normalized_id = _normalize_account_id(self.token)
+            logger.debug(f"start: normalized_id={normalized_id}")
             existing_account = _load_account(normalized_id)
+            logger.debug(f"start: existing_account loaded: {existing_account is not None}")
 
             if existing_account:
                 # token 是 account_id，直接加载
@@ -536,9 +695,10 @@ class WeChatChannel(Channel):
 
         try:
             body = {"base_info": _build_base_info()}
-            await self._http_client.post("/ilink/bot/msg/notifystart", json=body)
+            resp = await self._http_client.post("/ilink/bot/msg/notifystart", json=body)
+            logger.info(f"notifyStart response: {resp.status_code} {resp.text}")
         except Exception as e:
-            logger.warn(f"notifyStart failed (ignored): {e}")
+            logger.error(f"notifyStart failed: {e}")
 
         self._running = True
         self._update_state(status=ChannelStatus.RUNNING, started_at=None)
@@ -593,13 +753,23 @@ class WeChatChannel(Channel):
             logger.error(f"Failed to send message: {e}")
 
     async def _poll_messages(self) -> None:
-        """长轮询获取消息"""
+        """长轮询获取消息 (OpenClaw 兼容)"""
+        logger.info(f"WeChat _poll_messages STARTED for account_id={self._account.account_id if self._account else 'unknown'}")
         poll_interval = 1.0
+        account_id = self._account.account_id if self._account else "unknown"
 
         while self._running:
             try:
+                logger.info(f"Polling loop iteration, running={self._running}")
                 if not self._http_client or not self._account:
                     await asyncio.sleep(poll_interval)
+                    continue
+
+                # 检查 session 是否暂停
+                if _is_session_paused(account_id):
+                    remaining_min = int(_get_remaining_pause_ms(account_id) / 60000)
+                    logger.info(f"session paused for {remaining_min} min, waiting...")
+                    await asyncio.sleep(_get_remaining_pause_ms(account_id) / 1000)
                     continue
 
                 body = {
@@ -613,40 +783,42 @@ class WeChatChannel(Channel):
                         json=body,
                         timeout=DEFAULT_LONG_POLL_TIMEOUT_MS / 1000,
                     )
+                    logger.info(f"getUpdates response: status={response.status_code}")
+                    if response.status_code == 200:
+                        data = response.json()
+                        ret = data.get("ret", 0)
+                        errcode = data.get("errcode", 0)
+                        msgs_count = len(data.get("msgs", []))
+                        logger.info(f"getUpdates: ret={ret}, errcode={errcode}, msgs={msgs_count}")
+
+                        if ret == 0 or errcode == 0:
+                            msgs = data.get("msgs", [])
+                            for raw_msg in msgs:
+                                await self._handle_incoming_message(raw_msg)
+
+                            if data.get("get_updates_buf"):
+                                self._get_updates_buf = data["get_updates_buf"]
+                                sync_file = _get_state_dir() / "accounts" / f"{self._account.account_id}.sync.buf"
+                                sync_file.parent.mkdir(parents=True, exist_ok=True)
+                                sync_file.write_text(self._get_updates_buf)
+
+                            if data.get("longpolling_timeout_ms", 0) > 0:
+                                poll_interval = data["longpolling_timeout_ms"] / 1000
+                            else:
+                                poll_interval = 1.0
+                        elif errcode == SESSION_EXPIRED_ERRCODE:
+                            _pause_session(account_id)
+                            remaining_min = int(_get_remaining_pause_ms(account_id) / 60000)
+                            logger.warn(f"Session expired (errcode={errcode}), pausing for {remaining_min} min")
+                            await asyncio.sleep(5)
+                        else:
+                            logger.warning(f"getUpdates errcode={errcode}")
+                            await asyncio.sleep(poll_interval)
+                    else:
+                        logger.warning(f"getUpdates returned {response.status_code}")
+                        await asyncio.sleep(poll_interval)
                 except Exception as e:
                     logger.error(f"getUpdates error: {e}")
-                    await asyncio.sleep(poll_interval)
-                    continue
-
-                if response.status_code == 200:
-                    data = response.json()
-                    ret = data.get("ret", 0)
-                    errcode = data.get("errcode", 0)
-
-                    if ret == 0 or errcode == 0:
-                        msgs = data.get("msgs", [])
-                        for raw_msg in msgs:
-                            await self._handle_incoming_message(raw_msg)
-
-                        if data.get("get_updates_buf"):
-                            self._get_updates_buf = data["get_updates_buf"]
-                            # 保存 sync buffer
-                            sync_file = _get_state_dir() / "accounts" / f"{self._account.account_id}.sync.buf"
-                            sync_file.parent.mkdir(parents=True, exist_ok=True)
-                            sync_file.write_text(self._get_updates_buf)
-
-                        if data.get("longpolling_timeout_ms", 0) > 0:
-                            poll_interval = data["longpolling_timeout_ms"] / 1000
-                        else:
-                            poll_interval = 1.0
-                    elif errcode == -14:
-                        logger.warn("Session expired, waiting 5 min...")
-                        await asyncio.sleep(300)
-                    else:
-                        logger.warning(f"getUpdates errcode={errcode}")
-                        await asyncio.sleep(poll_interval)
-                else:
-                    logger.warning(f"getUpdates returned {response.status_code}")
                     await asyncio.sleep(poll_interval)
 
             except asyncio.CancelledError:
@@ -661,6 +833,8 @@ class WeChatChannel(Channel):
             from_user = raw_msg.get("from_user_id", "")
             content = self._extract_content(raw_msg)
             context_token = raw_msg.get("context_token")
+
+            logger.debug(f"WeChat incoming message: from={from_user}, content={content[:50]}...")
 
             if context_token and from_user:
                 _set_context_token(self._account.account_id, from_user, context_token)
@@ -679,9 +853,19 @@ class WeChatChannel(Channel):
                 reply_to=context_token,
             )
 
-            await self._safe_handle_message(channel_msg)
+            # 如果有回调，直接调用（用于 WebSocket 转发到前端）
+            if self._on_message_callback:
+                logger.debug(f"Calling callback for message from {from_user}")
+                self._on_message_callback(channel_msg)
+            else:
+                logger.warning(f"No callback set! Channel id={self.config.channel_id}, callback={self._on_message_callback}")
+                await self._safe_handle_message(channel_msg)
         except Exception as e:
             logger.error(f"Error handling incoming message: {e}")
+
+    def on_message(self, callback) -> None:
+        """设置消息回调"""
+        self._on_message_callback = callback
 
     def _get_message_type(self, raw: dict) -> MessageType:
         """获取消息类型"""

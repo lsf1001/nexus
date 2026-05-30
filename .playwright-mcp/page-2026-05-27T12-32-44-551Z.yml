@@ -1,0 +1,73 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e105]: "N"
+      - generic [ref=e106]: 关系
+    - button "新建会话" [ref=e10]:
+      - img [ref=e11]
+      - generic [ref=e107]: 新建会话
+    - generic [ref=e13]:
+      - generic [ref=e108]: 历史会话
+      - generic [ref=e15]:
+        - generic [ref=e16] [cursor=pointer]:
+          - generic [ref=e109]: 完整测试流程
+          - generic [ref=e18]:
+            - generic [ref=e110]: 2026年5月27日
+            - button [ref=e20]:
+              - img [ref=e21]
+        - generic [ref=e23] [cursor=pointer]:
+          - generic [ref=e111]: 测试消息是否保存
+          - generic [ref=e25]:
+            - generic [ref=e112]: 2026年5月27日
+            - button [ref=e27]:
+              - img [ref=e28]
+        - generic [ref=e30] [cursor=pointer]:
+          - generic [ref=e113]: 测试消息保存功能
+          - generic [ref=e32]:
+            - generic [ref=e114]: 2026年5月27日
+            - button [ref=e34]:
+              - img [ref=e35]
+        - generic [ref=e37] [cursor=pointer]:
+          - generic [ref=e115]: 测试发送消息到新会话
+          - generic [ref=e39]:
+            - generic [ref=e116]: 2026年5月27日
+            - button [ref=e41]:
+              - img [ref=e42]
+        - generic [ref=e44] [cursor=pointer]:
+          - generic [ref=e117]: 你好，测试新建会话流程
+          - generic [ref=e46]:
+            - generic [ref=e118]: 2026年5月27日
+            - button [ref=e48]:
+              - img [ref=e49]
+        - generic [ref=e51] [cursor=pointer]:
+          - generic [ref=e119]: 测试环节
+          - generic [ref=e53]:
+            - generic [ref=e120]: 2026年5月27日
+            - button [ref=e55]:
+              - img [ref=e56]
+    - button "模型配置" [ref=e59]:
+      - img [ref=e60]
+      - generic [ref=e121]: 模型配置
+  - generic [ref=e63]:
+    - banner [ref=e64]:
+      - generic [ref=e65]:
+        - button [ref=e66]:
+          - img [ref=e67]
+        - generic [ref=e122]: 聊天
+      - generic [ref=e70]:
+        - button "推理模式" [ref=e123]:
+          - img [ref=e72]
+        - generic [ref=e124]: 已连接
+    - generic [ref=e77]:
+      - generic [ref=e79]:
+        - paragraph [ref=e140]:
+          - generic [ref=e141]: 测试发送消息
+        - button "复制内容" [ref=e144]:
+          - img [ref=e145]
+      - generic [ref=e98]:
+        - generic [ref=e99]:
+          - textbox "输入消息..." [disabled] [ref=e100]
+          - button [disabled] [ref=e101]:
+            - img [ref=e102]
+        - paragraph [ref=e104]:
+          - generic [ref=e136]: 输入发送，Shift + Enter 换行

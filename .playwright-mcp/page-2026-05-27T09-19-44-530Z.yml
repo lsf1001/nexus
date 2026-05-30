@@ -1,0 +1,186 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e9]:
+        - link "OpenClaw" [ref=e10] [cursor=pointer]:
+          - /url: /overview
+        - generic [ref=e11]:
+          - generic [ref=e12]: ›
+          - generic "main" [ref=e13]
+        - generic [ref=e14]: ›
+        - generic [ref=e15]: 聊天
+      - generic [ref=e16]:
+        - button "打开命令面板" [ref=e17] [cursor=pointer]:
+          - generic [ref=e18]: 搜索
+          - generic [ref=e19]: ⌘K
+        - generic [ref=e20]:
+          - text: "自动滚动模式: 接近底部"
+          - group "颜色模式" [ref=e21]:
+            - button "颜色模式：系统" [ref=e22] [cursor=pointer]:
+              - img [ref=e23]
+            - button "颜色模式：浅睡" [ref=e25] [cursor=pointer]:
+              - img [ref=e26]
+            - button "颜色模式：深色" [pressed] [ref=e32] [cursor=pointer]:
+              - img [ref=e33]
+  - complementary [ref=e36]:
+    - generic [ref=e37]:
+      - generic [ref=e38]:
+        - generic [ref=e39]:
+          - img "OpenClaw" [ref=e40]
+          - generic [ref=e41]:
+            - generic [ref=e42]: 控制
+            - generic [ref=e43]: OpenClaw
+        - button "折叠侧边栏" [ref=e44] [cursor=pointer]:
+          - img [ref=e46]
+      - generic [ref=e49]:
+        - button "新会话" [ref=e51] [cursor=pointer]:
+          - img [ref=e53]
+          - generic [ref=e54]: 新会话
+        - navigation [ref=e55]:
+          - generic [ref=e56]:
+            - button "聊天" [expanded] [ref=e57] [cursor=pointer]:
+              - generic [ref=e58]: 聊天
+              - img [ref=e60]
+            - link "聊天" [ref=e63] [cursor=pointer]:
+              - /url: /chat
+              - img [ref=e65]
+              - generic [ref=e67]: 聊天
+          - generic [ref=e68]:
+            - button "控制" [expanded] [ref=e69] [cursor=pointer]:
+              - generic [ref=e70]: 控制
+              - img [ref=e72]
+            - generic [ref=e74]:
+              - link "概览" [ref=e75] [cursor=pointer]:
+                - /url: /overview
+                - img [ref=e77]
+                - generic [ref=e78]: 概览
+              - link "实例" [ref=e79] [cursor=pointer]:
+                - /url: /instances
+                - img [ref=e81]
+                - generic [ref=e84]: 实例
+              - link "会话" [ref=e85] [cursor=pointer]:
+                - /url: /sessions
+                - img [ref=e87]
+                - generic [ref=e90]: 会话
+              - link "使用情况" [ref=e91] [cursor=pointer]:
+                - /url: /usage
+                - img [ref=e93]
+                - generic [ref=e94]: 使用情况
+              - link "定时任务" [ref=e95] [cursor=pointer]:
+                - /url: /cron
+                - img [ref=e97]
+                - generic [ref=e102]: 定时任务
+          - generic [ref=e103]:
+            - button "代理" [expanded] [ref=e104] [cursor=pointer]:
+              - generic [ref=e105]: 代理
+              - img [ref=e107]
+            - generic [ref=e109]:
+              - link "代理" [ref=e110] [cursor=pointer]:
+                - /url: /agents
+                - img [ref=e112]
+                - generic [ref=e114]: 代理
+              - link "技能" [ref=e115] [cursor=pointer]:
+                - /url: /skills
+                - img [ref=e117]
+                - generic [ref=e119]: 技能
+              - link "节点" [ref=e120] [cursor=pointer]:
+                - /url: /nodes
+                - img [ref=e122]
+                - generic [ref=e124]: 节点
+              - link "梦境" [ref=e125] [cursor=pointer]:
+                - /url: /dreaming
+                - img [ref=e127]
+                - generic [ref=e129]: 梦境
+          - generic [ref=e130]:
+            - button "设置" [expanded] [ref=e131] [cursor=pointer]:
+              - generic [ref=e132]: 设置
+              - img [ref=e134]
+            - link "设置" [ref=e137] [cursor=pointer]:
+              - /url: /config
+              - img [ref=e139]
+              - generic [ref=e142]: 设置
+      - generic [ref=e144]:
+        - link "文档" [ref=e145] [cursor=pointer]:
+          - /url: https://docs.openclaw.ai
+          - img [ref=e147]
+          - generic [ref=e149]: 文档
+          - img [ref=e151]
+        - generic "v2026.5.20" [ref=e154]:
+          - generic [ref=e155]: 版本
+          - generic [ref=e156]: v2026.5.20
+          - img "Gateway 状态：在线" [ref=e157]
+  - main [ref=e158]:
+    - generic [ref=e159]:
+      - generic [ref=e160]:
+        - generic [ref=e161]:
+          - combobox "聊天会话" [ref=e163] [cursor=pointer]:
+            - option "main" [selected]
+          - combobox "聊天模型" [ref=e165] [cursor=pointer]:
+            - option "Default model" [selected]
+          - combobox "聊天思考级别" [ref=e167] [cursor=pointer]:
+            - option "Off" [selected]
+            - option "Off"
+            - option "Minimal"
+            - option "Low"
+            - option "Medium"
+            - option "High"
+        - status
+      - generic [ref=e169]:
+        - button "刷新聊天数据" [ref=e170] [cursor=pointer]:
+          - img [ref=e171]
+          - text: 刷新聊天数据
+        - generic [ref=e174]: "|"
+        - 'button "自动滚动模式: 接近底部" [pressed] [ref=e175] [cursor=pointer]':
+          - img [ref=e176]
+          - text: "自动滚动模式: 接近底部"
+        - button "切换助手思考/工作输出" [pressed] [ref=e179] [cursor=pointer]:
+          - img [ref=e180]
+          - text: 切换助手思考/工作输出
+        - button "切换工具调用和工具结果" [pressed] [ref=e190] [cursor=pointer]:
+          - img [ref=e191]
+          - text: 切换工具调用和工具结果
+        - button "切换专注模式 (隐藏侧边栏 + 页面页眉)" [ref=e193] [cursor=pointer]:
+          - img [ref=e194]
+          - text: 切换专注模式 (隐藏侧边栏 + 页面页眉)
+        - button "显示定时任务会话" [pressed] [ref=e200] [cursor=pointer]:
+          - img [ref=e202]
+          - text: 显示定时任务会话
+    - generic [ref=e205]:
+      - log [ref=e208]:
+        - generic [ref=e210]:
+          - img "七七" [ref=e212]
+          - heading "七七" [level=2] [ref=e213]
+          - generic [ref=e215]: 准备好聊天
+          - paragraph [ref=e216]:
+            - text: 在下方输入消息 · 输入
+            - generic [ref=e217]: /
+            - text: 查看命令
+          - generic [ref=e218]:
+            - button "你能做什么？" [ref=e219] [cursor=pointer]
+            - button "总结我最近的会话" [ref=e220] [cursor=pointer]
+            - button "帮我配置一个频道" [ref=e221] [cursor=pointer]
+            - button "检查系统健康状况" [ref=e222] [cursor=pointer]
+      - generic [ref=e223]:
+        - generic [ref=e224]:
+          - textbox "给 七七 发消息（Enter 发送）" [ref=e225]
+          - status [ref=e226]
+        - generic [ref=e227]:
+          - generic [ref=e228]:
+            - button "附加文件" [ref=e229] [cursor=pointer]:
+              - img [ref=e230]
+              - generic [ref=e232]: 附加文件
+            - button "开始 Talk" [ref=e233] [cursor=pointer]:
+              - img [ref=e234]
+              - generic [ref=e237]: 开始 Talk
+            - button "Talk options" [ref=e238] [cursor=pointer]:
+              - img [ref=e239]
+          - generic [ref=e242]:
+            - button "新会话" [ref=e243] [cursor=pointer]:
+              - img [ref=e244]
+              - generic [ref=e245]: 新会话
+            - button "导出聊天" [disabled] [ref=e246]:
+              - img [ref=e247]
+              - generic [ref=e250]: 导出
+            - button "发送消息" [ref=e251] [cursor=pointer]:
+              - img [ref=e252]
+              - generic [ref=e255]: 发送

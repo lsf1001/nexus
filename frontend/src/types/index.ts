@@ -12,6 +12,7 @@ export interface Conversation {
   messages: Message[];
   createdAt: Date;
   updatedAt: string;
+  channel?: string;
 }
 
 export interface SessionResponse {
@@ -19,10 +20,11 @@ export interface SessionResponse {
   title: string;
   created_at: string;
   updated_at: string;
+  channel?: string;
 }
 
 export interface StreamEvent {
-  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage';
+  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage' | 'wechat_message';
   content?: string;
   token_count?: number;
   context_usage?: number;

@@ -1,0 +1,53 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e7]: "N"
+      - generic [ref=e8]: Nexus
+    - button "新建会话" [ref=e10]:
+      - img [ref=e11]
+      - text: 新建会话
+    - generic [ref=e13]:
+      - generic [ref=e14]: 历史会话
+      - generic [ref=e16] [cursor=pointer]:
+        - generic [ref=e17]: 你好，请介绍一下你自己有哪些能力
+        - generic [ref=e18]:
+          - generic [ref=e19]: 2026/5/27
+          - button [ref=e20]:
+            - img [ref=e21]
+    - button "模型配置" [ref=e24]:
+      - img [ref=e25]
+      - text: 模型配置
+  - generic [ref=e28]:
+    - banner [ref=e29]:
+      - generic [ref=e30]:
+        - button [ref=e31]:
+          - img [ref=e32]
+        - generic [ref=e34]: 聊天
+      - generic [ref=e35]:
+        - button "深色模式" [ref=e36]:
+          - img [ref=e37]
+        - generic [ref=e41]: 已连接
+    - generic [ref=e42]:
+      - generic [ref=e44]:
+        - img "龙猫" [ref=e46]
+        - heading "你好，我是 Nexus" [level=2] [ref=e47]
+        - paragraph [ref=e48]: 我可以帮你解答问题、编写代码、分析数据...
+        - generic [ref=e49]:
+          - button "写代码 Python、JavaScript..." [ref=e50]:
+            - generic [ref=e51]: 写代码
+            - generic [ref=e52]: Python、JavaScript...
+          - button "分析数据 Excel、CSV、JSON..." [ref=e53]:
+            - generic [ref=e54]: 分析数据
+            - generic [ref=e55]: Excel、CSV、JSON...
+          - button "知识问答 解释概念、回答问题..." [ref=e56]:
+            - generic [ref=e57]: 知识问答
+            - generic [ref=e58]: 解释概念、回答问题...
+          - button "写作助手 文章、邮件、报告..." [ref=e59]:
+            - generic [ref=e60]: 写作助手
+            - generic [ref=e61]: 文章、邮件、报告...
+      - generic [ref=e63]:
+        - generic [ref=e64]:
+          - textbox "输入消息..." [ref=e65]
+          - button [disabled] [ref=e66]:
+            - img [ref=e67]
+        - paragraph [ref=e69]: Enter 发送，Shift + Enter 换行

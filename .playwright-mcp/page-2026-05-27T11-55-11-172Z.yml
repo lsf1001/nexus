@@ -1,0 +1,78 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e7]: "N"
+      - generic [ref=e8]: Nexus
+    - button "新建会话" [ref=e10]:
+      - img [ref=e11]
+      - text: 新建会话
+    - generic [ref=e13]:
+      - generic [ref=e14]: 历史会话
+      - generic [ref=e15]:
+        - generic [ref=e16] [cursor=pointer]:
+          - generic [ref=e17]: 帮我写一段 Python 代码
+          - generic [ref=e18]:
+            - generic [ref=e19]: 2026/5/27
+            - button [ref=e20]:
+              - img [ref=e21]
+        - generic [ref=e23] [cursor=pointer]:
+          - generic [ref=e24]: 帮我写一段 Python 代码
+          - generic [ref=e25]:
+            - generic [ref=e26]: 2026/5/27
+            - button [ref=e27]:
+              - img [ref=e28]
+        - generic [ref=e30] [cursor=pointer]:
+          - generic [ref=e31]: 帮我写一段 Python 代码
+          - generic [ref=e32]:
+            - generic [ref=e33]: 2026/5/27
+            - button [ref=e34]:
+              - img [ref=e35]
+        - generic [ref=e37] [cursor=pointer]:
+          - generic [ref=e38]: 帮我写一段 Python 代码
+          - generic [ref=e39]:
+            - generic [ref=e40]: 2026/5/27
+            - button [ref=e41]:
+              - img [ref=e42]
+        - generic [ref=e44] [cursor=pointer]:
+          - generic [ref=e45]: 帮我写一段 Python 代码
+          - generic [ref=e46]:
+            - generic [ref=e47]: 2026/5/27
+            - button [ref=e48]:
+              - img [ref=e49]
+    - button "模型配置" [ref=e52]:
+      - img [ref=e53]
+      - text: 模型配置
+  - generic [ref=e56]:
+    - banner [ref=e57]:
+      - generic [ref=e58]:
+        - button [ref=e59]:
+          - img [ref=e60]
+        - generic [ref=e62]: 聊天
+      - generic [ref=e63]:
+        - button "深色模式" [ref=e64]:
+          - img [ref=e65]
+        - generic [ref=e69]: 已连接
+    - generic [ref=e70]:
+      - generic [ref=e72]:
+        - img "龙猫" [ref=e74]
+        - heading "你好，我是 Nexus" [level=2] [ref=e75]
+        - paragraph [ref=e76]: 我可以帮你解答问题、编写代码、分析数据...
+        - generic [ref=e77]:
+          - button "写代码 Python、JavaScript..." [ref=e78]:
+            - generic [ref=e79]: 写代码
+            - generic [ref=e80]: Python、JavaScript...
+          - button "分析数据 Excel、CSV、JSON..." [ref=e81]:
+            - generic [ref=e82]: 分析数据
+            - generic [ref=e83]: Excel、CSV、JSON...
+          - button "知识问答 解释概念、回答问题..." [ref=e84]:
+            - generic [ref=e85]: 知识问答
+            - generic [ref=e86]: 解释概念、回答问题...
+          - button "写作助手 文章、邮件、报告..." [ref=e87]:
+            - generic [ref=e88]: 写作助手
+            - generic [ref=e89]: 文章、邮件、报告...
+      - generic [ref=e91]:
+        - generic [ref=e92]:
+          - textbox "输入消息..." [ref=e93]
+          - button [disabled] [ref=e94]:
+            - img [ref=e95]
+        - paragraph [ref=e97]: Enter 发送，Shift + Enter 换行

@@ -14,3 +14,9 @@ declare module '*.svg' {
   const content: string;
   export default content;
 }
+
+declare module 'qrcode' {
+  function toDataURL(text: string, options?: object): Promise<string>;
+  function toCanvas(canvas: HTMLCanvasElement, text: string, options?: object): Promise<void>;
+  export = { toDataURL, toCanvas };
+}
