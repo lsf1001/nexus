@@ -234,6 +234,9 @@ def _create_agent_with_model(model_config: dict | None = None, mcp_tools: list[A
 async def lifespan(app: FastAPI):
     """启动时初始化，关闭时清理。"""
     global _agent, _mcp_tools, _wechat_executor
+    # 初始化数据库
+    from .db import init_db
+    init_db()
     # 检查是否启用 MCP（通过环境变量控制）
     if os.environ.get("NEXUS_ENABLE_MCP", "true").lower() == "true":
         _mcp_tools = await load_all_mcp_tools()
