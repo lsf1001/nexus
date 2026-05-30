@@ -18,9 +18,10 @@ class LaunchdManager(DaemonManager):
 
     def _generate_plist(self) -> str:
         """生成 plist 内容。"""
-        nexus_home = Path.home() / ".nexus"
-        python_path = nexus_home / ".venv" / "bin" / "python"
-        nexus_path = nexus_home / "nexus"
+        import os
+        nexus_home = os.path.expanduser("~/.nexus")
+        python_path = os.path.join(nexus_home, ".venv", "bin", "python")
+        run_py = os.path.join(nexus_home, "nexus", "backend", "run.py")
 
         return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -31,16 +32,12 @@ class LaunchdManager(DaemonManager):
     <key>ProgramArguments</key>
     <array>
         <string>{python_path}</string>
-        <string>-m</string>
-        <string>uvicorn</string>
-        <string>nexus.backend.main:app</string>
+        <string>{run_py}</string>
         <string>--host</string>
         <string>0.0.0.0</string>
         <string>--port</string>
         <string>30000</string>
     </array>
-    <key>WorkingDirectory</key>
-    <string>{nexus_path}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -53,8 +50,6 @@ class LaunchdManager(DaemonManager):
     <dict>
         <key>NEXUS_HOME</key>
         <string>{nexus_home}</string>
-        <key>PATH</key>
-        <string>{nexus_home}/.venv/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 </dict>
 </plist>

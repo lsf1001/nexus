@@ -1,153 +1,168 @@
-# Nexus PRD - 智能研究助手
+# Nexus PRD - AI Gateway
 
 ## 1. 产品概述
 
-| 属性   | 值                                 |
-| ---- | --------------------------------- |
-| 产品名称 | Nexus                             |
-| 开发公司 | 夜小白科技有限公司                         |
-| 产品类型 | AI Agent Web 应用                   |
-| 核心功能 | 用户输入研究主题，Agent 自动搜索、规划、执行，生成结构化报告 |
-| 技术原则 | 基于 DeepAgents SDK，不过度封装，不造轮子      |
+| 属性 | 值 |
+|------|-----|
+| 产品名称 | Nexus |
+| 开发公司 | 夜小白科技有限公司 |
+| 产品类型 | AI Gateway Web 应用 |
+| 核心功能 | 会话管理 + 记忆系统 + AI 对话 + 插件扩展 |
+| 技术原则 | 基于 DeepAgents SDK，参考 OpenClaw/Hermes 设计 |
 
 ## 2. 技术架构
 
 ### 2.1 技术栈
 
-| 组件       | 技术               | 说明             |
-| -------- | ---------------- | -------------- |
-| 前端       | React            | SPA 应用         |
-| 后端       | FastAPI          | Python ASGI 框架 |
-| Agent 框架 | DeepAgents 0.5.3 | SDK，不过度封装      |
-| LLM      | MiniMax-M2.7     | OpenAI SDK 兼容  |
-| 通信协议     | WebSocket        | 实时流式双向通信       |
-| 会话存储     | SQLite           | 自建表结构          |
+| 组件 | 技术 | 说明 |
+|------|------|------|
+| 前端 | React + Vite | SPA 应用 |
+| 后端 | FastAPI | Python ASGI 框架 |
+| Agent 框架 | DeepAgents 0.6.4 | SDK，不过度封装 |
+| LLM | MiniMax-M2.7 | OpenAI SDK 兼容 |
+| 通信协议 | WebSocket | 实时流式双向通信 |
+| 会话存储 | SQLite | 自建表结构 |
+| 守护进程 | launchd (macOS) / systemd (Linux) | 常驻 + 开机自启 |
 
-### 2.2 项目结构
+### 2.2 系统架构图
+
+```
+┌─────────────┐         HTTP/WebSocket        ┌─────────────┐
+│   React     │ ◄─────────────────────────────► │   FastAPI   │
+│   Frontend  │                              │   Backend   │
+│   (:30000)  │                              │   (:30000)  │
+└─────────────┘                              └──────┬──────┘
+                                                    │
+                           ┌────────────────────────┼────────────────────────┐
+                           │                        │                        │
+                    ┌──────▼──────┐          ┌──────▼──────┐          ┌──────▼──────┐
+                    │  Session    │          │   Memory    │          │    MCP      │
+                    │  Manager    │          │   Service   │          │   Plugin    │
+                    │  (会话管理)   │          │  (BM25检索)  │          │   System    │
+                    └─────────────┘          └─────────────┘          └─────────────┘
+                           │
+                    ┌──────▼──────┐
+                    │  SQLite     │
+                    │  (会话+记忆) │
+                    └─────────────┘
+```
+
+### 2.3 项目结构
 
 ```
 nexus/
-├── backend/
-│   ├── main.py              # FastAPI 入口 + WebSocket + DeepAgents
-│   ├── config.py            # 配置管理
-│   ├── database.py          # SQLite 连接和表
-│   ├── models.py            # Pydantic 模型
-│   ├── agent.py             # DeepAgents 封装
-│   ├── tools.py             # 自定义工具
-│   ├── session.py           # 会话管理
-│   ├── run.py               # 运行脚本
-│   └── requirements.txt
-│
-└── frontend/
-    └── (React 项目)
+├── frontend/                 # React 前端
+│   ├── src/
+│   │   ├── components/     # UI 组件
+│   │   ├── store/          # Zustand 状态
+│   │   └── App.tsx         # 主应用
+│   └── public/             # 静态资源
+├── nexus/
+│   ├── backend/             # FastAPI 后端
+│   │   ├── main.py         # 服务入口 + WebSocket
+│   │   ├── config.py       # 配置管理
+│   │   ├── agent.py        # DeepAgents 封装
+│   │   ├── sessions.py     # 会话管理（SessionManager）
+│   │   ├── memory.py        # 记忆系统（BM25 + SQLite）
+│   │   ├── db.py           # SQLite 数据库
+│   │   ├── run.py          # 启动脚本（CLI 兼容）
+│   │   └── requirements.txt
+│   └── cli/                 # CLI 命令
+│       ├── main.py         # CLI 入口
+│       ├── daemon/         # 守护进程管理
+│       └── ...
+├── CLAUDE.md               # 开发规范
+├── README.md               # 用户文档
+└── docker-compose.yml      # Docker 备用部署
 ```
 
-### 2.3 技术栈
+## 3. 功能模块
 
-| 组件       | 技术               | 说明             |
-| -------- | ---------------- | -------------- |
-| 前端框架     | React + Vite     | SPA 应用         |
-| 样式       | Tailwind CSS     | 自定义组件          |
-| 状态管理     | Zustand          | 轻量状态管理         |
-| 后端       | FastAPI          | Python ASGI 框架 |
-| Agent 框架 | DeepAgents 0.5.3 | SDK，不过度封装      |
-| LLM      | MiniMax-M2.7 等   | OpenAI SDK 兼容  |
-| 通信协议     | WebSocket        | 实时流式双向通信       |
-| 会话存储     | SQLite           | 自建表结构          |
-| Token 计算 | tiktoken         | 上下文用量计算        |
+### 3.1 会话管理 (SessionManager)
 
-### 2.3 系统架构图
+- 统一会话上下文管理
+- 构建带记忆的 prompt
+- WebSocket 实时通信
+- 线程安全单例模式
 
-```
-┌─────────────┐         WebSocket          ┌─────────────┐
-│   React     │ ◄─────────────────────────► │   FastAPI   │
-│   Frontend  │                             │   Backend   │
-└─────────────┘                             └──────┬──────┘
-                                                   │
-                                            ┌──────▼──────┐
-                                            │ DeepAgents  │
-                                            │    SDK      │
-                                            └──────┬──────┘
-                                                   │
-                                            ┌──────▼──────┐
-                                            │  MiniMax    │
-                                            │   LLM       │
-                                            └─────────────┘
-```
+### 3.2 记忆系统 (MemoryService)
 
-## 3. API 设计
+- BM25 关键词检索（rank-bm25 库）
+- SQLite LIKE 回退
+- 记忆类别：preference / knowledge / context
+- 自动缓存失效
 
-### 3.1 WebSocket 连接
+### 3.3 上下文窗口
 
-- **端点**: `ws://localhost:8000/ws`
-- **连接参数**: `?session_id=xxx` (可选，新建会话时为空)
+- 85% 阈值触发压缩
+- 保留最近 15 条消息
+- 手动触发 `/api/context/compact`
 
-### 3.2 客户端发送消息
+### 3.4 MCP 插件系统
 
-```json
-{
-  "session_id": "uuid-xxx",
-  "content": "今天几号"
-}
-```
+- 动态加载 MCP 服务器
+- 工具函数注册
+- 过滤器支持
 
-| 字段         | 类型     | 必填  | 说明           |
-| ---------- | ------ | --- | ------------ |
-| session_id | string | 否   | 会话ID，空表示新建会话 |
-| content    | string | 是   | 消息内容         |
+### 3.5 微信通道
 
-### 3.3 服务端推送消息
+- 二维码登录
+- 消息回调处理
+- 会话自动创建
 
-```json
-{
-  "type": "thinking",
-  "content": "用户问今天几号，我需要调用工具...",
-  "session_id": "uuid-xxx"
-}
+## 4. API 设计
 
-{
-  "type": "tool_call",
-  "content": "get_current_date",
-  "session_id": "uuid-xxx"
-}
+### 4.1 REST API
 
-{
-  "type": "tool_result",
-  "content": "2026-05-23",
-  "session_id": "uuid-xxx"
-}
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/health` | GET | 健康检查 |
+| `/api/` | GET | API 信息 |
+| `/api/sessions` | GET | 会话列表 |
+| `/api/sessions` | POST | 创建会话 |
+| `/api/sessions/{id}` | GET | 会话详情 |
+| `/api/sessions/{id}` | PUT | 更新会话 |
+| `/api/sessions/{id}` | DELETE | 软删除会话 |
+| `/api/sessions/{id}/restore` | POST | 恢复会话 |
+| `/api/sessions/{id}/permanent` | DELETE | 永久删除 |
+| `/api/sessions/{id}/messages` | GET | 消息历史 |
+| `/api/sessions/{id}/messages` | POST | 添加消息 |
+| `/api/sessions/{id}/history` | GET | AI 用历史 |
+| `/api/model` | GET | 当前模型 |
+| `/api/models` | GET | 模型列表 |
+| `/api/models/switch` | POST | 切换模型 |
+| `/api/models` | POST | 创建模型 |
+| `/api/models/{id}` | PUT | 更新模型 |
+| `/api/models/{id}` | DELETE | 删除模型 |
+| `/api/context` | GET | 上下文信息 |
+| `/api/context/compact` | POST | 触发压缩 |
 
-{
-  "type": "final",
-  "content": "今天是2026年5月23日",
-  "session_id": "uuid-xxx"
-}
+### 4.2 WebSocket
 
-{
-  "type": "done",
-  "content": "",
-  "session_id": "uuid-xxx"
-}
-```
+- **端点**: `ws://localhost:30000/api/ws?token=xxx`
+- **认证**: token 参数
 
-| type        | 说明         |
-| ----------- | ---------- |
-| thinking    | Agent 思考过程 |
-| tool_call   | 工具调用开始     |
-| tool_result | 工具返回结果     |
-| final       | 最终回复       |
-| done        | 结束信号       |
+### 4.3 微信通道 API
 
-## 4. 数据库设计
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/api/channels/wechat/qr` | POST | 获取二维码 |
+| `/api/channels/wechat/status/{key}` | GET | 二维码状态 |
+| `/api/channels/wechat/bind` | GET | 绑定状态 |
+| `/api/channels/wechat/bind` | POST | 绑定账号 |
+| `/api/channels/wechat/bind` | DELETE | 解绑 |
 
-### 4.1 表结构
+## 5. 数据库设计
+
+### 5.1 表结构
 
 ```sql
 -- 会话表
 CREATE TABLE sessions (
     id TEXT PRIMARY KEY,
     title TEXT,
-    show_thinking BOOLEAN DEFAULT TRUE,
+    channel TEXT DEFAULT 'main',
+    deleted_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -156,258 +171,134 @@ CREATE TABLE sessions (
 CREATE TABLE messages (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
-    role TEXT NOT NULL,          -- user / assistant
+    role TEXT NOT NULL,
     content TEXT NOT NULL,
-    thinking_content TEXT,       -- 思考过程（可选存储）
+    thinking_content TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
+
+-- 记忆表
+CREATE TABLE memories (
+    id TEXT PRIMARY KEY,
+    session_id TEXT,
+    category TEXT NOT NULL,
+    memory_type TEXT DEFAULT 'explicit',
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 模型配置表
+CREATE TABLE models (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    api_key TEXT,
+    api_base TEXT,
+    temperature REAL DEFAULT 0.7,
+    is_active INTEGER DEFAULT 0,
+    max_context_tokens INTEGER DEFAULT 200000,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
-### 4.2 索引
+### 5.2 索引
 
 ```sql
 CREATE INDEX idx_messages_session ON messages(session_id);
 CREATE INDEX idx_sessions_updated ON sessions(updated_at);
+CREATE INDEX idx_memories_session ON memories(session_id);
+CREATE INDEX idx_memories_key ON memories(key);
 ```
 
-## 5. DeepAgents 集成
+## 6. CLI 设计
 
-### 5.1 模型配置
+### 6.1 命令
 
-```python
-from langchain_openai import ChatOpenAI
-
-llm = ChatOpenAI(
-    model="MiniMax-M2.7",
-    openai_api_key=os.environ.get("MiniMax_API_KEY"),
-    openai_api_base="https://api.minimaxi.com/v1",
-    temperature=0.7,
-)
+```bash
+nexus install    # 注册 launchd 服务
+nexus start      # 启动服务
+nexus stop       # 停止服务
+nexus restart    # 重启服务
+nexus status     # 查看状态
+nexus logs       # 查看日志
+nexus uninstall  # 移除服务
+nexus setup      # 交互式配置
+nexus doctor     # 环境诊断
+nexus gateway    # 网关子命令（向后兼容）
+nexus config     # 配置管理
 ```
 
-### 5.2 Agent 创建
+### 6.2 launchd plist
 
-```python
-from deepagents import create_deep_agent
-
-agent = create_deep_agent(
-    model=llm,
-    tools=[get_current_date, web_search],
-)
+```xml
+<key>Label</key>
+<string>ai.nexus.gateway</string>
+<key>RunAtLoad</key>
+<true/>
+<key>KeepAlive</key>
+<true/>
 ```
 
-### 5.3 模型配置
+## 7. 部署方式
 
-```python
-MODELS = {
-    "MiniMax-M2.7": {
-        "context_window": 200000,
-        "api_base": "https://api.minimaxi.com/v1",
-    },
-    "MiniMax-M2.8": {
-        "context_window": 200000,
-        "api_base": "https://api.minimaxi.com/v1",
-    },
-    "DeepSeek-V3": {
-        "context_window": 128000,
-        "api_base": "https://api.deepseek.com/v1",
-    },
-}
+### 7.1 对比 OpenClaw / Hermes
+
+| 项目 | Claude Code | OpenClaw | Hermes | Nexus |
+|------|-------------|----------|--------|-------|
+| 安装 | `brew install` | `npm install -g` | `pip install` | `pip install nexus` |
+| 部署 | App Bundle | npm 全局 | venv + pip | .venv + pip |
+| 守护 | 内置 | launchd | launchd | launchd |
+| 自启 | macOS 系统 | RunAtLoad | RunAtLoad | RunAtLoad |
+| 管理 | GUI | CLI | CLI | CLI |
+
+### 7.2 安装流程
+
+```bash
+# 1. 安装
+pip3 install nexus
+
+# 2. 配置 launchd
+nexus install
+
+# 3. 启动
+nexus start
 ```
 
-### 5.4 模型配置
+### 7.3 服务信息
 
-```python
-MODELS = {
-    "MiniMax-M2.7": {
-        "context_window": 200000,
-        "api_base": "https://api.minimaxi.com/v1",
-        "api_key": os.environ.get("MiniMax_API_KEY"),
-    },
-}
-```
+| 项目 | 值 |
+|------|-----|
+| 进程名 | ai.nexus.gateway |
+| 端口 | 30000 |
+| 日志 | ~/.nexus/logs/stdout.log, stderr.log |
+| 数据 | ~/.nexus/nexus.db |
+| PID | ~/.nexus/run/nexus.pid |
 
-**注意：** 当前仅支持 MiniMax-M2.7，后续可根据需要添加更多模型。
+## 8. 开发计划
 
-### 5.5 内置工具
+### Phase 1: 核心功能 ✓
 
-| 工具                                               | 说明                      |
-| ------------------------------------------------ | ----------------------- |
-| write_todos                                      | 任务规划                    |
-| ls, read_file, write_file, edit_file, glob, grep | 文件操作                    |
-| execute                                          | Shell 命令（需要 backend 支持） |
-| task                                             | 子智能体委派                  |
+- [x] FastAPI 服务入口
+- [x] WebSocket 端点
+- [x] DeepAgents 集成
+- [x] SQLite 会话管理
+- [x] SessionManager
+- [x] MemoryService (BM25)
 
-### 5.6 自定义工具
+### Phase 2: CLI 和部署 ✓
 
-| 工具               | 说明                   |
-| ---------------- | -------------------- |
-| get_current_date | 获取当天日期，格式 YYYY-MM-DD |
-| web_search       | DuckDuckGo 搜索        |
-
-## 6. 任务模式
-
-### 6.1 自动判断逻辑
-
-```python
-def is_research_topic(topic: str) -> bool:
-    """
-    研究类关键词：研究、分析、调查、报告、对比、趋势、原理、技术、方案
-    简单问答关键词：今天、明天、昨天、几号、星期几、你、你好、谢谢、再见、1+1、计算、天气
-
-    - 包含研究关键词 → research
-    - 只有简单问答关键词 → simple_chat
-    - 内容较长(>20字符)但无研究关键词 → research
-    """
-```
-
-### 6.2 模式差异
-
-| 模式          | 触发条件 | 行为                   |
-| ----------- | ---- | -------------------- |
-| simple_chat | 简单问答 | 快速回复，跳过详细规划          |
-| research    | 研究任务 | 完整流程：规划→搜索→并行研究→汇总报告 |
-
-## 7. 前端界面设计
-
-### 7.1 技术栈
-
-| 项目   | 技术                   |
-| ---- | -------------------- |
-| 框架   | React + Vite         |
-| 样式   | Tailwind CSS + 自定义组件 |
-| 状态管理 | Zustand              |
-| 组件   | 自定义（无 UI 组件库）        |
-
-### 7.2 布局结构
-
-```
-┌──────────────────────────────────────────────────┐
-│  📋 会话                                  ⚙️     │
-├──────────────┬─────────────────────────────────┤
-│              │                                 │
-│  会话1       │   消息区域                       │
-│  会话2       │   (scrollable)                   │
-│  会话3       │                                 │
-│  ...         │                                 │
-│              │                                 │
-├──────────────┼─────────────────────────────────┤
-│ + 新建会话   │ [☐ 思考] [输入框...    ] [发送] │
-└──────────────┴─────────────────────────────────┘
-```
-
-### 7.3 设置面板
-
-```
-┌──────────────────────────────────────────────────┐
-│  ⚙️ 设置                           [×]           │
-├──────────────────────────────────────────────────┤
-│                                                  │
-│  模型                  上下文用量                  │
-│  ┌────────────────┐  ████████████░░░░░░░░       │
-│  │ MiniMax-M2.7 ▼ │  71% (142K/200K)              │
-│  └────────────────┘                              │
-│                                                  │
-│  可用模型:                                       │
-│  • MiniMax-M2.7 (200K context)                   │
-│                                                  │
-│  ☑ 显示思考过程                                  │
-│                                                  │
-│            [保存]                               │
-└──────────────────────────────────────────────────┘
-```
-
-### 7.4 消息气泡
-
-| 类型    | 内容                           |
-| ----- | ---------------------------- |
-| 用户消息  | 右对齐，蓝色背景                     |
-| AI 思考 | 可折叠，显示推理过程                   |
-| 工具调用  | 可折叠，显示 tool_call/tool_result |
-| AI 回复 | 左对齐，灰色背景，最终回复                |
-
-### 7.5 状态管理
-
-```typescript
-interface AppState {
-  // 会话
-  sessions: Session[];
-  currentSessionId: string;
-
-  // 消息
-  messages: Record<string, Message[]>;
-
-  // 设置
-  currentModel: string;
-  models: ModelConfig[];
-  showThinking: boolean;
-
-  // 连接
-  wsConnected: boolean;
-  contextUsage: number;  // 当前 token 用量
-}
-```
-
-### 7.6 Token 计算
-
-使用 tiktoken 计算消息 token 数：
-
-- 编码: `cl100k_base`
-- 公式: 用量 = 已用 token / context_window * 100%
-
-## 8. 配置管理
-
-### 8.1 环境变量
-
-| 变量               | 说明        | 默认值                          |
-| ---------------- | --------- | ---------------------------- |
-| MiniMax_API_KEY  | API Key   | 从 ~/.claude/settings.json 读取 |
-| MiniMax_API_BASE | API 端点    | https://api.minimaxi.com/v1  |
-| DATABASE_URL     | SQLite 路径 | ./nexus.db                   |
-| SERVER_HOST      | 服务地址      | 0.0.0.0                      |
-| SERVER_PORT      | 服务端口      | 8000                         |
-
-## 9. 依赖清单
-
-### 9.1 Python 依赖
-
-```
-fastapi>=0.100.0
-uvicorn[standard]>=0.23.0
-deepagents==0.5.3
-langchain-openai>=1.0.0
-langchain-community>=0.0.20
-duckduckgo-search>=4.0.0
-aiosqlite>=0.19.0
-pydantic>=2.0.0
-```
-
-## 10. 开发计划
-
-### Phase 1: 后端核心
-
-- [ ] FastAPI 项目初始化
-- [ ] WebSocket 端点
-- [ ] DeepAgents 集成
-- [ ] SQLite 会话管理
-- [ ] 自定义工具实现
-
-### Phase 2: 前端基础
-
-- [ ] React 项目初始化
-- [ ] WebSocket 客户端
-- [ ] Chatbot 界面
-- [ ] 思考过程开关
+- [x] CLI 命令（install/start/stop/status/logs）
+- [x] launchd 守护
+- [x] 开机自启
 
 ### Phase 3: 完善功能
 
-- [ ] 流式输出美化
-- [ ] 历史记录
-- [ ] 错误处理
-- [ ] 加载状态
+- [ ] 前端界面优化
+- [ ] 微信通道完整功能
+- [ ] MCP 插件市场
 
 ---
 
-*最后更新: 2026-05-23*
+*最后更新: 2026-05-30*
 *作者: 夜小白科技有限公司*

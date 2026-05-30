@@ -1,5 +1,8 @@
 """会话管理 API。"""
 
+from __future__ import annotations
+
+import threading
 import uuid
 from typing import Optional
 
@@ -20,8 +23,96 @@ from .db import (
     get_conversation_history,
 )
 from .config import CONFIG
+from .memory import MemoryService
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+
+# ============================================================================
+# SessionManager - 统一会话管理
+# ============================================================================
+
+class SessionManager:
+    """统一会话上下文管理。
+
+    职责：
+    - 管理会话生命周期
+    - 构建带记忆的 prompt
+    - 提供流式响应接口
+    """
+
+    def __init__(self):
+        """初始化会话管理器。"""
+        from .memory import MemoryService
+        self._memory_service: Optional[MemoryService] = None
+
+    @property
+    def memory_service(self) -> MemoryService:
+        """延迟加载记忆服务。"""
+        if self._memory_service is None:
+            from .memory import MemoryService
+            self._memory_service = MemoryService()
+        return self._memory_service
+
+    def build_prompt(self, session_id: str, user_message: str) -> dict:
+        """构建带记忆的 prompt。
+
+        Args:
+            session_id: 会话 ID
+            user_message: 用户消息
+
+        Returns:
+            包含 session_id、messages 的字典
+        """
+        from .db import get_conversation_history
+
+        # 1. 获取记忆上下文
+        memory_context = self.memory_service.build_context(session_id)
+
+        # 2. 获取对话历史
+        history = get_conversation_history(session_id)
+
+        # 3. 构建 system prompt
+        system_content = ""
+        if memory_context:
+            system_content = f"【记忆上下文】\n{memory_context}\n\n"
+        system_content += "你是 Nexus，夜小白科技有限公司开发的 AI 助手。"
+
+        # 4. 组装消息
+        messages = [{"role": "system", "content": system_content}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": user_message})
+
+        return {
+            "session_id": session_id,
+            "messages": messages,
+        }
+
+    def build_context(self, session_id: str) -> str:
+        """构建记忆上下文（供外部调用）。
+
+        Args:
+            session_id: 会话 ID
+
+        Returns:
+            格式化的记忆上下文字符串
+        """
+        return self.memory_service.build_context(session_id)
+
+
+# 全局单例
+_session_manager: Optional[SessionManager] = None
+_manager_lock = threading.Lock()
+
+
+def get_session_manager() -> SessionManager:
+    """获取会话管理器单例（线程安全）。"""
+    global _session_manager
+    if _session_manager is None:
+        with _manager_lock:
+            if _session_manager is None:
+                _session_manager = SessionManager()
+    return _session_manager
 
 
 @router.get("")
@@ -35,7 +126,8 @@ async def create_new_session(body: dict = None) -> dict:
     """创建新会话。"""
     session_id = str(uuid.uuid4())
     title = body.get("title") if body else None
-    return create_session(session_id, title=title)
+    channel = body.get("channel", "main") if body else "main"
+    return create_session(session_id, title=title, channel=channel)
 
 
 @router.get("/deleted")

@@ -8,13 +8,24 @@ if str(project_root) not in sys.path:
 
 import uvicorn
 
+# 动态导入以避免模块路径问题
+from nexus.backend.config import CONFIG
+
 if __name__ == "__main__":
-    # 动态导入以避免模块路径问题
-    from nexus.backend.config import CONFIG
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default=None)
+    parser.add_argument("--port", type=int, default=None)
+    args = parser.parse_args()
+
+    # CLI args override config; config overrides defaults
+    host = args.host or CONFIG.get("server_host", "0.0.0.0")
+    port = args.port or CONFIG.get("server_port", 30000)
 
     uvicorn.run(
         "nexus.backend.main:app",
-        host=CONFIG.get("server_host", "0.0.0.0"),
-        port=CONFIG.get("server_port", 30000),
-        reload=False,  # 禁用热重载，避免进程管理混乱
+        host=host,
+        port=port,
+        reload=False,
     )

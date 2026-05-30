@@ -20,3 +20,10 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Nexus runtime (don't commit)
+.nexus/
+logs/
+run/
+*.db
+*.log
