@@ -31,7 +31,8 @@ run/
 # Playwright test artifacts
 .playwright-mcp/
 _temp/
-*.png
+screenshots/
+test_message.txt
 
 # Frontend
 frontend/package-lock.json
