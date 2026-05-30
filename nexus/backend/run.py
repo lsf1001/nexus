@@ -9,7 +9,13 @@ if str(project_root) not in sys.path:
 import uvicorn
 
 if __name__ == "__main__":
-    # 动态导入以避免模块路径问题
+    # 设置进程名称
+    try:
+        import setproctitle
+        setproctitle.setproctitle("nexus-gateway")
+    except ImportError:
+        pass
+
     from nexus.backend.config import CONFIG
     import argparse
 
