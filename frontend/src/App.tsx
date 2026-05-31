@@ -154,7 +154,7 @@ function App() {
   return (
     <div className={`flex h-screen ${darkMode ? 'dark' : ''}`}>
       {/* 左侧边栏 */}
-      <aside className={`${showSidebar ? 'w-64' : 'w-0'} ${darkMode ? 'bg-[#0f0f0f] border-[#1f1f1f]' : 'bg-white border-[#e0e5dc]'} border-r flex flex-col transition-all duration-200`}>
+      <aside className={`${showSidebar ? 'w-64' : 'w-0'} h-full ${darkMode ? 'bg-[#0f0f0f] border-[#1f1f1f]' : 'bg-white border-[#e0e5dc]'} border-r flex flex-col transition-all duration-200 overflow-hidden`}>
         <div className="flex items-center gap-3 px-4 py-4 border-b ${darkMode ? 'border-[#1f1f1f]' : 'border-[#e0e5dc]'}">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4a7c59] to-[#2d4a3a] flex items-center justify-center">
             <span className="text-white font-bold">N</span>
@@ -256,6 +256,15 @@ function App() {
 
         {/* 底部设置 */}
         <div className={`p-3 border-t ${darkMode ? 'border-[#1f1f1f]' : 'border-[#e0e5dc]'}`}>
+          {/* 显示思考过程开关 */}
+          <div className={`flex items-center justify-between px-3 py-2 rounded-lg mb-2 ${darkMode ? 'bg-[#1a1a1a]' : 'bg-[#f0f2ed]'}`}>
+            <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-[#5a6b52]'}`}>显示思考过程</span>
+            <button
+              onClick={() => useStore.getState().setShowThinking(!useStore.getState().showThinking)}
+              className={`toggle-switch ${useStore.getState().showThinking ? '' : 'off'}`}
+              aria-label="切换显示思考"
+            />
+          </div>
           <button
             onClick={() => setShowModelConfig(true)}
             className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${darkMode ? 'hover:bg-[#1a1a1a] text-gray-400' : 'hover:bg-[#f0f2ed] text-[#5a6b52]'}`}
@@ -279,7 +288,7 @@ function App() {
       </aside>
 
       {/* 主内容区 */}
-      <div className="flex-1 flex flex-col bg-[#f5f7f2]">
+      <div className="flex-1 flex flex-col bg-[#f5f7f2] overflow-hidden">
         {/* 顶部工具栏 */}
         <header className={`flex items-center justify-between px-4 py-3 ${darkMode ? 'bg-[#0f0f0f] border-[#1f1f1f]' : 'bg-white border-[#e0e5dc]'} border-b`}>
           <div className="flex items-center gap-4">

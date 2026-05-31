@@ -566,9 +566,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # 创建或获取会话
             if session_id is None:
-                from .db import create_session
-                session_id = str(uuid.uuid4())
-                create_session(session_id, title="WebSocket 会话", channel="main")
+                session_id = data.get("session_id")
+                if not session_id:
+                    from .db import create_session
+                    session_id = str(uuid.uuid4())
+                    create_session(session_id, title="新会话", channel="main")
 
             # 添加用户消息到历史
             from .db import add_message

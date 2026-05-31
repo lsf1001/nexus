@@ -127,10 +127,22 @@ def get_llm(
     temperature: float | None = None,
 ) -> ChatOpenAI:
     """创建 ChatOpenAI 实例。"""
+    # 如果传入了 api_key，说明是自定义模型，使用传入的参数
+    if api_key:
+        return ChatOpenAI(
+            model=model_name or "gpt-4",
+            openai_api_key=api_key,
+            openai_api_base=api_base,
+            temperature=temperature if temperature is not None else 0.7,
+        )
+    # 没有 api_key 且没有 model_name，返回 None（由调用方处理）
+    if not model_name:
+        raise ValueError("model_name and api_key are both required")
+    # 有 model_name 但没有 api_key，使用 CONFIG 中的
     return ChatOpenAI(
-        model=model_name or CONFIG["model_name"],
-        openai_api_key=api_key or CONFIG["minimax_api_key"],
-        openai_api_base=api_base or CONFIG["minimax_api_base"],
+        model=model_name,
+        openai_api_key=CONFIG["minimax_api_key"],
+        openai_api_base=CONFIG["minimax_api_base"],
         temperature=temperature if temperature is not None else CONFIG["temperature"],
     )
 
@@ -188,27 +200,29 @@ def _create_permissions(project_root: Path) -> list:
     ]
 
 
-def create_subagents() -> list[SubAgent]:
+def create_subagents(model: ChatOpenAI | None = None) -> list[SubAgent]:
     """创建子代理列表。
 
-    定义专门领域的子代理：
-    - code_writer: 代码编写专家
-    - researcher: 研究分析专家
+    Args:
+        model: 可选的 LLM 实例，如果不提供则使用 CONFIG 中的默认模型（可能为 None）
     """
     from .tools import TOOLS
 
+    # 如果没有提供模型且 CONFIG 中也没有 API key，跳过工具
+    use_tools = model is not None or CONFIG.get("minimax_api_key")
+
     code_writer = SubAgent(
         name="code_writer",
-        model=get_llm(model_name=CONFIG["model_name"]),
-        tools=[t for t in TOOLS if t.name in ("write_file", "edit_file", "read_file", "execute")],
+        model=model or get_llm(model_name=CONFIG["model_name"]) if use_tools else None,
+        tools=[t for t in TOOLS if t.name in ("write_file", "edit_file", "read_file", "execute")] if use_tools else [],
         system_prompt="你是一个专业的 Python 代码助手，负责编写高质量、生产级别的代码。",
         description="代码编写专家",
     )
 
     researcher = SubAgent(
         name="researcher",
-        model=get_llm(model_name=CONFIG["model_name"]),
-        tools=[t for t in TOOLS if t.name in ("web_search", "browse")],
+        model=model or get_llm(model_name=CONFIG["model_name"]) if use_tools else None,
+        tools=[t for t in TOOLS if t.name in ("web_search", "browse")] if use_tools else [],
         system_prompt="你是一个专业的研究分析助手，负责搜索和分析信息。",
         description="研究分析专家",
     )
@@ -256,8 +270,8 @@ def create_agent(
     # 创建 backend
     backend = _create_backend(project_root)
 
-    # 子代理
-    subagents = create_subagents()
+    # 子代理（复用主模型的 LLM 实例）
+    subagents = create_subagents(model=llm)
 
     # 权限规则
     permissions = _create_permissions(project_root)

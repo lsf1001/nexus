@@ -197,7 +197,7 @@ function ChatArea({ resetTrigger, onConnectedChange, conversationId: _conversati
   return (
     <div className={`flex-1 flex flex-col ${bgClass}`}>
       {/* 消息区域 */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {displayMessages.length === 0 && !isLoading ? (
           /* 欢迎界面 */
           <div className="flex flex-col items-center justify-center h-full px-4">
