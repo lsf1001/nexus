@@ -6,7 +6,21 @@ build-backend = "hatchling.build"
 name = "nexus"
 version = "1.0.0"
 description = "Nexus - AI Gateway"
+readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "夜小白科技有限公司", email = "contact@yexiaobai.com"}
+]
+keywords = ["ai", "gateway", "chatbot", "nexus"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 dependencies = [
     "fastapi>=0.100.0",
     "uvicorn[standard]",
@@ -22,11 +36,19 @@ dependencies = [
     "rank-bm25>=0.2.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "black",
+    "ruff",
+]
+
 [project.scripts]
 nexus = "nexus.cli.main:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["nexus"]
+packages = ["nexus/", "nexus/cli/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

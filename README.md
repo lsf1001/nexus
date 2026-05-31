@@ -105,7 +105,7 @@ nexus/
 │       └── daemon/          # 守护进程管理
 ├── CLAUDE.md                # 开发规范
 ├── README.md                # 本文档
-└── docker-compose.yml       # Docker 部署（备用）
+└── pyproject.toml           # Python 包配置
 ```
 
 ## API 接口
@@ -181,7 +181,7 @@ nexus gateway run
 
 ```bash
 cd ~/.nexus
-./.venv/bin/python -m pytest nexus/backend/tests/
+./.venv/bin/python -m pytest tests/
 ```
 
 ## 问题排查
