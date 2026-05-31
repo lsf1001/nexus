@@ -11,51 +11,61 @@ Nexus 是夜小白科技有限公司开发的 AI Gateway，基于 DeepAgents 框
 - **MCP 插件** - 支持 MCP 服务器扩展
 - **WebSocket** - 实时流式响应
 - **微信通道** - 集成微信消息处理
+- **多模型支持** - MiniMax / DeepSeek / Qwen 等
 
 ## 技术栈
 
 - **前端**: React + TypeScript + Tailwind CSS + Zustand
 - **后端**: FastAPI + DeepAgents + SQLite
-- **模型**: MiniMax-M2.7
+- **模型**: MiniMax-M2.7 / DeepSeek / Qwen
 - **守护进程**: launchd (macOS) / systemd (Linux)
 
 ## 安装部署
 
-### 方式一：pip 安装（待发布后使用）
+### 方式一：一键安装脚本
 
 ```bash
-pip3 install nexus
-nexus install
-nexus start
+curl -fsSL https://raw.githubusercontent.com/lsf1001/nexus/main/install.sh | bash
 ```
 
-### 方式二：源码安装（开发模式）
+### 方式二：源码安装
 
 ```bash
 # 克隆代码
-git clone https://github.com/your-org/nexus.git ~/.nexus
+git clone https://github.com/lsf1001/nexus.git ~/.nexus
 
 # 创建虚拟环境
 cd ~/.nexus
 python3 -m venv .venv
-./.venv/bin/pip install -e .
+source .venv/bin/activate  # 或 .venv\Scripts\activate (Windows)
 
-# 配置 launchd（常驻）
+# 安装依赖
+pip install -e .
+
+# 配置服务
 nexus install
 
 # 启动服务
 nexus start
 ```
 
+### 方式三：pip 安装（待 PyPI 发布）
+
+```bash
+pip install nexus
+nexus install
+nexus start
+```
+
 ## CLI 命令
 
 ```bash
-nexus install    # 注册 launchd 服务（开机自启）
+nexus install    # 注册服务（开机自启）
 nexus start      # 启动服务
 nexus stop       # 停止服务
 nexus restart    # 重启服务
 nexus status     # 查看运行状态
-nexus logs        # 查看日志（-n 行数，-f 实时跟踪）
+nexus logs       # 查看日志（-n 行数，-f 实时跟踪）
 nexus uninstall  # 移除服务注册
 nexus setup      # 交互式配置向导
 nexus doctor     # 环境诊断
@@ -65,21 +75,21 @@ nexus doctor     # 环境诊断
 
 | 项目 | 值 |
 |------|-----|
-| 进程名 | ai.nexus.gateway |
+| 进程名 | nexus-gateway |
 | 端口 | 30000 |
+| 前端地址 | http://localhost:30000/app/ |
+| API 地址 | http://localhost:30000/api/ |
 | 日志 | ~/.nexus/logs/ |
 | 数据 | ~/.nexus/nexus.db |
-| 守护 | launchd |
-| 自启 | RunAtLoad + KeepAlive |
+| 守护 | launchd (macOS) / systemd (Linux) |
 
 ## 环境变量
 
 ```bash
 export MiniMax_API_KEY="your-api-key"
 export MiniMax_API_BASE="https://api.minimaxi.com/v1"  # 可选
-export MODEL_NAME="MiniMax-M2.7"                        # 可选
-export MODEL_TEMPERATURE="0.7"                         # 可选
-export NEXUS_WS_TOKEN="your-token"                     # WebSocket 认证
+export NEXUS_WS_TOKEN="nexus-default-token"           # WebSocket 认证
+export NEXUS_PORT="30000"                              # 端口
 ```
 
 ## 项目结构
@@ -90,22 +100,26 @@ nexus/
 │   ├── src/
 │   │   ├── components/     # UI 组件
 │   │   ├── store/           # Zustand 状态
-│   │   └── App.tsx          # 主应用
+│   │   ├── types/           # TypeScript 类型
+│   │   ├── App.tsx           # 主应用
+│   │   └── index.css         # 全局样式
 │   └── public/              # 静态资源
 ├── nexus/
 │   ├── backend/             # FastAPI 后端
 │   │   ├── main.py          # 服务入口
-│   │   ├── agent.py         # DeepAgents Agent
-│   │   ├── sessions.py      # 会话管理
+│   │   ├── agent.py          # DeepAgents Agent
+│   │   ├── sessions.py       # 会话管理
 │   │   ├── memory.py        # 记忆系统
-│   │   ├── db.py            # SQLite 数据库
-│   │   └── run.py           # 启动脚本
-│   └── cli/                 # CLI 命令
-│       ├── main.py          # CLI 入口
-│       └── daemon/          # 守护进程管理
-├── CLAUDE.md                # 开发规范
-├── README.md                # 本文档
-└── pyproject.toml           # Python 包配置
+│   │   ├── db.py             # SQLite 数据库
+│   │   └── channels/         # 通道实现
+│   └── cli/                  # CLI 命令
+│       ├── main.py           # CLI 入口
+│       └── daemon/           # 守护进程
+├── tests/                   # 测试
+├── docs/                     # 文档
+├── SPEC.md                   # 产品规格
+├── CLAUDE.md                 # 开发规范
+└── pyproject.toml            # Python 包配置
 ```
 
 ## API 接口
@@ -127,13 +141,12 @@ nexus/
 ### WebSocket 对话
 
 ```javascript
-const ws = new WebSocket('ws://localhost:30000/api/ws?token=your-token');
+const ws = new WebSocket('ws://localhost:30000/api/ws?token=nexus-default-token');
 
 // 发送消息
 ws.send(JSON.stringify({ content: '你好' }));
 
 // 接收消息类型
-// - token_usage: Token 用量
 // - thinking: 思考过程
 // - chunk: 响应内容片段
 // - final: 最终响应
@@ -154,8 +167,7 @@ ws.send(JSON.stringify({ content: '你好' }));
       "api_key": "your-api-key",
       "api_base": "https://api.minimaxi.com/v1",
       "temperature": 0.7,
-      "is_active": true,
-      "max_context_tokens": 200000
+      "is_active": true
     }
   ]
 }
@@ -166,22 +178,28 @@ ws.send(JSON.stringify({ content: '你好' }));
 ### 本地开发
 
 ```bash
-cd ~/.nexus
+# 克隆代码
+git clone https://github.com/lsf1001/nexus.git
+cd nexus
+
+# 创建虚拟环境
 python3 -m venv .venv
-./.venv/bin/pip install -e .
+source .venv/bin/activate
 
-# 前台运行
-./.venv/bin/python -m nexus.backend.run
+# 安装依赖
+pip install -e .
 
-# 或使用 CLI
+# 启动后端
 nexus gateway run
+
+# 前端开发（另开终端）
+cd frontend && npm install && npm run dev
 ```
 
 ### 测试
 
 ```bash
-cd ~/.nexus
-./.venv/bin/python -m pytest tests/
+pytest tests/
 ```
 
 ## 问题排查
@@ -205,8 +223,8 @@ lsof -i :30000
 # 检查服务
 curl http://localhost:30000/health
 
-# 检查 token
-cat ~/.nexus/workspace/config/config.json | grep ws_token
+# 环境诊断
+nexus doctor
 ```
 
 ## 许可证

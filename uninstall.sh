@@ -3,8 +3,6 @@
 # Nexus 卸载脚本
 #
 # Usage:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/lsf1001/nexus/main/install.sh) --uninstall
-# 或
 #   curl -fsSL https://raw.githubusercontent.com/lsf1001/nexus/main/uninstall.sh | bash
 #
 
