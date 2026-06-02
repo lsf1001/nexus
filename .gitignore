@@ -47,3 +47,6 @@ test_message.txt
 # Vite 缓存（不应入 git；历史误建在 nexus/.vite/）
 .vite/
 **/.vite/
+
+# 测试 artifacts（兜底）
+frontend/tests/

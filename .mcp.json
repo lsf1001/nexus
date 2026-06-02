@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "filesystem": {
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["@modelcontextprotocol/server-filesystem", "/Users/yxb/Documents"]
-    }
-  }
-}

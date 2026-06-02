@@ -42,6 +42,16 @@ pip install -e .
 nexus install && nexus start
 ```
 
+> **交付包说明**：仓库不包含 `node_modules/`、`frontend/dist/`、`.venv/`、构建产物（`dist/*.whl` / `dist/*.tar.gz`）与 `__pycache__/` 等运行时缓存。
+> 首次拉取后请先执行：
+> ```bash
+> # 后端依赖
+> python3 -m venv .venv && source .venv/bin/activate
+> pip install -e .
+> # 前端依赖（如需本地构建）
+> cd frontend && npm install
+> ```
+
 ### pip 安装（待 PyPI 发布）
 
 ```bash
