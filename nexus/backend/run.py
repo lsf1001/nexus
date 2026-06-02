@@ -1,23 +1,25 @@
 import sys
 from pathlib import Path
 
+import uvicorn
+
 # 确保项目根目录在 sys.path 中
 project_root = Path(__file__).parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-import uvicorn
-
 if __name__ == "__main__":
     # 设置进程名称
     try:
         import setproctitle
+
         setproctitle.setproctitle("nexus-gateway")
     except ImportError:
         pass
 
-    from nexus.backend.config import CONFIG
     import argparse
+
+    from nexus.backend.config import CONFIG
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default=None)

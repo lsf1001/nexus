@@ -1,8 +1,8 @@
 """测试 tools.py 模块。"""
 
-import pytest
-from unittest.mock import patch, MagicMock
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
 from nexus.backend.tools import _get_save_path
 
 
@@ -98,6 +98,7 @@ class TestYandexSearch:
     def test_search_timeout(self, mock_get):
         """超时时返回错误信息。"""
         import requests
+
         from nexus.backend.tools import yandex_search
 
         mock_get.side_effect = requests.RequestException("timeout")

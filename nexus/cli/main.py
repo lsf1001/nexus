@@ -12,10 +12,11 @@
     nexus doctor     # 环境诊断
     nexus gateway    # 网关子命令（向后兼容）
 """
+
 import typer
 
-from .gateway import gateway_app
 from .config_cmd import config_app
+from .gateway import gateway_app
 
 app = typer.Typer(
     name="nexus",
@@ -30,8 +31,9 @@ app.add_typer(config_app, name="config", help="配置管理")
 @app.command()
 def install() -> None:
     """注册为系统服务（launchd/systemd），实现开机自启和常驻运行。"""
-    from .daemon import get_daemon_manager
     from rich.console import Console
+
+    from .daemon import get_daemon_manager
 
     console = Console()
     console.print("[cyan]注册系统服务...[/cyan]")
@@ -46,8 +48,9 @@ def install() -> None:
 @app.command()
 def uninstall() -> None:
     """移除系统服务注册。"""
-    from .daemon import get_daemon_manager
     from rich.console import Console
+
+    from .daemon import get_daemon_manager
 
     console = Console()
     manager = get_daemon_manager()
@@ -65,8 +68,9 @@ def start(
     replace: bool = typer.Option(False, "--replace", help="替换已有实例"),
 ) -> None:
     """启动 Nexus Gateway 服务（后台运行）。"""
-    from .daemon import get_daemon_manager
     from rich.console import Console
+
+    from .daemon import get_daemon_manager
 
     console = Console()
     manager = get_daemon_manager()
@@ -77,7 +81,7 @@ def start(
             manager.stop()
         else:
             console.print(f"[yellow]网关已在运行中 (PID: {manager.get_pid()})[/yellow]")
-            console.print(f"使用 [cyan]nexus restart[/cyan] 重启")
+            console.print("使用 [cyan]nexus restart[/cyan] 重启")
             return
 
     manager.start()
@@ -87,8 +91,9 @@ def start(
 @app.command()
 def stop() -> None:
     """停止 Nexus Gateway 服务。"""
-    from .daemon import get_daemon_manager
     from rich.console import Console
+
+    from .daemon import get_daemon_manager
 
     console = Console()
     manager = get_daemon_manager()
@@ -104,8 +109,9 @@ def stop() -> None:
 @app.command()
 def restart() -> None:
     """重启 Nexus Gateway 服务。"""
-    from .daemon import get_daemon_manager
     from rich.console import Console
+
+    from .daemon import get_daemon_manager
 
     console = Console()
     manager = get_daemon_manager()
@@ -117,9 +123,11 @@ def restart() -> None:
 def status() -> None:
     """查看 Nexus Gateway 运行状态。"""
     import platform
-    from .daemon import get_daemon_manager
+
     from rich.console import Console
     from rich.panel import Panel
+
+    from .daemon import get_daemon_manager
 
     console = Console()
     manager = get_daemon_manager()
@@ -150,6 +158,7 @@ def logs(
 ) -> None:
     """查看 Nexus Gateway 日志。"""
     from pathlib import Path
+
     from rich.console import Console
 
     console = Console()
@@ -162,10 +171,10 @@ def logs(
 
     if follow:
         # 实时跟踪
-        console.print(f"[cyan]实时跟踪日志 (Ctrl+C 退出)[/cyan]")
+        console.print("[cyan]实时跟踪日志 (Ctrl+C 退出)[/cyan]")
         console.print(f"[dim]文件: {log_file}[/dim]\n")
 
-        with open(log_file, "r", encoding="utf-8") as f:
+        with open(log_file, encoding="utf-8") as f:
             f.seek(0, 2)  # 跳到末尾
             try:
                 while True:
@@ -174,12 +183,13 @@ def logs(
                         console.print(line.rstrip())
                     else:
                         import time
+
                         time.sleep(0.5)
             except KeyboardInterrupt:
                 pass
     else:
         # 显示最后 N 行
-        with open(log_file, "r", encoding="utf-8") as f:
+        with open(log_file, encoding="utf-8") as f:
             all_lines = f.readlines()
             tail_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
 
@@ -191,6 +201,7 @@ def logs(
 def setup() -> None:
     """交互式设置向导。"""
     from .setup_cmd import run_setup
+
     run_setup()
 
 
@@ -200,6 +211,7 @@ def doctor(
 ) -> None:
     """诊断 Nexus 运行环境。"""
     from .doctor import run_doctor
+
     run_doctor(fix=fix)
 
 

@@ -1,11 +1,10 @@
 """测试 models_config 原子写入。"""
 
 import json
-import os
 from pathlib import Path
 from unittest.mock import patch
 
-from nexus.backend.models_config import save_models, MODELS_FILE
+from nexus.backend.models_config import save_models
 
 
 class TestAtomicWrite:

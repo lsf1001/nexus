@@ -64,27 +64,33 @@ function ChatArea({ resetTrigger, onConnectedChange, onSessionCreated, conversat
       case 'thinking': {
         if (messagesRef.current.length > 0) {
           const lastIdx = messagesRef.current.length - 1;
-          messagesRef.current[lastIdx].thinking =
-            (messagesRef.current[lastIdx].thinking || '') + data.content;
-          setConversationMessages([...messagesRef.current]);
+          const last = messagesRef.current[lastIdx];
+          if (last) {
+            last.thinking = (last.thinking || '') + data.content;
+            setConversationMessages([...messagesRef.current]);
+          }
         }
         break;
       }
       case 'chunk': {
         if (messagesRef.current.length > 0) {
           const lastIdx = messagesRef.current.length - 1;
-          if (messagesRef.current[lastIdx].role === 'assistant') {
-            messagesRef.current[lastIdx].content += data.content;
+          const last = messagesRef.current[lastIdx];
+          if (last && last.role === 'assistant') {
+            last.content += data.content;
+            setConversationMessages([...messagesRef.current]);
           }
-          setConversationMessages([...messagesRef.current]);
         }
         break;
       }
       case 'final': {
         if (messagesRef.current.length > 0) {
           const lastIdx = messagesRef.current.length - 1;
-          messagesRef.current[lastIdx].content = data.content || '';
-          setConversationMessages([...messagesRef.current]);
+          const last = messagesRef.current[lastIdx];
+          if (last) {
+            last.content = data.content || '';
+            setConversationMessages([...messagesRef.current]);
+          }
         }
         setIsLoading(false);
         break;

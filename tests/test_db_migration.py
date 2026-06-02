@@ -1,8 +1,6 @@
 """测试 db.py 迁移逻辑。"""
 
 import sqlite3
-import tempfile
-from pathlib import Path
 
 import pytest
 

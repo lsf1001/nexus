@@ -4,43 +4,31 @@
 参考 OpenClaw: openclaw/plugin-sdk/channel-core
 """
 
-import asyncio
 import base64
 import json
 import logging
-import os
 import random
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
 
 import httpx
 
 from . import (
     ChannelConfig,
     ChannelManifest,
-    ChannelMessageAdapter,
-    ChannelSecurity,
     ChannelStatus,
-    DMPolicy,
     DefaultChannelSecurity,
-    DefaultSessionGrammar,
     InMemorySessionManager,
-    InboundMessage,
-    MessageContent,
     MessageReceipt,
     MessageReceiptStatus,
-    MessageType,
     OutboundMessage,
     SecurityResult,
     Sender,
-    Session,
-    SessionManager,
     TextOnlyAdapter,
     define_channel_plugin_entry,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +44,10 @@ QR_LONG_POLL_TIMEOUT_MS = 35_000
 
 # ========== 账号管理 ==========
 
+
 class WeixinAccount:
     """微信账号"""
+
     def __init__(
         self,
         account_id: str,
@@ -72,6 +62,7 @@ class WeixinAccount:
 
 
 # ========== API 客户端 ==========
+
 
 async def _api_post(
     base_url: str,
@@ -122,6 +113,7 @@ def _build_base_info() -> dict:
 
 # ========== 微信消息适配器 ==========
 
+
 class WechatMessageAdapter(TextOnlyAdapter):
     """微信消息适配器"""
 
@@ -166,6 +158,7 @@ class WechatMessageAdapter(TextOnlyAdapter):
 
 # ========== 微信通道插件 ==========
 
+
 class WechatChannelPlugin:
     """微信通道插件
 
@@ -185,8 +178,8 @@ class WechatChannelPlugin:
         )
 
         # 配置
-        self._config: Optional[ChannelConfig] = None
-        self._account: Optional[WeixinAccount] = None
+        self._config: ChannelConfig | None = None
+        self._account: WeixinAccount | None = None
 
         # 状态
         self._status = ChannelStatus.DISCONNECTED
@@ -277,7 +270,7 @@ class WechatChannelPlugin:
     def _get_account_path(self, account_id: str) -> Path:
         return self._get_state_dir() / "accounts" / f"{account_id}.json"
 
-    def _load_account(self, account_id: str) -> Optional[WeixinAccount]:
+    def _load_account(self, account_id: str) -> WeixinAccount | None:
         """加载账号
 
         注意: Token 使用 base64 编码存储，非真正加密。
@@ -288,7 +281,7 @@ class WechatChannelPlugin:
             return None
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
 
             encoded_token = data.get("token", "")
@@ -357,14 +350,17 @@ class WechatChannelPlugin:
 
 # ========== 工厂函数 ==========
 
-@define_channel_plugin_entry(ChannelManifest(
-    id="wechat",
-    name="WeChat",
-    version="1.0.0",
-    description="微信通道插件",
-    channel=True,
-    supports_dm=True,
-))
+
+@define_channel_plugin_entry(
+    ChannelManifest(
+        id="wechat",
+        name="WeChat",
+        version="1.0.0",
+        description="微信通道插件",
+        channel=True,
+        supports_dm=True,
+    )
+)
 def create_wechat_channel() -> WechatChannelPlugin:
     """创建微信通道插件实例"""
     return WechatChannelPlugin()

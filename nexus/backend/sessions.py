@@ -4,25 +4,23 @@ from __future__ import annotations
 
 import threading
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
 from .db import (
+    add_message,
     create_session,
-    get_session,
-    list_sessions,
-    list_deleted_sessions,
-    update_session,
     delete_session,
-    restore_session,
+    get_conversation_history,
+    get_messages,
+    get_session,
+    list_deleted_sessions,
+    list_sessions,
     permanent_delete_session,
     purge_old_sessions,
-    get_messages,
-    add_message,
-    get_conversation_history,
+    restore_session,
+    update_session,
 )
-from .config import CONFIG
 from .memory import MemoryService
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -31,6 +29,7 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 # ============================================================================
 # SessionManager - 统一会话管理
 # ============================================================================
+
 
 class SessionManager:
     """统一会话上下文管理。
@@ -43,7 +42,7 @@ class SessionManager:
 
     def __init__(self):
         """初始化会话管理器。"""
-        self._memory_service: Optional[MemoryService] = None
+        self._memory_service: MemoryService | None = None
 
     @property
     def memory_service(self) -> MemoryService:
@@ -102,7 +101,7 @@ class SessionManager:
 
 
 # 全局单例
-_session_manager: Optional[SessionManager] = None
+_session_manager: SessionManager | None = None
 _manager_lock = threading.Lock()
 
 
@@ -151,14 +150,11 @@ async def get_session_detail(session_id: str) -> dict:
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     messages = get_messages(session_id)
-    return {
-        **session,
-        "messages": messages
-    }
+    return {**session, "messages": messages}
 
 
 @router.put("/{session_id}")
-async def update_session_title(session_id: str, title: Optional[str] = None) -> dict:
+async def update_session_title(session_id: str, title: str | None = None) -> dict:
     """更新会话标题。"""
     session = update_session(session_id, title=title)
     if not session:
@@ -209,10 +205,7 @@ async def get_session_conversation_history(session_id: str) -> list[dict]:
 
 
 @router.post("/{session_id}/messages")
-async def add_message_to_session(
-    session_id: str,
-    body: dict
-) -> dict:
+async def add_message_to_session(session_id: str, body: dict) -> dict:
     """添加消息到会话。"""
     session = get_session(session_id)
     if not session:

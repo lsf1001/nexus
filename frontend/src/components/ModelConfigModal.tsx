@@ -45,7 +45,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
       const res = await fetch(`${apiUrl}/models`);
       const data = await res.json();
       setModels(data);
-    } catch (e) {
+    } catch {
       console.error('加载模型失败');
     }
   };
@@ -103,7 +103,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
       } else {
         setError(data.error || '删除失败');
       }
-    } catch (e) {
+    } catch {
       setError('删除失败');
     } finally {
       setLoading(false);
@@ -125,7 +125,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
       } else {
         setError(data.error || '切换失败');
       }
-    } catch (e) {
+    } catch {
       setError('切换失败');
     } finally {
       setLoading(false);
@@ -169,7 +169,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
           setError(data.error || '更新失败');
         }
       }
-    } catch (e) {
+    } catch {
       setError(isCreating ? '创建失败' : '更新失败');
     } finally {
       setLoading(false);

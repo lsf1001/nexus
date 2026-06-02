@@ -1,7 +1,7 @@
 """守护进程管理抽象基类。"""
+
 import platform
 from abc import ABC, abstractmethod
-from pathlib import Path
 
 
 class DaemonManager(ABC):

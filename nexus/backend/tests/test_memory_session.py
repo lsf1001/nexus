@@ -1,8 +1,7 @@
 """测试会话管理和记忆机制"""
 
-import pytest
+from nexus.backend.memory import CATEGORY_PREFERENCE, MemoryService
 from nexus.backend.sessions import SessionManager, get_session_manager
-from nexus.backend.memory import MemoryService, CATEGORY_PREFERENCE, CATEGORY_KNOWLEDGE
 
 
 class TestSessionManager:
@@ -59,10 +58,7 @@ class TestMemoryService:
 
         # 保存记忆
         result = ms.save_memory(
-            category=CATEGORY_PREFERENCE,
-            key="test_key",
-            value="test_value",
-            memory_type="explicit"
+            category=CATEGORY_PREFERENCE, key="test_key", value="test_value", memory_type="explicit"
         )
 
         assert result["key"] == "test_key"
@@ -74,14 +70,11 @@ class TestMemoryService:
         ms = MemoryService()
 
         # 保存测试记忆
-        result = ms.save_memory(
-            category="preference",
-            key="简洁偏好",
-            value="用户喜欢简洁回答"
-        )
+        ms.save_memory(category="preference", key="简洁偏好", value="用户喜欢简洁回答")
 
         # 强制使用数据库搜索（通过空关键词触发回退或直接测试 db_search_memory）
         from nexus.backend.db import search_memory as db_search
+
         results = db_search("简洁", memory_type=None, limit=5)
 
         # 验证数据库搜索能找到刚保存的记忆
@@ -92,11 +85,7 @@ class TestMemoryService:
         ms = MemoryService()
 
         # 保存一些记忆
-        ms.save_memory(
-            category=CATEGORY_PREFERENCE,
-            key="语言偏好",
-            value="用户喜欢中文回答"
-        )
+        ms.save_memory(category=CATEGORY_PREFERENCE, key="语言偏好", value="用户喜欢中文回答")
 
         context = ms.build_context("any-session")
 
@@ -109,11 +98,7 @@ class TestMemoryService:
         ms = MemoryService()
 
         # 保存后删除
-        result = ms.save_memory(
-            category="test",
-            key="delete_me",
-            value="delete this"
-        )
+        result = ms.save_memory(category="test", key="delete_me", value="delete this")
 
         memory_id = result["id"]
         success = ms.delete_memory(memory_id, hard=True)
@@ -142,11 +127,7 @@ class TestMemorySearchEdgeCases:
 
         # 添加多条记忆
         for i in range(10):
-            ms.save_memory(
-                category="test",
-                key=f"key_{i}",
-                value=f"value_{i}"
-            )
+            ms.save_memory(category="test", key=f"key_{i}", value=f"value_{i}")
 
         results = ms.search_memory("key", limit=3)
         assert len(results) <= 3
@@ -160,11 +141,7 @@ class TestSessionMemoryIntegration:
         sm = SessionManager()
 
         # 先添加记忆
-        sm.memory_service.save_memory(
-            category=CATEGORY_PREFERENCE,
-            key="用户名字",
-            value="张三"
-        )
+        sm.memory_service.save_memory(category=CATEGORY_PREFERENCE, key="用户名字", value="张三")
 
         # 构建 prompt 时应该包含记忆
         result = sm.build_prompt("session-with-memory", "你好")

@@ -1,4 +1,5 @@
 """macOS launchd 守护进程管理。"""
+
 import re
 import subprocess
 import sys
@@ -20,6 +21,7 @@ class LaunchdManager(DaemonManager):
     def _generate_plist(self) -> str:
         """生成 plist 内容。"""
         import os
+
         nexus_home = os.path.expanduser("~/.nexus")
         python_path = os.path.join(nexus_home, ".venv", "bin", "python")
         run_py = os.path.join(nexus_home, "nexus", "backend", "run.py")

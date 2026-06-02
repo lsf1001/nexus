@@ -1,26 +1,25 @@
 import datetime
-import requests
 from pathlib import Path
-from typing import Optional, List
-from langchain_core.tools import tool as langchain_tool
+
+import requests
 from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_community.tools.wikipedia.tool import WikipediaQueryRun
 from langchain_community.tools.file_management import (
+    CopyFileTool,
+    DeleteFileTool,
+    MoveFileTool,
     ReadFileTool,
     WriteFileTool,
-    ListDirectoryTool,
-    CopyFileTool,
-    MoveFileTool,
-    DeleteFileTool,
 )
+from langchain_community.tools.wikipedia.tool import WikipediaQueryRun
 from langchain_community.utilities.wikipedia import WikipediaAPIWrapper
+from langchain_core.tools import tool as langchain_tool
 
 from .config import CONFIG
-from .memory import MemoryService, EvolutionService, CATEGORY_PREFERENCE, CATEGORY_KNOWLEDGE, CATEGORY_CONTEXT
+from .memory import EvolutionService, MemoryService
 
 # 全局服务实例
-_memory_service: Optional[MemoryService] = None
-_evolution_service: Optional[EvolutionService] = None
+_memory_service: MemoryService | None = None
+_evolution_service: EvolutionService | None = None
 
 
 def get_memory_service() -> MemoryService:
@@ -155,6 +154,7 @@ def list_dir(path: str | None = None) -> str:
 # 记忆工具
 # ============================================================================
 
+
 @langchain_tool
 def save_memory(category: str, key: str, value: str) -> str:
     """保存记忆。
@@ -167,12 +167,12 @@ def save_memory(category: str, key: str, value: str) -> str:
         value: 记忆内容，要保存的具体信息
     """
     ms = get_memory_service()
-    result = ms.save_memory(category=category, key=key, value=value, memory_type="explicit")
+    ms.save_memory(category=category, key=key, value=value, memory_type="explicit")
     return f"已保存记忆：[{category}] {key} = {value}"
 
 
 @langchain_tool
-def read_memory(category: Optional[str] = None) -> str:
+def read_memory(category: str | None = None) -> str:
     """读取已保存的记忆。
 
     Args:

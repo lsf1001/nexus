@@ -9,9 +9,9 @@
 
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any
 
-from .base import Channel, ChannelConfig, ChannelMessage, ChannelType
+from .base import Channel, ChannelMessage
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +63,7 @@ class Gateway:
                 logger.info(f"Channel unregistered: {channel_id}")
 
                 # 清理会话映射
-                sessions_to_remove = [
-                    sid for sid, cid in self._session_to_channel.items() if cid == channel_id
-                ]
+                sessions_to_remove = [sid for sid, cid in self._session_to_channel.items() if cid == channel_id]
                 for sid in sessions_to_remove:
                     self._session_to_channel.pop(sid, None)
 
@@ -126,7 +124,9 @@ class Gateway:
         else:
             # 创建新会话
             session_id = message.session_id if message.session_id else f"{message.channel_id}:{message.user_id}"
-            await self.db_session.create_session(session_id, title=message.content[:50] if message.content else "新会话")
+            await self.db_session.create_session(
+                session_id, title=message.content[:50] if message.content else "新会话"
+            )
 
         # 绑定映射
         async with self._lock:
@@ -135,7 +135,7 @@ class Gateway:
 
         return session_id
 
-    async def _find_existing_session(self, message: ChannelMessage) -> Optional[str]:
+    async def _find_existing_session(self, message: ChannelMessage) -> str | None:
         """从数据库查找已有会话
 
         Args:
@@ -145,10 +145,7 @@ class Gateway:
             session_id 或 None
         """
         try:
-            sessions = await self.db_session.list_sessions(limit=10)
-            for session in sessions:
-                # 简化：查找最新的同类型会话
-                pass
+            await self.db_session.list_sessions(limit=10)
         except Exception:
             pass
         return None
@@ -176,10 +173,7 @@ class Gateway:
 
             # 调用 Agent
             full_response = ""
-            async for chunk in self.agent.astream(
-                {"messages": messages},
-                stream_mode="updates"
-            ):
+            async for chunk in self.agent.astream({"messages": messages}, stream_mode="updates"):
                 if not isinstance(chunk, dict):
                     continue
                 if "model" in chunk:
@@ -202,7 +196,7 @@ class Gateway:
         session_id: str,
         role: str,
         original_message: ChannelMessage,
-        content: Optional[str] = None,
+        content: str | None = None,
     ) -> None:
         """保存消息到数据库
 
@@ -214,11 +208,9 @@ class Gateway:
         """
         try:
             import uuid
-            from datetime import datetime
 
             msg_id = str(uuid.uuid4())
             msg_content = content or original_message.content
-            now = datetime.now().isoformat()
 
             await self.db_messages.add_message(
                 msg_id=msg_id,
@@ -282,7 +274,7 @@ class Gateway:
         except Exception as e:
             logger.error(f"Error sending error message: {e}")
 
-    async def get_channel_status(self, channel_id: str) -> Optional[dict]:
+    async def get_channel_status(self, channel_id: str) -> dict | None:
         """获取通道状态
 
         Args:

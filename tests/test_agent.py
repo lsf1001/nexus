@@ -1,14 +1,13 @@
 """测试 agent.py 模块。"""
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
 from nexus.backend.agent import (
-    _scan_content,
-    _load_identity,
     _build_system_prompt,
+    _scan_content,
     get_system_prompt,
-    reload_system_prompt,
     is_research_topic,
+    reload_system_prompt,
 )
 
 
@@ -72,7 +71,7 @@ class TestIsResearchTopic:
 class TestSystemPrompt:
     """测试系统提示词相关函数。"""
 
-    @patch('nexus.backend.agent._load_identity')
+    @patch("nexus.backend.agent._load_identity")
     def test_build_system_prompt_with_identity(self, mock_load):
         """有身份配置时应该包含身份。"""
         mock_load.return_value = "我是 Nexus 助手"
@@ -81,7 +80,7 @@ class TestSystemPrompt:
         assert "【能力】" in prompt
         assert "【安全规则】" in prompt
 
-    @patch('nexus.backend.agent._load_identity')
+    @patch("nexus.backend.agent._load_identity")
     def test_build_system_prompt_without_identity(self, mock_load):
         """无身份配置时应该使用默认身份。"""
         mock_load.return_value = ""
@@ -96,7 +95,7 @@ class TestSystemPrompt:
 
     def test_reload_system_prompt(self):
         """重新加载应该清除缓存。"""
-        prompt1 = get_system_prompt()
+        get_system_prompt()
         reload_system_prompt()
         prompt2 = get_system_prompt()
         # After reload, should be different object (though content may be same)

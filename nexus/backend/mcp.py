@@ -2,13 +2,12 @@
 
 支持从 .mcp.json 配置文件加载 MCP 服务器工具。
 """
+
+import asyncio
 import json
 import logging
-import asyncio
 from pathlib import Path
 from typing import Any
-
-from .config import CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +91,11 @@ async def _load_tools_for_server(
 
         # 使用 session=None + connection 参数
         # 这样工具会在每次调用时创建新的临时会话，避免会话生命周期问题
-        tools = await asyncio.wait_for(
-            load_mcp_tools(session=None, connection=conn_config),
-            timeout=30.0
-        )
+        tools = await asyncio.wait_for(load_mcp_tools(session=None, connection=conn_config), timeout=30.0)
         logger.info(f"从 MCP 服务器 {server_name} 加载了 {len(tools)} 个工具")
         return tools
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(f"加载 MCP 服务器 {server_name} 超时（30秒）")
         return []
     except Exception as e:
@@ -129,12 +125,15 @@ async def load_all_mcp_tools() -> list[Any]:
 
     # 过滤掉与内置工具重复的工具（按名称）
     from .tools import TOOLS
+
     built_in_names = {t.name for t in TOOLS}
     filtered_tools = [t for t in all_tools if t.name not in built_in_names]
 
     duplicate_count = len(all_tools) - len(filtered_tools)
     if duplicate_count > 0:
-        logger.warning(f"过滤了 {duplicate_count} 个与内置工具重复的 MCP 工具: {[t.name for t in all_tools if t.name in built_in_names]}")
+        logger.warning(
+            f"过滤了 {duplicate_count} 个与内置工具重复的 MCP 工具: {[t.name for t in all_tools if t.name in built_in_names]}"
+        )
 
     logger.info(f"共加载 {len(filtered_tools)} 个 MCP 工具（过滤后）")
     return filtered_tools

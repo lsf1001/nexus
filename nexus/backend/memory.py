@@ -8,56 +8,78 @@
 """
 
 import json
-import re
 import uuid
-from typing import Optional, Any
 
 try:
     from rank_bm25 import BM25Okapi
+
     BM25_AVAILABLE = True
 except ImportError:
     BM25_AVAILABLE = False
 
 from .db import (
-    save_memory as db_save_memory,
-    get_memory as db_get_memory,
-    search_memory as db_search_memory,
-    delete_memory as db_delete_memory,
-    list_user_memory as db_list_user_memory,
-    get_session_memory as db_get_session_memory,
-    update_tool_stats as db_update_tool_stats,
-    get_tool_stats as db_get_tool_stats,
-    get_all_tool_stats as db_get_all_tool_stats,
-    update_session_stats as db_update_session_stats,
-    get_session_stats as db_get_session_stats,
-    end_session as db_end_session,
     cleanup_expired_memory,
-    cleanup_low_confidence_memory,
     cleanup_low_access_memory,
+    cleanup_low_confidence_memory,
 )
-from .config import CONFIG
-
+from .db import (
+    delete_memory as db_delete_memory,
+)
+from .db import (
+    get_all_tool_stats as db_get_all_tool_stats,
+)
+from .db import (
+    get_memory as db_get_memory,
+)
+from .db import (
+    get_session_memory as db_get_session_memory,
+)
+from .db import (
+    get_tool_stats as db_get_tool_stats,
+)
+from .db import (
+    list_user_memory as db_list_user_memory,
+)
+from .db import (
+    save_memory as db_save_memory,
+)
+from .db import (
+    search_memory as db_search_memory,
+)
+from .db import (
+    update_tool_stats as db_update_tool_stats,
+)
 
 # ============================================================================
 # 常量定义
 # ============================================================================
 
-MEMORY_TYPE_EXPLICIT = "explicit"    # 用户显式保存
-MEMORY_TYPE_EVOLVED = "evolved"       # 自动进化生成
-MEMORY_TYPE_SESSION = "session"       # 会话级记忆
+MEMORY_TYPE_EXPLICIT = "explicit"  # 用户显式保存
+MEMORY_TYPE_EVOLVED = "evolved"  # 自动进化生成
+MEMORY_TYPE_SESSION = "session"  # 会话级记忆
 
-CATEGORY_PREFERENCE = "preference"   # 用户偏好
-CATEGORY_KNOWLEDGE = "knowledge"      # 用户告诉的事实
-CATEGORY_CONTEXT = "context"         # 当前会话上下文
-CATEGORY_SUMMARY = "summary"         # 会话摘要
+CATEGORY_PREFERENCE = "preference"  # 用户偏好
+CATEGORY_KNOWLEDGE = "knowledge"  # 用户告诉的事实
+CATEGORY_CONTEXT = "context"  # 当前会话上下文
+CATEGORY_SUMMARY = "summary"  # 会话摘要
 
 # 自动捕获触发词
 AUTO_CAPTURE_TRIGGERS = [
-    "告诉过我", "我之前", "你应该知道",
-    "记住", "别忘了", "重要的是",
-    "我的", "我喜欢", "我习惯",
-    "我是", "我在做", "我做的是",
-    "别忘了", "要记住", "记住这点",
+    "告诉过我",
+    "我之前",
+    "你应该知道",
+    "记住",
+    "别忘了",
+    "重要的是",
+    "我的",
+    "我喜欢",
+    "我习惯",
+    "我是",
+    "我在做",
+    "我做的是",
+    "别忘了",
+    "要记住",
+    "记住这点",
 ]
 
 # 自动捕获的类别映射
@@ -74,13 +96,14 @@ TRIGGER_TO_CATEGORY = {
 # MemoryService - 记忆服务
 # ============================================================================
 
+
 class MemoryService:
     """记忆服务 - 对 Agent 暴露的统一接口"""
 
     def __init__(self):
         """初始化记忆服务。"""
         self.user_id = "default"
-        self._bm25: Optional[BM25Okapi] = None
+        self._bm25: BM25Okapi | None = None
         self._bm25_memories: list[dict] = []
         # 缓存分词结果，避免 dirty 重建时对未变化的文档重复分词
         self._bm25_tokens: list[list[str]] = []
@@ -137,9 +160,9 @@ class MemoryService:
         key: str,
         value: str,
         memory_type: str = MEMORY_TYPE_EXPLICIT,
-        session_id: Optional[str] = None,
-        metadata: Optional[dict] = None,
-        expires_at: Optional[str] = None
+        session_id: str | None = None,
+        metadata: dict | None = None,
+        expires_at: str | None = None,
     ) -> dict:
         """保存记忆。
 
@@ -164,7 +187,7 @@ class MemoryService:
             key=full_key,
             value=value,
             metadata=metadata,
-            expires_at=expires_at
+            expires_at=expires_at,
         )
 
         # 标记 BM25 需要重建
@@ -173,10 +196,7 @@ class MemoryService:
         return result
 
     def get_memory(
-        self,
-        session_id: Optional[str] = None,
-        category: Optional[str] = None,
-        memory_type: Optional[str] = None
+        self, session_id: str | None = None, category: str | None = None, memory_type: str | None = None
     ) -> list[dict]:
         """获取记忆列表。
 
@@ -185,13 +205,9 @@ class MemoryService:
             category: 分类过滤
             memory_type: 记忆类型过滤
         """
-        return db_get_memory(
-            session_id=session_id,
-            memory_type=memory_type,
-            category=category
-        )
+        return db_get_memory(session_id=session_id, memory_type=memory_type, category=category)
 
-    def search_memory(self, keyword: str, memory_type: Optional[str] = None, limit: int = 10) -> list[dict]:
+    def search_memory(self, keyword: str, memory_type: str | None = None, limit: int = 10) -> list[dict]:
         """搜索记忆（BM25 关键词检索）。
 
         Args:
@@ -295,7 +311,7 @@ class MemoryService:
             self._invalidate_bm25()
         return result
 
-    def list_memory(self, category: Optional[str] = None) -> list[dict]:
+    def list_memory(self, category: str | None = None) -> list[dict]:
         """列出所有记忆。
 
         Args:
@@ -308,6 +324,7 @@ class MemoryService:
 # EvolutionService - 进化服务
 # ============================================================================
 
+
 class EvolutionService:
     """进化服务 - 自动学习和优化"""
 
@@ -319,7 +336,7 @@ class EvolutionService:
         """
         self.memory = memory_service
 
-    def auto_capture(self, user_content: str, session_id: str) -> Optional[dict]:
+    def auto_capture(self, user_content: str, session_id: str) -> dict | None:
         """自动捕获用户偏好。
 
         Args:
@@ -354,7 +371,7 @@ class EvolutionService:
                         value=value,
                         memory_type=MEMORY_TYPE_EVOLVED,
                         session_id=session_id,
-                        metadata={"source": "auto_capture", "confidence": 0.6}
+                        metadata={"source": "auto_capture", "confidence": 0.6},
                     )
 
         return None
@@ -381,12 +398,7 @@ class EvolutionService:
         stats = db_get_tool_stats(tool_name)
 
         if not stats:
-            return {
-                "tool_name": tool_name,
-                "reliability": 0.5,
-                "suggestion": "unknown",
-                "can_auto_use": True
-            }
+            return {"tool_name": tool_name, "reliability": 0.5, "suggestion": "unknown", "can_auto_use": True}
 
         total = stats["success_count"] + stats["failure_count"]
         reliability = stats["success_count"] / total if total > 0 else 0.5
@@ -414,7 +426,7 @@ class EvolutionService:
             "suggestion": suggestion,
             "can_auto_use": can_auto_use,
             "success_count": stats["success_count"],
-            "failure_count": stats["failure_count"]
+            "failure_count": stats["failure_count"],
         }
 
     def distill(self, session_id: str, messages: list[dict]) -> list[dict]:
@@ -452,11 +464,7 @@ class EvolutionService:
                     value=f"工具 {tool_name} 在该会话中成功使用 {stats['success']} 次",
                     memory_type=MEMORY_TYPE_EVOLVED,
                     session_id=session_id,
-                    metadata={
-                        "source": "distill",
-                        "confidence": 0.6,
-                        "tool_name": tool_name
-                    }
+                    metadata={"source": "distill", "confidence": 0.6, "tool_name": tool_name},
                 )
                 distilled.append(tool_name)
 
@@ -472,7 +480,7 @@ class EvolutionService:
                 value=summary,
                 memory_type=MEMORY_TYPE_SESSION,
                 session_id=session_id,
-                expires_at=None  # session 类型默认不过期
+                expires_at=None,  # session 类型默认不过期
             )
             distilled.append("session_summary")
 
@@ -493,18 +501,14 @@ class EvolutionService:
             "code": {
                 "preferred_tools": ["write_file", "edit_file", "read_file"],
                 "avoid_tools": [],
-                "strategy": "使用文件操作工具时优先读写，复杂修改用 edit_file"
+                "strategy": "使用文件操作工具时优先读写，复杂修改用 edit_file",
             },
             "search": {
                 "preferred_tools": ["web_search", "browse"],
                 "avoid_tools": [],
-                "strategy": "搜索任务优先使用 web_search"
+                "strategy": "搜索任务优先使用 web_search",
             },
-            "general": {
-                "preferred_tools": [],
-                "avoid_tools": [],
-                "strategy": "根据上下文选择合适工具"
-            }
+            "general": {"preferred_tools": [], "avoid_tools": [], "strategy": "根据上下文选择合适工具"},
         }
 
         # 分析历史表现调整策略
@@ -533,11 +537,12 @@ class EvolutionService:
 # 清理任务
 # ============================================================================
 
+
 def run_memory_cleanup() -> dict:
     """运行记忆清理任务。返回清理统计。"""
     stats = {
         "expired": cleanup_expired_memory(),
         "low_confidence": cleanup_low_confidence_memory(),
-        "low_access": cleanup_low_access_memory()
+        "low_access": cleanup_low_access_memory(),
     }
     return stats

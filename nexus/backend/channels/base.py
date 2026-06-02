@@ -3,13 +3,13 @@
 提供所有 Channel 的抽象基类和统一消息格式。
 """
 
-import uuid
 import asyncio
 import logging
+import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
-from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -19,8 +19,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class MessageType(str, Enum):
+class MessageType(StrEnum):
     """消息类型枚举"""
+
     TEXT = "text"
     IMAGE = "image"
     VOICE = "voice"
@@ -29,15 +30,17 @@ class MessageType(str, Enum):
     EVENT = "event"
 
 
-class ChannelType(str, Enum):
+class ChannelType(StrEnum):
     """通道类型枚举"""
+
     WEBSOCKET = "websocket"
     WECHAT = "wechat"
     FEISHU = "feishu"
 
 
-class ChannelStatus(str, Enum):
+class ChannelStatus(StrEnum):
     """通道状态枚举"""
+
     STOPPED = "stopped"
     STARTING = "starting"
     RUNNING = "running"
@@ -47,21 +50,23 @@ class ChannelStatus(str, Enum):
 
 class ChannelConfig(BaseModel):
     """通道配置"""
+
     channel_id: str = Field(..., description="通道唯一标识")
     channel_type: ChannelType = Field(..., description="通道类型")
     enabled: bool = Field(default=True, description="是否启用")
     name: str = Field(..., description="通道显示名称")
-    auth_token: Optional[str] = Field(default=None, description="Token 认证")
+    auth_token: str | None = Field(default=None, description="Token 认证")
     allowed_users: list[str] = Field(default_factory=list, description="白名单用户")
     settings: dict[str, Any] = Field(default_factory=dict, description="通道特定配置")
 
 
 class ChannelState(BaseModel):
     """通道运行时状态"""
+
     channel_id: str
     status: ChannelStatus = ChannelStatus.STOPPED
-    last_error: Optional[str] = None
-    started_at: Optional[datetime] = None
+    last_error: str | None = None
+    started_at: datetime | None = None
     message_count: int = 0
     error_count: int = 0
 
@@ -79,7 +84,7 @@ class ChannelMessage(BaseModel):
     raw_data: dict[str, Any] = Field(default_factory=dict, description="原始平台数据")
     timestamp: datetime = Field(default_factory=datetime.now, description="时间戳")
     metadata: dict[str, Any] = Field(default_factory=dict, description="元数据")
-    reply_to: Optional[str] = Field(default=None, description="回复目标消息ID")
+    reply_to: str | None = Field(default=None, description="回复目标消息ID")
 
 
 class Channel(ABC):
@@ -88,7 +93,7 @@ class Channel(ABC):
     def __init__(self, config: ChannelConfig):
         self.config = config
         self.state = ChannelState(channel_id=config.channel_id)
-        self._gateway: Optional["Gateway"] = None
+        self._gateway: Gateway | None = None
         self._lock = asyncio.Lock()
 
     @abstractmethod

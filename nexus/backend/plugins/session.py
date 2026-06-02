@@ -8,13 +8,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class ConversationType(Enum):
     """会话类型"""
-    DM = "dm"           # 私信
-    GROUP = "group"     # 群聊
+
+    DM = "dm"  # 私信
+    GROUP = "group"  # 群聊
     CHANNEL = "channel"  # 频道
 
 
@@ -24,17 +25,18 @@ class Session:
 
     代表一个持续的对话会话
     """
-    session_id: str                    # 会话 ID（平台相关）
-    channel_id: str                    # 通道 ID
+
+    session_id: str  # 会话 ID（平台相关）
+    channel_id: str  # 通道 ID
     conversation_type: ConversationType = ConversationType.DM
 
     # 参与者
     participants: list[str] = field(default_factory=list)  # 用户 ID 列表
 
     # 会话标识（用于路由）
-    base_session_id: Optional[str] = None   # 基础会话 ID
-    thread_id: Optional[str] = None          # 线程 ID
-    parent_id: Optional[str] = None         # 父消息 ID
+    base_session_id: str | None = None  # 基础会话 ID
+    thread_id: str | None = None  # 线程 ID
+    parent_id: str | None = None  # 父消息 ID
 
     # 元数据
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -55,14 +57,15 @@ class SessionGrammar:
 
     定义如何将平台特定的会话 ID 映射到基础结构
     """
+
     # 格式模板
     session_id_template: str = "{channel}:{type}:{id}"
-    thread_template: Optional[str] = None
-    parent_template: Optional[str] = None
+    thread_template: str | None = None
+    parent_template: str | None = None
 
     # 正则解析
-    session_id_pattern: Optional[str] = None
-    thread_pattern: Optional[str] = None
+    session_id_pattern: str | None = None
+    thread_pattern: str | None = None
 
     @abstractmethod
     def parse_session_id(self, raw_id: str) -> dict[str, Any]:
@@ -119,13 +122,13 @@ class SessionManager(ABC):
         channel_id: str,
         session_id: str,
         conversation_type: ConversationType = ConversationType.DM,
-        participants: Optional[list[str]] = None,
+        participants: list[str] | None = None,
     ) -> Session:
         """获取或创建会话"""
         pass
 
     @abstractmethod
-    async def get_session(self, session_id: str) -> Optional[Session]:
+    async def get_session(self, session_id: str) -> Session | None:
         """获取会话"""
         pass
 
@@ -139,7 +142,7 @@ class SessionManager(ABC):
         self,
         session_id: str,
         message_id: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         """解析线程父消息
 
         返回父消息所在的会话 ID
@@ -158,7 +161,7 @@ class InMemorySessionManager(SessionManager):
         channel_id: str,
         session_id: str,
         conversation_type: ConversationType = ConversationType.DM,
-        participants: Optional[list[str]] = None,
+        participants: list[str] | None = None,
     ) -> Session:
         if session_id in self._sessions:
             return self._sessions[session_id]
@@ -172,7 +175,7 @@ class InMemorySessionManager(SessionManager):
         self._sessions[session_id] = session
         return session
 
-    async def get_session(self, session_id: str) -> Optional[Session]:
+    async def get_session(self, session_id: str) -> Session | None:
         return self._sessions.get(session_id)
 
     async def update_session(self, session: Session) -> None:
@@ -183,5 +186,5 @@ class InMemorySessionManager(SessionManager):
         self,
         session_id: str,
         message_id: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         return session_id  # 默认返回当前会话

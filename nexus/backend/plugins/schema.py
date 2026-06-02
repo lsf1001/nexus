@@ -5,12 +5,13 @@ https://github.com/openclaw/openclaw/blob/main/docs/plugins/sdk-channel-plugins.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
 class ConfigSchema:
     """配置 Schema 基类"""
+
     type: str = "object"
     properties: dict[str, Any] = field(default_factory=dict)
     required: list[str] = field(default_factory=list)
@@ -19,27 +20,30 @@ class ConfigSchema:
 @dataclass
 class StringField:
     """字符串字段"""
+
     type: str = "string"
     default: str = ""
     description: str = ""
-    min_length: Optional[int] = None
-    max_length: Optional[int] = None
-    pattern: Optional[str] = None  # 正则表达式
+    min_length: int | None = None
+    max_length: int | None = None
+    pattern: str | None = None  # 正则表达式
 
 
 @dataclass
 class NumberField:
     """数字字段"""
+
     type: str = "number"
     default: float = 0
     description: str = ""
-    minimum: Optional[float] = None
-    maximum: Optional[float] = None
+    minimum: float | None = None
+    maximum: float | None = None
 
 
 @dataclass
 class BooleanField:
     """布尔字段"""
+
     type: str = "boolean"
     default: bool = False
     description: str = ""
@@ -48,6 +52,7 @@ class BooleanField:
 @dataclass
 class EnumField:
     """枚举字段"""
+
     type: str = "string"
     enum: list[str] = field(default_factory=list)
     default: str = ""
@@ -57,6 +62,7 @@ class EnumField:
 @dataclass
 class ArrayField:
     """数组字段"""
+
     type: str = "array"
     items: dict[str, Any] = field(default_factory=dict)
     default: list = field(default_factory=list)
@@ -66,6 +72,7 @@ class ArrayField:
 @dataclass
 class ObjectField:
     """对象字段"""
+
     type: str = "object"
     properties: dict[str, Any] = field(default_factory=dict)
     default: dict = field(default_factory=dict)
@@ -74,7 +81,7 @@ class ObjectField:
 
 def build_config_schema(
     fields: dict[str, Any],
-    required: Optional[list[str]] = None,
+    required: list[str] | None = None,
 ) -> dict[str, Any]:
     """构建配置 Schema
 

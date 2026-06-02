@@ -4,10 +4,9 @@
 https://github.com/openclaw/openclaw/blob/main/docs/plugins/sdk-overview.md
 """
 
-import asyncio
 import logging
 import threading
-from typing import Any, Callable, Optional
+from collections.abc import Callable
 
 from .channel import BaseChannel, ChannelConfig, ChannelStatus
 from .manifest import ChannelManifest, PluginManifest
@@ -32,7 +31,7 @@ class PluginRegistry:
     def register_channel(
         cls,
         channel: BaseChannel,
-        manifest: Optional[ChannelManifest] = None,
+        manifest: ChannelManifest | None = None,
     ) -> None:
         """注册通道插件
 
@@ -69,13 +68,13 @@ class PluginRegistry:
     # ========== 获取 ==========
 
     @classmethod
-    def get_channel(cls, channel_id: str) -> Optional[BaseChannel]:
+    def get_channel(cls, channel_id: str) -> BaseChannel | None:
         """获取通道插件"""
         with cls._lock:
             return cls._channels.get(channel_id)
 
     @classmethod
-    def get_manifest(cls, channel_id: str) -> Optional[PluginManifest]:
+    def get_manifest(cls, channel_id: str) -> PluginManifest | None:
         """获取插件清单"""
         with cls._lock:
             return cls._manifests.get(channel_id)
@@ -93,7 +92,7 @@ class PluginRegistry:
             return list(cls._channels.keys())
 
     @classmethod
-    def get_by_type(cls, channel_type: str) -> Optional[BaseChannel]:
+    def get_by_type(cls, channel_type: str) -> BaseChannel | None:
         """按类型获取通道"""
         with cls._lock:
             return cls._channels.get(channel_type)
@@ -104,13 +103,10 @@ class PluginRegistry:
     def get_connected_channels(cls) -> list[BaseChannel]:
         """获取已连接的通道"""
         with cls._lock:
-            return [
-                ch for ch in cls._channels.values()
-                if ch.status == ChannelStatus.CONNECTED
-            ]
+            return [ch for ch in cls._channels.values() if ch.status == ChannelStatus.CONNECTED]
 
     @classmethod
-    def get_channel_status(cls, channel_id: str) -> Optional[ChannelStatus]:
+    def get_channel_status(cls, channel_id: str) -> ChannelStatus | None:
         """获取通道状态"""
         with cls._lock:
             channel = cls._channels.get(channel_id)
@@ -176,7 +172,7 @@ class PluginRegistry:
         cls,
         channel_type: str,
         config: ChannelConfig,
-    ) -> Optional[BaseChannel]:
+    ) -> BaseChannel | None:
         """创建通道实例"""
         with cls._lock:
             factory = cls._factories.get(channel_type)
@@ -200,6 +196,7 @@ def define_plugin_entry(
         def create_wechat_channel():
             return WechatChannel()
     """
+
     def decorator(func: Callable) -> Callable:
         PluginRegistry.register_factory(manifest.id, factory)
         PluginRegistry._manifests[manifest.id] = manifest
@@ -227,6 +224,7 @@ def define_channel_plugin_entry(
         def create_wechat_channel():
             return WechatChannel()
     """
+
     def decorator(func: Callable) -> Callable:
         PluginRegistry.register_factory(manifest.id, func)
         with PluginRegistry._lock:

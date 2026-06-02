@@ -1,4 +1,5 @@
 """配置存储模块。"""
+
 import json
 from pathlib import Path
 from typing import Any
@@ -142,7 +143,7 @@ def set_config_key(config: dict, key: str, value: str) -> None:
         parts.append(current)
 
     obj = config
-    for i, part in enumerate(parts[:-1]):
+    for _i, part in enumerate(parts[:-1]):
         if isinstance(part, int):
             if isinstance(obj, list) and 0 <= part < len(obj):
                 obj = obj[part]

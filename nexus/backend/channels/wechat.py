@@ -10,13 +10,12 @@ import json
 import logging
 import os
 import random
-import struct
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import httpx
 
@@ -44,9 +43,11 @@ ACTIVE_LOGIN_TTL_MS = 5 * 60 * 1000
 
 # ========== 账号管理 ==========
 
+
 @dataclass
 class WeixinAccount:
     """微信账号数据"""
+
     account_id: str
     user_id: str
     token: str
@@ -57,17 +58,18 @@ class WeixinAccount:
 @dataclass
 class QRSession:
     """二维码登录会话"""
+
     session_key: str
     qrcode: str
     qrcode_url: str
     started_at: float = field(default_factory=time.time)
     status: str = "wait"
-    bot_token: Optional[str] = None
-    ilink_bot_id: Optional[str] = None
-    ilink_user_id: Optional[str] = None
+    bot_token: str | None = None
+    ilink_bot_id: str | None = None
+    ilink_user_id: str | None = None
     base_url: str = ""
     current_api_base_url: str = FIXED_BASE_URL
-    pending_verify_code: Optional[str] = None
+    pending_verify_code: str | None = None
 
 
 # 全局状态（带线程锁保护）
@@ -117,7 +119,6 @@ def _check_token_valid(account_id: str) -> bool:
 
 def _delete_account(account_id: str) -> None:
     """删除账号数据"""
-    import shutil
     account_file = _resolve_account_file_path(account_id)
     if account_file.exists():
         account_file.unlink()
@@ -161,7 +162,7 @@ def _list_indexed_weixin_account_ids() -> list[str]:
         path = _resolve_account_index_path()
         if not path.exists():
             return []
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, list):
             return [x for x in data if isinstance(x, str) and x.strip()]
@@ -191,23 +192,28 @@ def _save_account(account: WeixinAccount) -> None:
     encoded_token = base64.b64encode(account.token.encode()).decode()
 
     with open(file_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "token": encoded_token,
-            "savedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "baseUrl": account.base_url,
-            "userId": account.user_id,
-        }, f, ensure_ascii=False, indent=2)
+        json.dump(
+            {
+                "token": encoded_token,
+                "savedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "baseUrl": account.base_url,
+                "userId": account.user_id,
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
 
     os.chmod(file_path, 0o600)
 
 
-def _load_account(account_id: str) -> Optional[WeixinAccount]:
+def _load_account(account_id: str) -> WeixinAccount | None:
     """从磁盘加载账号"""
     file_path = _resolve_account_file_path(account_id)
     if not file_path.exists():
         return None
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             data = json.load(f)
 
         encoded_token = data.get("token", "")
@@ -232,7 +238,7 @@ def _save_context_tokens(account_id: str) -> None:
     prefix = f"{account_id}:"
     for k, v in _context_tokens.items():
         if k.startswith(prefix):
-            tokens[k[len(prefix):]] = v
+            tokens[k[len(prefix) :]] = v
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(tokens, f, ensure_ascii=False)
 
@@ -243,7 +249,7 @@ def _restore_context_tokens(account_id: str) -> None:
     if not file_path.exists():
         return
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             tokens = json.load(f)
         for user_id, token in tokens.items():
             _context_tokens[f"{account_id}:{user_id}"] = token
@@ -258,7 +264,7 @@ def _set_context_token(account_id: str, user_id: str, token: str) -> None:
     _context_tokens[key] = token
 
 
-def _get_context_token(account_id: str, user_id: str) -> Optional[str]:
+def _get_context_token(account_id: str, user_id: str) -> str | None:
     """获取 context token"""
     return _context_tokens.get(f"{account_id}:{user_id}")
 
@@ -285,10 +291,10 @@ def _build_client_version(version: str) -> int:
     major = int(parts[0]) if len(parts) > 0 and parts[0].isdigit() else 0
     minor = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
     patch = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
-    return ((major & 0xff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff)
+    return ((major & 0xFF) << 16) | ((minor & 0xFF) << 8) | (patch & 0xFF)
 
 
-def _build_headers(token: Optional[str] = None) -> dict:
+def _build_headers(token: str | None = None) -> dict:
     """构建请求头 (OpenClaw 兼容)"""
     headers = {
         "Content-Type": "application/json",
@@ -312,6 +318,7 @@ def _build_base_info() -> dict:
 
 # ========== API 调用 ==========
 
+
 async def _api_get_fetch(base_url: str, endpoint: str, timeout_ms: int = 15000) -> str:
     """GET 请求"""
     url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
@@ -326,7 +333,9 @@ async def _api_get_fetch(base_url: str, endpoint: str, timeout_ms: int = 15000) 
         return response.text
 
 
-async def _api_post_fetch(base_url: str, endpoint: str, body: dict, token: Optional[str] = None, timeout_ms: int = 15000) -> str:
+async def _api_post_fetch(
+    base_url: str, endpoint: str, body: dict, token: str | None = None, timeout_ms: int = 15000
+) -> str:
     """POST JSON 请求"""
     url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
     headers = _build_headers(token)
@@ -388,6 +397,7 @@ def _purge_expired_logins() -> None:
 
 # ========== 消息类型定义 ==========
 
+
 class MessageItemType:
     NONE = 0
     TEXT = 1
@@ -411,6 +421,7 @@ class MessageState:
 
 # ========== 消息发送 ==========
 
+
 async def _get_config(base_url: str, token: str, ilink_user_id: str, context_token: str = "") -> dict:
     """获取用户配置（包括 typing_ticket）"""
     body = {
@@ -422,7 +433,9 @@ async def _get_config(base_url: str, token: str, ilink_user_id: str, context_tok
     return json.loads(raw)
 
 
-async def _send_typing(base_url: str, token: str, to_user: str, typing_ticket: str = "", context_token: str = "") -> str:
+async def _send_typing(
+    base_url: str, token: str, to_user: str, typing_ticket: str = "", context_token: str = ""
+) -> str:
     """发送正在输入状态"""
     # 如果没有 typing_ticket，先获取
     if not typing_ticket:
@@ -442,7 +455,7 @@ async def _send_typing(base_url: str, token: str, to_user: str, typing_ticket: s
     return raw
 
 
-async def _send_message(base_url: str, token: str, to_user: str, text: str, context_token: Optional[str] = None) -> str:
+async def _send_message(base_url: str, token: str, to_user: str, text: str, context_token: str | None = None) -> str:
     """发送文本消息"""
     client_id = _generate_client_id()
     item_list = [{"type": MessageItemType.TEXT, "text_item": {"text": text}}]
@@ -458,11 +471,12 @@ async def _send_message(base_url: str, token: str, to_user: str, text: str, cont
         },
         "base_info": _build_base_info(),
     }
-    raw = await _api_post_fetch(base_url, "/ilink/bot/sendmessage", body, token, DEFAULT_API_TIMEOUT_MS)
+    await _api_post_fetch(base_url, "/ilink/bot/sendmessage", body, token, DEFAULT_API_TIMEOUT_MS)
     return client_id
 
 
 # ========== 独立 QR 登录流程 ==========
+
 
 async def wechat_qr_login() -> dict:
     """启动 QR 登录流程"""
@@ -510,7 +524,9 @@ async def wait_qr_scan(session_key: str, timeout_ms: int = 480000) -> dict:
 
     while time.time() < deadline:
         try:
-            data = await _poll_qr_status(session.current_api_base_url, session.qrcode, session.pending_verify_code or "")
+            data = await _poll_qr_status(
+                session.current_api_base_url, session.qrcode, session.pending_verify_code or ""
+            )
             status = data.get("status", "wait")
             with _global_lock:
                 session.status = status
@@ -546,12 +562,14 @@ async def wait_qr_scan(session_key: str, timeout_ms: int = 480000) -> dict:
                     name=f"WeChat ({normalized_id[:8]}...)",
                     settings={"account_id": normalized_id},
                 )
-                from .wechat import WeChatChannel as WCH
+                from .wechat import WeChatChannel as WCH  # noqa: N814
+
                 _active_channel = WCH(config, token=normalized_id)
                 await _active_channel.start()
 
                 # 立即设置消息回调
                 from nexus.backend.main import _handle_wechat_message
+
                 _active_channel.on_message(_handle_wechat_message)
                 logger.info(f"Callback set for channel {_active_channel.config.channel_id}")
 
@@ -631,16 +649,17 @@ def _get_remaining_pause_ms(account_id: str) -> float:
 
 # ========== WeChatChannel 实现 ==========
 
+
 class WeChatChannel(Channel):
     """微信通道"""
 
     def __init__(self, config: ChannelConfig, token: str = ""):
         super().__init__(config)
         self.token = token
-        self._http_client: Optional[httpx.AsyncClient] = None
-        self._poll_task: Optional[asyncio.Task] = None
+        self._http_client: httpx.AsyncClient | None = None
+        self._poll_task: asyncio.Task | None = None
         self._running = False
-        self._account: Optional[WeixinAccount] = None
+        self._account: WeixinAccount | None = None
         self._get_updates_buf: str = ""
         self._on_message_callback = None
 
@@ -754,7 +773,9 @@ class WeChatChannel(Channel):
 
     async def _poll_messages(self) -> None:
         """长轮询获取消息 (OpenClaw 兼容)"""
-        logger.info(f"WeChat _poll_messages STARTED for account_id={self._account.account_id if self._account else 'unknown'}")
+        logger.info(
+            f"WeChat _poll_messages STARTED for account_id={self._account.account_id if self._account else 'unknown'}"
+        )
         poll_interval = 1.0
         account_id = self._account.account_id if self._account else "unknown"
 
@@ -858,7 +879,9 @@ class WeChatChannel(Channel):
                 logger.debug(f"Calling callback for message from {from_user}")
                 self._on_message_callback(channel_msg)
             else:
-                logger.warning(f"No callback set! Channel id={self.config.channel_id}, callback={self._on_message_callback}")
+                logger.warning(
+                    f"No callback set! Channel id={self.config.channel_id}, callback={self._on_message_callback}"
+                )
                 await self._safe_handle_message(channel_msg)
         except Exception as e:
             logger.error(f"Error handling incoming message: {e}")
@@ -904,6 +927,7 @@ class WeChatChannel(Channel):
         """生成二维码图片"""
         try:
             import qrcode
+
             img = qrcode.make(qrcode_url)
             buf = io.BytesIO()
             img.save(buf, format="PNG")

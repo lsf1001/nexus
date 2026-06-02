@@ -1,6 +1,5 @@
 """测试模型配置 REST API（routes/model_config.py）。"""
 
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -86,6 +85,7 @@ class TestCreateModel:
         assert data["model"]["id"] == "m2"
         # 验证已写入文件
         import json
+
         cfg = json.loads(test_file.read_text(encoding="utf-8"))
         ids = {m["id"] for m in cfg["models"]}
         assert ids == {"m1", "m2"}

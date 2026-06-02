@@ -1,17 +1,15 @@
 """配置管理子命令。"""
-import json
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 from .config_store import (
-    load_nexus_config,
-    save_nexus_config,
-    resolve_config_key,
-    set_config_key,
     NEXUS_CONFIG_PATH,
+    load_nexus_config,
+    resolve_config_key,
+    save_nexus_config,
+    set_config_key,
 )
 
 console = Console()

@@ -3,15 +3,13 @@
 保持向后兼容，现有 /api/ws 端点不变。
 """
 
-import asyncio
 import logging
 import re
 import uuid
-from typing import Any, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from .base import Channel, ChannelConfig, ChannelMessage, ChannelStatus, ChannelType, MessageType
+from .base import Channel, ChannelConfig, ChannelMessage, ChannelStatus, ChannelType
 
 logger = logging.getLogger(__name__)
 
@@ -70,26 +68,32 @@ class WebSocketChannel(Channel):
                 # 分块发送：每帧约 16 字符，UI 打字效果更顺滑
                 chunk_size = 16
                 for i in range(0, len(message.content), chunk_size):
-                    chunk = message.content[i:i + chunk_size]
-                    await ws.send_json({
-                        "type": "chunk",
-                        "content": chunk,
-                    })
+                    chunk = message.content[i : i + chunk_size]
+                    await ws.send_json(
+                        {
+                            "type": "chunk",
+                            "content": chunk,
+                        }
+                    )
 
-                await ws.send_json({
-                    "type": "final",
-                    "content": message.content,
-                })
+                await ws.send_json(
+                    {
+                        "type": "final",
+                        "content": message.content,
+                    }
+                )
 
-            await ws.send_json({
-                "type": "done",
-                "content": "",
-            })
+            await ws.send_json(
+                {
+                    "type": "done",
+                    "content": "",
+                }
+            )
 
         except Exception as e:
             logger.error(f"Error sending WebSocket message: {e}")
 
-    async def handle_connection(self, websocket: WebSocket, session_id: Optional[str] = None) -> None:
+    async def handle_connection(self, websocket: WebSocket, session_id: str | None = None) -> None:
         """处理 WebSocket 连接
 
         Args:
@@ -123,7 +127,6 @@ class WebSocketChannel(Channel):
                 data = await websocket.receive_json()
                 user_content = data.get("content", "")
                 msg_session_id = data.get("session_id") or session_id
-                msg_title = data.get("title")
 
                 if not user_content:
                     continue
@@ -166,10 +169,10 @@ class WebSocketChannel(Channel):
         Returns:
             (thinking_text, response_text)
         """
-        normalized = response.replace('<think>', '<thinking>').replace('</think>', '</thinking>')
+        normalized = response.replace("<think>", "<thinking>").replace("</think>", "</thinking>")
 
-        thinking_parts = re.findall(r'<thinking>(.*?)</thinking>', normalized, flags=re.DOTALL)
-        response_text = re.sub(r'<thinking>.*?</thinking>', '', normalized, flags=re.DOTALL).strip()
-        thinking_text = '\n'.join(thinking_parts)
+        thinking_parts = re.findall(r"<thinking>(.*?)</thinking>", normalized, flags=re.DOTALL)
+        response_text = re.sub(r"<thinking>.*?</thinking>", "", normalized, flags=re.DOTALL).strip()
+        thinking_text = "\n".join(thinking_parts)
 
         return thinking_text, response_text

@@ -1,10 +1,10 @@
 """测试 mcp.py 模块。"""
 
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+
 from nexus.backend.mcp import find_mcp_config, load_all_mcp_tools
 
 
@@ -14,9 +14,7 @@ class TestFindMcpConfig:
     def test_user_config_exists(self, tmp_path):
         """用户级配置文件存在时加载。"""
         user_mcp = tmp_path / ".mcp.json"
-        user_mcp.write_text(json.dumps({
-            "mcpServers": {"test": {"command": "node"}}
-        }))
+        user_mcp.write_text(json.dumps({"mcpServers": {"test": {"command": "node"}}}))
 
         with patch("nexus.backend.mcp.Path.home") as mock_home:
             mock_home.return_value = tmp_path

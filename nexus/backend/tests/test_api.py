@@ -1,8 +1,5 @@
 """测试 API 端点"""
 
-import pytest
-from fastapi.testclient import TestClient
-
 
 # 需要先启动服务才能测试，这里只测试数据结构
 
@@ -21,7 +18,7 @@ class TestAPIResponseStructure:
             "temperature": 0.7,
             "api_base": "https://api.minimaxi.com/v1",
             "id": "minimax",
-            "max_context_tokens": 200000
+            "max_context_tokens": 200000,
         }
 
         for field in expected_fields:
@@ -36,7 +33,7 @@ class TestAPIResponseStructure:
             "trigger_threshold": 170000,
             "trigger_percent": 85,
             "keep_messages": 15,
-            "offload_path": "~/.nexus/store/conversation_history"
+            "offload_path": "~/.nexus/store/conversation_history",
         }
 
         for field in expected_fields:
@@ -49,11 +46,7 @@ class TestAPIResponseStructure:
         sm = SessionManager()
 
         # 1. 先保存一条记忆
-        sm.memory_service.save_memory(
-            category="preference",
-            key="测试偏好",
-            value="用户喜欢简洁"
-        )
+        sm.memory_service.save_memory(category="preference", key="测试偏好", value="用户喜欢简洁")
 
         # 2. 构建 prompt
         result = sm.build_prompt("test-session-001", "你好，帮我写代码")
@@ -84,11 +77,7 @@ class TestMemoryServiceBM25:
 
         # 保存多条记忆
         for i in range(5):
-            ms.save_memory(
-                category="test",
-                key=f"key_{i}",
-                value=f"value_{i}"
-            )
+            ms.save_memory(category="test", key=f"key_{i}", value=f"value_{i}")
 
         # 强制重建索引
         ms._invalidate_bm25()

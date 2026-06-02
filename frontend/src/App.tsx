@@ -85,15 +85,15 @@ function App() {
     try {
       const res = await fetch(`/api/sessions/${conv.id}`);
       const data = await res.json();
-      const messages: Message[] = (data.messages || []).map((m: any) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        thinking: m.thinking_content,
-        createdAt: new Date(m.created_at),
+      const messages: Message[] = (data.messages || []).map((m: Record<string, unknown>) => ({
+        id: String(m.id),
+        role: m.role as 'user' | 'assistant',
+        content: String(m.content ?? ''),
+        thinking: m.thinking_content as string | undefined,
+        createdAt: new Date(m.created_at as string),
       }));
       setConversationMessages(messages);
-    } catch (e) {
+    } catch {
       setConversationMessages(conv.messages);
     }
   }, [clearConversationMessages, setConversationMessages]);
@@ -101,7 +101,7 @@ function App() {
   const handleDeleteConversation = useCallback(async (id: string) => {
     try {
       await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-    } catch (e) {}
+    } catch {}
     setConversations(prev => prev.filter(c => c.id !== id));
     if (currentConversationId === id) {
       setCurrentConversationId(null);

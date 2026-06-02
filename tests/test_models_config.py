@@ -1,9 +1,9 @@
 """测试 models_config.py 模块。"""
 
 import json
-import pytest
-from unittest.mock import patch, MagicMock, mock_open
-from nexus.backend.models_config import load_models, save_models, get_active_model, set_active_model
+from unittest.mock import MagicMock, mock_open, patch
+
+from nexus.backend.models_config import get_active_model, load_models, set_active_model
 
 
 class TestLoadModels:
@@ -15,7 +15,7 @@ class TestLoadModels:
         mock_file.exists.return_value = False
         mock_file.parent = MagicMock()
 
-        with patch("nexus.backend.models_config.save_models") as mock_save:
+        with patch("nexus.backend.models_config.save_models"):
             result = load_models()
             assert "models" in result
             assert len(result["models"]) == 1

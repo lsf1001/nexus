@@ -5,10 +5,10 @@ https://github.com/openclaw/openclaw/blob/main/docs/plugins/sdk-channel-plugins.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
 
 from .manifest import ChannelManifest
 from .message import (
@@ -19,11 +19,12 @@ from .message import (
     TypingIndicator,
 )
 from .security import ChannelSecurity, SecurityResult, Sender
-from .session import Session, SessionGrammar, SessionManager
+from .session import SessionGrammar, SessionManager
 
 
 class ChannelStatus(Enum):
     """通道状态"""
+
     DISCONNECTED = "disconnected"
     CONNECTING = "connecting"
     CONNECTED = "connected"
@@ -35,10 +36,11 @@ class ChannelStatus(Enum):
 @dataclass
 class ChannelConfig:
     """通道配置"""
+
     channel_id: str
     enabled: bool = True
     settings: dict[str, Any] = field(default_factory=dict)
-    credentials: Optional[dict[str, Any]] = None  # 敏感凭据
+    credentials: dict[str, Any] | None = None  # 敏感凭据
 
 
 class BaseChannel(ABC):
@@ -48,18 +50,18 @@ class BaseChannel(ABC):
     """
 
     def __init__(self):
-        self._manifest: Optional[ChannelManifest] = None
-        self._config: Optional[ChannelConfig] = None
+        self._manifest: ChannelManifest | None = None
+        self._config: ChannelConfig | None = None
         self._status = ChannelStatus.DISCONNECTED
-        self._security: Optional[ChannelSecurity] = None
-        self._session_manager: Optional[SessionManager] = None
-        self._message_adapter: Optional[ChannelMessageAdapter] = None
-        self._session_grammar: Optional[SessionGrammar] = None
+        self._security: ChannelSecurity | None = None
+        self._session_manager: SessionManager | None = None
+        self._message_adapter: ChannelMessageAdapter | None = None
+        self._session_grammar: SessionGrammar | None = None
 
         # 回调
-        self._on_message_callback: Optional[Callable] = None
-        self._on_status_change_callback: Optional[Callable] = None
-        self._on_error_callback: Optional[Callable] = None
+        self._on_message_callback: Callable | None = None
+        self._on_status_change_callback: Callable | None = None
+        self._on_error_callback: Callable | None = None
 
     # ========== 属性 ==========
 
@@ -141,10 +143,12 @@ class BaseChannel(ABC):
         """
         pass
 
+    @abstractmethod
     async def send_typing(self, indicator: TypingIndicator) -> None:
         """发送打字状态（可选）"""
         pass
 
+    @abstractmethod
     async def ack_message(self, message: InboundMessage, policy: AckPolicy) -> None:
         """确认消息"""
         pass

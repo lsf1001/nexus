@@ -54,8 +54,8 @@ from .schema import (
 )
 from .security import (
     ChannelSecurity,
-    DMPolicy,
     DefaultChannelSecurity,
+    DMPolicy,
     SecurityResult,
     Sender,
 )
@@ -74,13 +74,11 @@ __all__ = [
     "ChannelPlugin",
     "ChannelConfig",
     "ChannelStatus",
-
     # 清单
     "PluginManifest",
     "ChannelManifest",
     "ToolManifest",
     "HookManifest",
-
     # 消息
     "MessageType",
     "MessageReceiptStatus",
@@ -93,12 +91,10 @@ __all__ = [
     "ChannelMessageAdapter",
     "TextOnlyAdapter",
     "MediaAdapter",
-
     # 注册表
     "PluginRegistry",
     "define_plugin_entry",
     "define_channel_plugin_entry",
-
     # Schema
     "ConfigSchema",
     "StringField",
@@ -109,24 +105,22 @@ __all__ = [
     "ObjectField",
     "build_config_schema",
     "required_fields",
-
     # 安全
     "DMPolicy",
     "Sender",
     "SecurityResult",
     "ChannelSecurity",
     "DefaultChannelSecurity",
-
     # 会话
     "ConversationType",
     "Session",
     "SessionGrammar",
     "SessionManager",
     "DefaultSessionGrammar",
-
     # 插件实现
     "WechatChannelPlugin",
     "create_wechat_plugin",
+    "create_wechat_channel",
 ]
 
 # 版本

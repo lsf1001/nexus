@@ -1,4 +1,5 @@
 """诊断工具。"""
+
 import socket
 import subprocess
 import sys
@@ -6,12 +7,10 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
-from .config_store import load_nexus_config, NEXUS_CONFIG_PATH, NEXUS_MODELS_PATH
+from .config_store import NEXUS_CONFIG_PATH, NEXUS_MODELS_PATH, load_nexus_config
 from .daemon import get_daemon_manager
 
 console = Console()
@@ -19,6 +18,7 @@ console = Console()
 
 class CheckStatus(Enum):
     """检查结果状态。"""
+
     PASS = "pass"
     WARN = "warn"
     FAIL = "fail"
@@ -27,6 +27,7 @@ class CheckStatus(Enum):
 @dataclass
 class CheckResult:
     """检查结果。"""
+
     name: str
     status: CheckStatus
     message: str
@@ -38,7 +39,9 @@ def _check_python_version() -> CheckResult:
     version = sys.version_info
     if version >= (3, 11):
         return CheckResult("Python 版本", CheckStatus.PASS, f"Python {version.major}.{version.minor}.{version.micro}")
-    return CheckResult("Python 版本", CheckStatus.FAIL, f"Python {version.major}.{version.minor}.{version.micro} (需要 >= 3.11)")
+    return CheckResult(
+        "Python 版本", CheckStatus.FAIL, f"Python {version.major}.{version.minor}.{version.micro} (需要 >= 3.11)"
+    )
 
 
 def _check_nexus_home() -> CheckResult:
@@ -172,9 +175,10 @@ def _attempt_fixes(results: list[CheckResult]) -> None:
 
         elif result.name == "配置文件":
             from .config_store import get_default_config, save_nexus_config
+
             config = get_default_config()
             save_nexus_config(config)
-            console.print(f"[green]✔ 已创建默认配置[/green]")
+            console.print("[green]✔ 已创建默认配置[/green]")
 
         elif result.name == "API Key":
             console.print("[yellow]请运行 [cyan]nexus setup[/cyan] 配置 API Key[/yellow]")
@@ -222,7 +226,9 @@ def run_doctor(fix: bool = False) -> None:
     warn_count = sum(1 for r in results if r.status == CheckStatus.WARN)
     fail_count = sum(1 for r in results if r.status == CheckStatus.FAIL)
 
-    console.print(f"\n[green]通过: {pass_count}[/green]  [yellow]警告: {warn_count}[/yellow]  [red]失败: {fail_count}[/red]")
+    console.print(
+        f"\n[green]通过: {pass_count}[/green]  [yellow]警告: {warn_count}[/yellow]  [red]失败: {fail_count}[/red]"
+    )
 
     # 自动修复
     failed = [r for r in results if r.status == CheckStatus.FAIL]

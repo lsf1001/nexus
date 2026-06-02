@@ -39,9 +39,7 @@ def save_models(config: dict[str, Any]) -> None:
     先写到同目录下临时文件，再 os.replace 原子替换，避免写入中途崩溃损坏配置。
     """
     MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
-        dir=str(MODELS_FILE.parent), prefix=".models.", suffix=".json.tmp"
-    )
+    fd, tmp_path = tempfile.mkstemp(dir=str(MODELS_FILE.parent), prefix=".models.", suffix=".json.tmp")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)

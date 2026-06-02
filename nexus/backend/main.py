@@ -1,25 +1,24 @@
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
 import asyncio
 import logging
 import os
 import re
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
 
-from .config import CONFIG
 from .agent import create_agent
-from .models_config import load_models, get_active_model, set_active_model, save_models
+from .config import CONFIG
 from .mcp import load_all_mcp_tools
-from .models import SwitchModelRequest, SwitchModelResponse
-from .sessions import router as sessions_router
+from .models_config import get_active_model
 from .routes import model_config as model_config_routes
+from .sessions import router as sessions_router
 
 _agent = None
 _mcp_tools: list[Any] = []
@@ -39,11 +38,14 @@ def _handle_wechat_message(channel_message) -> None:
     """处理微信消息，转发到所有 WebSocket 客户端并生成回复"""
     try:
         from .channels.base import ChannelMessage
+
         if not isinstance(channel_message, ChannelMessage):
             logger.error(f"Invalid message type: {type(channel_message)}")
             return
 
-        logger.info(f"_handle_wechat_message CALLED: user={channel_message.user_id}, content={channel_message.content[:50]}...")
+        logger.info(
+            f"_handle_wechat_message CALLED: user={channel_message.user_id}, content={channel_message.content[:50]}..."
+        )
 
         message_data = {
             "type": "wechat_message",
@@ -90,9 +92,7 @@ def _process_wechat_message_sync(channel_message) -> None:
         logger.error("主事件循环不可用，跳过微信消息处理")
         return
     try:
-        future = asyncio.run_coroutine_threadsafe(
-            _process_wechat_message(channel_message), _main_loop
-        )
+        future = asyncio.run_coroutine_threadsafe(_process_wechat_message(channel_message), _main_loop)
         future.result(timeout=300)
     except Exception as e:
         logger.error(f"处理微信消息失败: {e}")
@@ -109,7 +109,8 @@ async def _process_wechat_message(channel_message) -> None:
             logger.error("No agent available for WeChat message")
             return
 
-        from .channels.wechat import get_active_wechat_channel, _send_message
+        from .channels.wechat import _send_message, get_active_wechat_channel
+
         channel = get_active_wechat_channel()
         logger.info(f"Active channel: {channel}, account: {channel._account if channel else None}")
         if not channel or not channel._account:
@@ -125,6 +126,7 @@ async def _process_wechat_message(channel_message) -> None:
         if not should_create:
             existing_session_id = _wechat_sessions[user_id]
             from .db import get_session
+
             existing_session = get_session(existing_session_id)
             if not existing_session:
                 should_create = True
@@ -132,6 +134,7 @@ async def _process_wechat_message(channel_message) -> None:
         if should_create:
             # 创建新会话
             from .db import create_session
+
             session_id = str(uuid.uuid4())
             # 提取微信用户ID的简短标识
             wx_id = channel_message.user_id.split("@")[0][:8]
@@ -145,11 +148,13 @@ async def _process_wechat_message(channel_message) -> None:
 
         # 保存用户消息
         from .db import add_message
+
         add_message(str(uuid.uuid4()), session_id, "user", channel_message.content)
 
         # 发送正在输入状态
         try:
             from .channels.wechat import _send_typing
+
             await _send_typing(
                 channel.base_url,
                 channel._account.token,
@@ -161,15 +166,13 @@ async def _process_wechat_message(channel_message) -> None:
 
         # 使用 SessionManager 构建带记忆的 prompt
         from .sessions import get_session_manager
+
         session_manager = get_session_manager()
         prompt = session_manager.build_prompt(session_id, channel_message.content)
 
         # 调用 Agent
         full_response = ""
-        async for chunk in agent.astream(
-            {"messages": prompt["messages"]},
-            stream_mode="updates"
-        ):
+        async for chunk in agent.astream({"messages": prompt["messages"]}, stream_mode="updates"):
             if not isinstance(chunk, dict):
                 continue
             if "model" in chunk:
@@ -183,7 +186,7 @@ async def _process_wechat_message(channel_message) -> None:
 
         if full_response:
             # 去除思考标签后发送
-            normalized = full_response.replace('<think>', '').replace('</think>', '').strip()
+            normalized = full_response.replace("<think>", "").replace("</think>", "").strip()
 
             # 保存助手回复（包含思考过程）
             add_message(str(uuid.uuid4()), session_id, "assistant", full_response)
@@ -252,6 +255,7 @@ async def lifespan(app: FastAPI):
     app.state.main_loop = _main_loop
     # 初始化数据库
     from .db import init_db
+
     init_db()
     # 检查是否启用 MCP（通过环境变量控制）
     if os.environ.get("NEXUS_ENABLE_MCP", "true").lower() == "true":
@@ -269,6 +273,7 @@ async def lifespan(app: FastAPI):
     )
     # 初始化通道注册表（lifespan 必须设置，否则 /api/channels 会 500）
     from .channels import ChannelRegistry
+
     app.state.channel_registry = ChannelRegistry()
     logger.info(f"Nexus Backend 已初始化 (MCP 工具: {len(_mcp_tools)} 个)")
     yield
@@ -287,6 +292,7 @@ def _set_global_agent(agent) -> None:
     global _agent
     with _agent_lock:
         _agent = agent
+
 
 API_PREFIX = "/api"
 
@@ -316,10 +322,12 @@ app.add_middleware(
 frontend_path = _get_frontend_path()
 if frontend_path:
     app.mount("/app", StaticFiles(directory=str(frontend_path), html=True), name="static")
+
     # 根路径重定向到 /app
     @app.get("/")
     async def root_redirect():
         from starlette.responses import RedirectResponse
+
         return RedirectResponse(url="/app", status_code=302)
 
 
@@ -347,7 +355,6 @@ async def get_context_info():
     - trigger_threshold: 触发压缩的阈值
     - usage_percent: 当前使用百分比（估算）
     """
-    from .config import CONFIG
 
     # 获取模型配置
     active = get_active_model()
@@ -398,8 +405,6 @@ async def get_model_info():
     }
 
 
-
-
 def _estimate_tokens(text: str) -> tuple[int, int]:
     """估算 token 数量和上下文使用率。
 
@@ -409,8 +414,8 @@ def _estimate_tokens(text: str) -> tuple[int, int]:
     Returns:
         (token_count, context_usage_percent)
     """
-    chinese_chars = len(re.findall(r'[一-鿿]', text))
-    english_chars = len(re.findall(r'[a-zA-Z]', text))
+    chinese_chars = len(re.findall(r"[一-鿿]", text))
+    english_chars = len(re.findall(r"[a-zA-Z]", text))
     other_chars = len(text) - chinese_chars - english_chars
     estimated_tokens = int(chinese_chars * 2.5 + english_chars * 0.25 + other_chars * 0.5)
     context_usage = min(int((estimated_tokens / 200000) * 100), 100)
@@ -448,12 +453,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # 设置微信消息回调
     from .channels.wechat import get_active_wechat_channel
+
     channel = get_active_wechat_channel()
     if channel:
         channel.on_message(_handle_wechat_message)
 
     # 会话管理
     from .sessions import get_session_manager
+
     session_manager = get_session_manager()
     session_id = None
 
@@ -471,20 +478,24 @@ async def websocket_endpoint(websocket: WebSocket):
                 session_id = data.get("session_id")
                 if not session_id:
                     from .db import create_session
+
                     session_id = str(uuid.uuid4())
                     title = data.get("title") or "新会话"
                     create_session(session_id, title=title, channel="main")
                     new_session_created = True
 
             if new_session_created:
-                await websocket.send_json({
-                    "type": "session_created",
-                    "session_id": session_id,
-                    "title": title,
-                })
+                await websocket.send_json(
+                    {
+                        "type": "session_created",
+                        "session_id": session_id,
+                        "title": title,
+                    }
+                )
 
             # 添加用户消息到历史
             from .db import add_message
+
             add_message(str(uuid.uuid4()), session_id, "user", user_content)
 
             # 使用 SessionManager 构建带记忆的 prompt
@@ -495,10 +506,7 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 with _agent_lock:
                     agent = _agent
-                async for chunk in agent.astream(
-                    {"messages": prompt["messages"]},
-                    stream_mode="updates"
-                ):
+                async for chunk in agent.astream({"messages": prompt["messages"]}, stream_mode="updates"):
                     if not isinstance(chunk, dict):
                         continue
 
@@ -513,59 +521,72 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     elif "tool_call" in chunk:
                         tool_name = chunk.get("tool_call", {}).get("name", "未知工具")
-                        await websocket.send_json({
-                            "type": "thinking",
-                            "content": f"[调用工具] {tool_name}",
-                        })
+                        await websocket.send_json(
+                            {
+                                "type": "thinking",
+                                "content": f"[调用工具] {tool_name}",
+                            }
+                        )
 
                     elif "tool_result" in chunk:
                         result = chunk.get("tool_result", "")
-                        await websocket.send_json({
-                            "type": "thinking",
-                            "content": f"[工具返回] {str(result)[:100]}...",
-                        })
+                        await websocket.send_json(
+                            {
+                                "type": "thinking",
+                                "content": f"[工具返回] {str(result)[:100]}...",
+                            }
+                        )
 
-                normalized = full_response.replace('<think>', '<thinking>').replace('</think>', '</thinking>')
+                normalized = full_response.replace("<think>", "<thinking>").replace("</think>", "</thinking>")
 
                 estimated_tokens, context_usage = _estimate_tokens(normalized)
 
-                await websocket.send_json({
-                    "type": "token_usage",
-                    "content": "",
-                    "token_count": estimated_tokens,
-                    "context_usage": context_usage
-                })
+                await websocket.send_json(
+                    {
+                        "type": "token_usage",
+                        "content": "",
+                        "token_count": estimated_tokens,
+                        "context_usage": context_usage,
+                    }
+                )
 
-                thinking_parts = re.findall(r'<thinking>(.*?)</thinking>', normalized, flags=re.DOTALL)
-                response_text = re.sub(r'<thinking>.*?</thinking>', '', normalized, flags=re.DOTALL).strip()
-                thinking_text = '\n'.join(thinking_parts)
+                thinking_parts = re.findall(r"<thinking>(.*?)</thinking>", normalized, flags=re.DOTALL)
+                response_text = re.sub(r"<thinking>.*?</thinking>", "", normalized, flags=re.DOTALL).strip()
 
                 if thinking_parts:
-                    all_thinking = '\n'.join(part.strip() for part in thinking_parts)
-                    await websocket.send_json({
-                        "type": "thinking",
-                        "content": all_thinking,
-                    })
+                    all_thinking = "\n".join(part.strip() for part in thinking_parts)
+                    await websocket.send_json(
+                        {
+                            "type": "thinking",
+                            "content": all_thinking,
+                        }
+                    )
 
                 if response_text:
                     # 分块发送：每帧约 16 字符（约 4-5 个 token），UI 打字效果更顺滑
                     chunk_size = 16
                     for i in range(0, len(response_text), chunk_size):
-                        chunk = response_text[i:i+chunk_size]
-                        await websocket.send_json({
-                            "type": "chunk",
-                            "content": chunk,
-                        })
+                        chunk = response_text[i : i + chunk_size]
+                        await websocket.send_json(
+                            {
+                                "type": "chunk",
+                                "content": chunk,
+                            }
+                        )
 
-                    await websocket.send_json({
-                        "type": "final",
-                        "content": response_text,
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "final",
+                            "content": response_text,
+                        }
+                    )
 
-                await websocket.send_json({
-                    "type": "done",
-                    "content": "",
-                })
+                await websocket.send_json(
+                    {
+                        "type": "done",
+                        "content": "",
+                    }
+                )
 
                 # 保存助手回复到数据库
                 if response_text:
@@ -574,10 +595,12 @@ async def websocket_endpoint(websocket: WebSocket):
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Agent error: {error_msg}")
-                await websocket.send_json({
-                    "type": "error",
-                    "content": error_msg,
-                })
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "content": error_msg,
+                    }
+                )
 
     except WebSocketDisconnect:
         logger.info("客户端断开连接")
@@ -588,10 +611,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # ========== 微信通道 API ==========
 
+
 @app.post(f"{API_PREFIX}/channels/wechat/qr")
 async def wechat_qr_login():
     """获取微信登录二维码"""
     from .channels.wechat import wechat_qr_login as do_qr_login
+
     try:
         result = await do_qr_login()
         return result
@@ -604,6 +629,7 @@ async def wechat_qr_login():
 async def wechat_qr_status(session_key: str, timeout_ms: int = 10000):
     """获取微信登录二维码状态"""
     from .channels.wechat import wait_qr_scan
+
     try:
         result = await wait_qr_scan(session_key, timeout_ms=timeout_ms)
         return result
@@ -615,7 +641,7 @@ async def wechat_qr_status(session_key: str, timeout_ms: int = 10000):
 @app.get(f"{API_PREFIX}/channels/wechat/bind")
 async def wechat_bind_status():
     """获取微信绑定状态"""
-    from .channels.wechat import get_active_wechat_channel, _accounts, _load_account, _list_indexed_weixin_account_ids
+    from .channels.wechat import _list_indexed_weixin_account_ids, _load_account, get_active_wechat_channel
 
     # 检查是否有活跃通道
     channel = get_active_wechat_channel()
@@ -623,7 +649,7 @@ async def wechat_bind_status():
         return {
             "bound": True,
             "account_id": channel._account.account_id,
-            "status": channel.state.status.value if hasattr(channel.state, 'status') else 'running',
+            "status": channel.state.status.value if hasattr(channel.state, "status") else "running",
         }
 
     # 检查是否有已保存的账号
@@ -647,8 +673,14 @@ async def wechat_bind_status():
 @app.post(f"{API_PREFIX}/channels/wechat/bind")
 async def wechat_do_bind():
     """绑定微信账号"""
-    from .channels.wechat import get_active_wechat_channel, _accounts, _load_account, _list_indexed_weixin_account_ids, WeChatChannel, ChannelConfig, ChannelType, _delete_account, _get_state_dir
-    from .channels.base import ChannelType as BaseChannelType
+    from .channels.wechat import (
+        ChannelConfig,
+        ChannelType,
+        _delete_account,
+        _list_indexed_weixin_account_ids,
+        _load_account,
+        get_active_wechat_channel,
+    )
 
     # 检查是否已有活跃通道
     channel = get_active_wechat_channel()
@@ -672,7 +704,8 @@ async def wechat_do_bind():
                 name=f"WeChat ({account_id[:8]}...)",
                 settings={"account_id": account_id},
             )
-            from .channels.wechat import WeChatChannel as WCH, _check_token_valid
+            from .channels.wechat import WeChatChannel as WCH  # noqa: N814
+            from .channels.wechat import _check_token_valid
 
             # 先检查 token 是否有效
             if not _check_token_valid(account_id):
@@ -690,11 +723,12 @@ async def wechat_do_bind():
             new_channel = WCH(config, token=account_id)
             logger.debug(f"About to start channel for account {account_id}")
             await new_channel.start()
-            logger.debug(f"Channel started, about to set on_message callback")
+            logger.debug("Channel started, about to set on_message callback")
             new_channel.on_message(_handle_wechat_message)
-            logger.debug(f"on_message callback set successfully")
+            logger.debug("on_message callback set successfully")
 
             from .channels.wechat import _set_active_channel
+
             _set_active_channel(new_channel)
             logger.info(f"Active channel set for account {account_id}")
 
@@ -713,7 +747,7 @@ async def wechat_do_bind():
 @app.delete(f"{API_PREFIX}/channels/wechat/bind")
 async def wechat_unbind():
     """解除微信绑定"""
-    from .channels.wechat import get_active_wechat_channel, _clear_active_channel
+    from .channels.wechat import _clear_active_channel, get_active_wechat_channel
 
     channel = get_active_wechat_channel()
     if channel:
@@ -727,13 +761,16 @@ async def wechat_unbind():
 async def get_channels(request: Request):
     """获取所有通道状态"""
     from .channels import ChannelRegistry
+
     registry: ChannelRegistry = request.app.state.channel_registry
     channels = []
     for ch in registry.list_all():
-        channels.append({
-            "id": ch.id,
-            "type": ch.type.value if hasattr(ch.type, "value") else str(ch.type),
-            "status": ch.status.value if hasattr(ch.status, "value") else str(ch.status),
-            "enabled": True,
-        })
+        channels.append(
+            {
+                "id": ch.id,
+                "type": ch.type.value if hasattr(ch.type, "value") else str(ch.type),
+                "status": ch.status.value if hasattr(ch.status, "value") else str(ch.status),
+                "enabled": True,
+            }
+        )
     return {"channels": channels}

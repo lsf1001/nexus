@@ -12,6 +12,7 @@ interface BindStatus {
   bound: boolean;
   account_id?: string;
   status?: string;
+  need_rescan?: boolean;
 }
 
 interface QRResult {
@@ -48,7 +49,7 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
     setStep('loading');
     fetch(`${apiUrl}/channels/wechat/bind`)
       .then(res => res.json())
-      .then((data: any) => {
+      .then((data: BindStatus) => {
         setBindStatus(data);
         if (data.bound) {
           setStep('success');
@@ -120,8 +121,8 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
       setStatusMessage('请使用微信扫描二维码');
       setStep('scanning');
       // 轮询由下面 useEffect 接管
-    } catch (e: any) {
-      setError(e.message || '获取二维码失败');
+    } catch {
+      setError('获取二维码失败');
       setStep('error');
     }
   };

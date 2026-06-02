@@ -1,5 +1,5 @@
-import os
 import json
+import os
 from pathlib import Path
 
 
@@ -24,7 +24,7 @@ def load_config() -> dict:
         try:
             with open(config_path, encoding="utf-8") as f:
                 file_config = json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             pass
 
     default_model = _pick_default_model(file_config)
@@ -51,7 +51,9 @@ def load_config() -> dict:
         "default_save_path": os.environ.get("DEFAULT_SAVE_PATH", str(Path.home() / ".nexus" / "workspace" / "outputs")),
         "tavily_api_key": os.environ.get("TAVILY_API_KEY", ""),
         "openweathermap_api_key": os.environ.get("OPENWEATHERMAP_API_KEY", ""),
-        "ws_token": os.environ.get("NEXUS_WS_TOKEN", file_config.get("security", {}).get("ws_token", "nexus-default-token")),
+        "ws_token": os.environ.get(
+            "NEXUS_WS_TOKEN", file_config.get("security", {}).get("ws_token", "nexus-default-token")
+        ),
         # 工作区目录
         "workspace_root": str(Path.home() / ".nexus" / "workspace"),
         "memory_dir": str(Path.home() / ".nexus" / "workspace" / "memory"),

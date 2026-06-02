@@ -1,15 +1,16 @@
 """模型配置路由：CRUD + 切换激活模型。"""
-from typing import Optional
+
+from threading import Lock
+
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
-from threading import Lock
 
 from ..models_config import load_models, save_models, set_active_model
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
 # 这些全局对象由 main.py 注入（见 init_router）
-_agent_lock: Optional[Lock] = None
+_agent_lock: Lock | None = None
 _mcp_tools: list = []
 _create_agent_with_model = None
 _set_global_agent = None
@@ -26,18 +27,21 @@ def init_router(agent_lock: Lock, mcp_tools: list, create_agent_with_model, set_
 
 class SwitchModelRequest(BaseModel):
     """切换模型请求。"""
+
     id: str = Field(..., min_length=1, description="目标模型 ID")
 
 
 class SwitchModelResponse(BaseModel):
     """切换模型响应。"""
+
     success: bool
-    active_model: Optional[dict] = None
-    error: Optional[str] = None
+    active_model: dict | None = None
+    error: str | None = None
 
 
 class CreateModelRequest(BaseModel):
     """创建模型请求。"""
+
     id: str = Field(..., min_length=1, description="模型ID")
     name: str = Field(default="New Model", description="模型名称")
     api_key: str = Field(default="", description="API密钥")
@@ -47,10 +51,11 @@ class CreateModelRequest(BaseModel):
 
 class UpdateModelRequest(BaseModel):
     """更新模型请求。"""
-    name: Optional[str] = Field(default=None, description="模型名称")
-    api_key: Optional[str] = Field(default=None, description="API密钥")
-    api_base: Optional[str] = Field(default=None, description="API端点")
-    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0, description="温度参数")
+
+    name: str | None = Field(default=None, description="模型名称")
+    api_key: str | None = Field(default=None, description="API密钥")
+    api_base: str | None = Field(default=None, description="API端点")
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0, description="温度参数")
 
 
 @router.get("")

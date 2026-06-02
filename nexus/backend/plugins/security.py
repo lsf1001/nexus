@@ -7,20 +7,21 @@ https://github.com/openclaw/openclaw/blob/main/docs/plugins/sdk-channel-ingress.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 
 class DMPolicy(Enum):
     """私信策略"""
-    ALLOW = "allow"           # 允许所有
-    DENY = "deny"            # 拒绝所有
-    APPROVE = "approve"       # 需要审批
+
+    ALLOW = "allow"  # 允许所有
+    DENY = "deny"  # 拒绝所有
+    APPROVE = "approve"  # 需要审批
     WHITELIST = "whitelist"  # 白名单
 
 
 @dataclass
 class Sender:
     """发送者信息"""
+
     sender_id: str
     sender_name: str = ""
     is_verified: bool = False
@@ -31,6 +32,7 @@ class Sender:
 @dataclass
 class SecurityResult:
     """安全检查结果"""
+
     allowed: bool
     reason: str = ""
     action: str = "block"  # block, allow, approve
@@ -117,7 +119,7 @@ class ChannelSecurity(ABC):
         self,
         sender: Sender,
         action: str,
-        target: Optional[str] = None,
+        target: str | None = None,
     ) -> SecurityResult:
         """授权动作"""
         pass
@@ -141,7 +143,7 @@ class DefaultChannelSecurity(ChannelSecurity):
         self,
         sender: Sender,
         action: str,
-        target: Optional[str] = None,
+        target: str | None = None,
     ) -> SecurityResult:
         """授权动作"""
         # 默认允许

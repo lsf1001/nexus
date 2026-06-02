@@ -3,12 +3,11 @@
 使用 SQLite 存储会话、消息和记忆。
 """
 
-import sqlite3
 import json
+import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any
-from contextlib import contextmanager
 
 from .config import CONFIG
 
@@ -129,7 +128,9 @@ def _migrate_deleted_at() -> None:
     """迁移 deleted_at 索引。"""
     try:
         with get_db() as conn:
-            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='_migrate_deleted_at_idx'")
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name='_migrate_deleted_at_idx'"
+            )
             if cursor.fetchone():
                 conn.execute("DROP INDEX _migrate_deleted_at_idx")
     except Exception:
@@ -151,19 +152,17 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
 # 会话管理
 # ============================================================================
 
-def create_session(session_id: str, title: Optional[str] = None, channel: str = "main") -> dict:
+
+def create_session(session_id: str, title: str | None = None, channel: str = "main") -> dict:
     """创建新会话。"""
     now = datetime.now().isoformat()
     with get_db() as conn:
         conn.execute(
             "INSERT INTO sessions (id, title, created_at, updated_at, channel) VALUES (?, ?, ?, ?, ?)",
-            (session_id, title, now, now, channel)
+            (session_id, title, now, now, channel),
         )
         # 初始化会话统计
-        conn.execute(
-            "INSERT INTO session_stats (session_id, created_at) VALUES (?, ?)",
-            (session_id, now)
-        )
+        conn.execute("INSERT INTO session_stats (session_id, created_at) VALUES (?, ?)", (session_id, now))
         return {
             "id": session_id,
             "title": title,
@@ -173,12 +172,10 @@ def create_session(session_id: str, title: Optional[str] = None, channel: str = 
         }
 
 
-def get_session(session_id: str) -> Optional[dict]:
+def get_session(session_id: str) -> dict | None:
     """获取会话。"""
     with get_db() as conn:
-        row = conn.execute(
-            "SELECT * FROM sessions WHERE id = ?", (session_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if row:
             return dict(row)
         return None
@@ -190,10 +187,7 @@ def list_sessions(limit: int = 50) -> list[dict]:
     微信会话按 account_id 分组，每组只返回最新一个。
     """
     with get_db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC",
-            ()
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC", ()).fetchall()
 
     sessions = [dict(row) for row in rows]
 
@@ -225,26 +219,19 @@ def list_deleted_sessions(limit: int = 50) -> list[dict]:
     """列出所有已删除会话，用于恢复。"""
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT * FROM sessions WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT ?",
-            (limit,)
+            "SELECT * FROM sessions WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(row) for row in rows]
 
 
-def update_session(session_id: str, title: Optional[str] = None) -> Optional[dict]:
+def update_session(session_id: str, title: str | None = None) -> dict | None:
     """更新会话标题和更新时间。"""
     now = datetime.now().isoformat()
     with get_db() as conn:
         if title is not None:
-            conn.execute(
-                "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
-                (title, now, session_id)
-            )
+            conn.execute("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?", (title, now, session_id))
         else:
-            conn.execute(
-                "UPDATE sessions SET updated_at = ? WHERE id = ?",
-                (now, session_id)
-            )
+            conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
         return get_session(session_id)
 
 
@@ -253,8 +240,7 @@ def delete_session(session_id: str) -> bool:
     now = datetime.now().isoformat()
     with get_db() as conn:
         cursor = conn.execute(
-            "UPDATE sessions SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
-            (now, session_id)
+            "UPDATE sessions SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL", (now, session_id)
         )
         return cursor.rowcount > 0
 
@@ -263,8 +249,7 @@ def restore_session(session_id: str) -> bool:
     """恢复已删除的会话。"""
     with get_db() as conn:
         cursor = conn.execute(
-            "UPDATE sessions SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL",
-            (session_id,)
+            "UPDATE sessions SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL", (session_id,)
         )
         return cursor.rowcount > 0
 
@@ -279,12 +264,10 @@ def permanent_delete_session(session_id: str) -> bool:
 def purge_old_sessions(days: int = 30) -> int:
     """清理指定天数前的已删除会话。返回删除数量。"""
     from datetime import timedelta
+
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
     with get_db() as conn:
-        cursor = conn.execute(
-            "DELETE FROM sessions WHERE deleted_at IS NOT NULL AND deleted_at < ?",
-            (cutoff,)
-        )
+        cursor = conn.execute("DELETE FROM sessions WHERE deleted_at IS NOT NULL AND deleted_at < ?", (cutoff,))
         return cursor.rowcount
 
 
@@ -292,38 +275,27 @@ def purge_old_sessions(days: int = 30) -> int:
 # 消息管理
 # ============================================================================
 
-def add_message(
-    message_id: str,
-    session_id: str,
-    role: str,
-    content: str,
-    thinking_content: Optional[str] = None
-) -> dict:
+
+def add_message(message_id: str, session_id: str, role: str, content: str, thinking_content: str | None = None) -> dict:
     """添加消息到会话。"""
     now = datetime.now().isoformat()
     with get_db() as conn:
         conn.execute(
             """INSERT INTO messages (id, session_id, role, content, thinking_content, created_at)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (message_id, session_id, role, content, thinking_content, now)
+            (message_id, session_id, role, content, thinking_content, now),
         )
         # 更新会话的更新时间
-        conn.execute(
-            "UPDATE sessions SET updated_at = ? WHERE id = ?",
-            (now, session_id)
-        )
+        conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
         # 更新会话统计
-        conn.execute(
-            "UPDATE session_stats SET message_count = message_count + 1 WHERE session_id = ?",
-            (session_id,)
-        )
+        conn.execute("UPDATE session_stats SET message_count = message_count + 1 WHERE session_id = ?", (session_id,))
         return {
             "id": message_id,
             "session_id": session_id,
             "role": role,
             "content": content,
             "thinking_content": thinking_content,
-            "created_at": now
+            "created_at": now,
         }
 
 
@@ -331,8 +303,7 @@ def get_messages(session_id: str) -> list[dict]:
     """获取会话的所有消息。"""
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC",
-            (session_id,)
+            "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC", (session_id,)
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -340,15 +311,13 @@ def get_messages(session_id: str) -> list[dict]:
 def get_conversation_history(session_id: str) -> list[dict]:
     """获取会话的历史消息，用于 AI 对话。"""
     messages = get_messages(session_id)
-    return [
-        {"role": msg["role"], "content": msg["content"]}
-        for msg in messages
-    ]
+    return [{"role": msg["role"], "content": msg["content"]} for msg in messages]
 
 
 # ============================================================================
 # 记忆管理
 # ============================================================================
+
 
 def save_memory(
     memory_id: str,
@@ -356,8 +325,8 @@ def save_memory(
     category: str,
     key: str,
     value: str,
-    metadata: Optional[dict] = None,
-    expires_at: Optional[str] = None
+    metadata: dict | None = None,
+    expires_at: str | None = None,
 ) -> dict:
     """保存记忆。
 
@@ -375,14 +344,23 @@ def save_memory(
     # 处理 key 冲突（同类型同 key 的旧记忆软删除）
     with get_db() as conn:
         conn.execute(
-            "UPDATE memory SET is_active = 0 WHERE memory_type = ? AND key = ? AND is_active = 1",
-            (memory_type, key)
+            "UPDATE memory SET is_active = 0 WHERE memory_type = ? AND key = ? AND is_active = 1", (memory_type, key)
         )
 
         conn.execute(
             """INSERT INTO memory (id, memory_type, category, key, value, metadata, created_at, updated_at, expires_at, is_active)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
-            (memory_id, memory_type, category, key, value, json.dumps(metadata) if metadata else None, now, now, expires_at)
+            (
+                memory_id,
+                memory_type,
+                category,
+                key,
+                value,
+                json.dumps(metadata) if metadata else None,
+                now,
+                now,
+                expires_at,
+            ),
         )
 
         return {
@@ -393,16 +371,16 @@ def save_memory(
             "value": value,
             "metadata": metadata,
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
 
 
 def get_memory(
-    session_id: Optional[str] = None,
-    memory_type: Optional[str] = None,
-    category: Optional[str] = None,
-    key: Optional[str] = None,
-    include_inactive: bool = False
+    session_id: str | None = None,
+    memory_type: str | None = None,
+    category: str | None = None,
+    key: str | None = None,
+    include_inactive: bool = False,
 ) -> list[dict]:
     """获取记忆列表。
 
@@ -428,7 +406,7 @@ def get_memory(
         conditions.append("key = ?")
         params.append(key)
 
-    if session_id and memory_type == 'session':
+    if session_id and memory_type == "session":
         # session 类型记忆需要关联会话
         conditions.append("""
             id IN (SELECT id FROM memory WHERE memory_type = 'session' AND key = ?)
@@ -438,14 +416,11 @@ def get_memory(
     where = " AND ".join(conditions) if conditions else "1=1"
 
     with get_db() as conn:
-        rows = conn.execute(
-            f"SELECT * FROM memory WHERE {where} ORDER BY updated_at DESC",
-            params
-        ).fetchall()
+        rows = conn.execute(f"SELECT * FROM memory WHERE {where} ORDER BY updated_at DESC", params).fetchall()
         return [dict(row) for row in rows]
 
 
-def search_memory(keyword: str, memory_type: Optional[str] = None, limit: int = 10) -> list[dict]:
+def search_memory(keyword: str, memory_type: str | None = None, limit: int = 10) -> list[dict]:
     """搜索记忆（全文搜索）。
 
     Args:
@@ -468,8 +443,7 @@ def search_memory(keyword: str, memory_type: Optional[str] = None, limit: int = 
 
     with get_db() as conn:
         rows = conn.execute(
-            f"SELECT * FROM memory WHERE {where} ORDER BY updated_at DESC LIMIT ?",
-            params + [limit]
+            f"SELECT * FROM memory WHERE {where} ORDER BY updated_at DESC LIMIT ?", params + [limit]
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -489,10 +463,7 @@ def delete_memory(memory_id: str, hard: bool = False) -> bool:
         return cursor.rowcount > 0
 
 
-def list_user_memory(
-    category: Optional[str] = None,
-    memory_types: Optional[list] = None
-) -> list[dict]:
+def list_user_memory(category: str | None = None, memory_types: list | None = None) -> list[dict]:
     """列出所有记忆。
 
     Args:
@@ -517,14 +488,11 @@ def list_user_memory(
     where = " AND ".join(conditions)
 
     with get_db() as conn:
-        rows = conn.execute(
-            f"SELECT * FROM memory WHERE {where} ORDER BY updated_at DESC",
-            params
-        ).fetchall()
+        rows = conn.execute(f"SELECT * FROM memory WHERE {where} ORDER BY updated_at DESC", params).fetchall()
         return [dict(row) for row in rows]
 
 
-def get_session_memory(session_id: str, category: Optional[str] = None) -> list[dict]:
+def get_session_memory(session_id: str, category: str | None = None) -> list[dict]:
     """获取会话的所有记忆。"""
     conditions = ["is_active = 1", "memory_type = 'session'", "key LIKE ?"]
     params = [f"{session_id}:%"]
@@ -536,16 +504,14 @@ def get_session_memory(session_id: str, category: Optional[str] = None) -> list[
     where = " AND ".join(conditions)
 
     with get_db() as conn:
-        rows = conn.execute(
-            f"SELECT * FROM memory WHERE {where} ORDER BY created_at DESC",
-            params
-        ).fetchall()
+        rows = conn.execute(f"SELECT * FROM memory WHERE {where} ORDER BY created_at DESC", params).fetchall()
         return [dict(row) for row in rows]
 
 
 # ============================================================================
 # 工具统计
 # ============================================================================
+
 
 def update_tool_stats(tool_name: str, success: bool, latency: float) -> None:
     """更新工具统计。"""
@@ -558,7 +524,7 @@ def update_tool_stats(tool_name: str, success: bool, latency: float) -> None:
                    success_count = success_count + 1,
                    total_latency = total_latency + ?,
                    last_used = ?""",
-                (tool_name, latency, now, latency, now)
+                (tool_name, latency, now, latency, now),
             )
         else:
             conn.execute(
@@ -566,16 +532,14 @@ def update_tool_stats(tool_name: str, success: bool, latency: float) -> None:
                    VALUES (?, 1, ?) ON CONFLICT(tool_name) DO UPDATE SET
                    failure_count = failure_count + 1,
                    last_used = ?""",
-                (tool_name, now, now)
+                (tool_name, now, now),
             )
 
 
-def get_tool_stats(tool_name: str) -> Optional[dict]:
+def get_tool_stats(tool_name: str) -> dict | None:
     """获取工具统计。"""
     with get_db() as conn:
-        row = conn.execute(
-            "SELECT * FROM tool_stats WHERE tool_name = ?", (tool_name,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM tool_stats WHERE tool_name = ?", (tool_name,)).fetchone()
         return dict(row) if row else None
 
 
@@ -590,12 +554,13 @@ def get_all_tool_stats() -> list[dict]:
 # 会话统计
 # ============================================================================
 
+
 def update_session_stats(
     session_id: str,
-    message_count: Optional[int] = None,
-    tool_call_count: Optional[int] = None,
-    success_outcomes: Optional[int] = None,
-    failure_outcomes: Optional[int] = None
+    message_count: int | None = None,
+    tool_call_count: int | None = None,
+    success_outcomes: int | None = None,
+    failure_outcomes: int | None = None,
 ) -> None:
     """更新会话统计。"""
     with get_db() as conn:
@@ -617,18 +582,13 @@ def update_session_stats(
 
         if updates:
             params.append(session_id)
-            conn.execute(
-                f"UPDATE session_stats SET {', '.join(updates)} WHERE session_id = ?",
-                params
-            )
+            conn.execute(f"UPDATE session_stats SET {', '.join(updates)} WHERE session_id = ?", params)
 
 
-def get_session_stats(session_id: str) -> Optional[dict]:
+def get_session_stats(session_id: str) -> dict | None:
     """获取会话统计。"""
     with get_db() as conn:
-        row = conn.execute(
-            "SELECT * FROM session_stats WHERE session_id = ?", (session_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM session_stats WHERE session_id = ?", (session_id,)).fetchone()
         return dict(row) if row else None
 
 
@@ -636,23 +596,20 @@ def end_session(session_id: str) -> None:
     """结束会话。"""
     now = datetime.now().isoformat()
     with get_db() as conn:
-        conn.execute(
-            "UPDATE session_stats SET ended_at = ? WHERE session_id = ?",
-            (now, session_id)
-        )
+        conn.execute("UPDATE session_stats SET ended_at = ? WHERE session_id = ?", (now, session_id))
 
 
 # ============================================================================
 # 清理任务
 # ============================================================================
 
+
 def cleanup_expired_memory() -> int:
     """清理过期记忆。返回删除数量。"""
     now = datetime.now().isoformat()
     with get_db() as conn:
         cursor = conn.execute(
-            "DELETE FROM memory WHERE expires_at IS NOT NULL AND expires_at < ? AND is_active = 1",
-            (now,)
+            "DELETE FROM memory WHERE expires_at IS NOT NULL AND expires_at < ? AND is_active = 1", (now,)
         )
         return cursor.rowcount
 
@@ -662,7 +619,7 @@ def cleanup_low_confidence_memory(threshold: float = 0.3) -> int:
     with get_db() as conn:
         cursor = conn.execute(
             "UPDATE memory SET is_active = 0 WHERE memory_type = 'evolved' AND is_active = 1 AND JSON_EXTRACT(metadata, '$.confidence') < ?",
-            (threshold,)
+            (threshold,),
         )
         return cursor.rowcount
 
@@ -670,10 +627,10 @@ def cleanup_low_confidence_memory(threshold: float = 0.3) -> int:
 def cleanup_low_access_memory(days: int = 90) -> int:
     """清理低访问记忆。返回删除数量。"""
     from datetime import timedelta
+
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
     with get_db() as conn:
         cursor = conn.execute(
-            "DELETE FROM memory WHERE memory_type = 'evolved' AND is_active = 1 AND updated_at < ?",
-            (cutoff,)
+            "DELETE FROM memory WHERE memory_type = 'evolved' AND is_active = 1 AND updated_at < ?", (cutoff,)
         )
         return cursor.rowcount

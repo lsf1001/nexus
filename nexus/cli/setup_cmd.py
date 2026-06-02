@@ -1,15 +1,15 @@
 """交互式设置向导。"""
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt, Confirm
+from rich.prompt import Confirm
 
 from .config_store import (
-    load_nexus_config,
-    save_nexus_config,
-    get_default_config,
     NEXUS_CONFIG_PATH,
     NEXUS_MODELS_PATH,
+    get_default_config,
+    save_nexus_config,
 )
 from .daemon import get_daemon_manager
 
@@ -44,6 +44,7 @@ def _migrate_models_json() -> dict | None:
     if NEXUS_MODELS_PATH.exists():
         try:
             import json
+
             with open(NEXUS_MODELS_PATH, encoding="utf-8") as f:
                 models_data = json.load(f)
             return models_data.get("models", [])
@@ -56,8 +57,7 @@ def run_setup() -> None:
     """交互式设置向导主流程。"""
     console.print(
         Panel(
-            "[bold cyan]Nexus 设置向导[/bold cyan]\n\n"
-            "本向导将引导你完成 Nexus 的初始配置。",
+            "[bold cyan]Nexus 设置向导[/bold cyan]\n\n本向导将引导你完成 Nexus 的初始配置。",
             title="欢迎",
             border_style="cyan",
         )

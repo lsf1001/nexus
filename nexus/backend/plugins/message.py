@@ -4,16 +4,18 @@
 https://github.com/openclaw/openclaw/blob/main/docs/plugins/sdk-channel-outbound.md
 """
 
-from abc import ABC, abstractmethod
 import uuid
+from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
 
 
 class MessageType(Enum):
     """消息类型"""
+
     TEXT = "text"
     IMAGE = "image"
     VOICE = "voice"
@@ -26,6 +28,7 @@ class MessageType(Enum):
 
 class MessageReceiptStatus(Enum):
     """消息回执状态"""
+
     PENDING = "pending"
     SENT = "sent"
     DELIVERED = "delivered"
@@ -35,28 +38,31 @@ class MessageReceiptStatus(Enum):
 
 class AckPolicy(Enum):
     """消息确认策略"""
-    NONE = "none"                   # 无确认
-    AUTO = "auto"                   # 自动确认
-    MANUAL = "manual"              # 手动确认
+
+    NONE = "none"  # 无确认
+    AUTO = "auto"  # 自动确认
+    MANUAL = "manual"  # 手动确认
 
 
 @dataclass
 class MediaContent:
     """媒体内容"""
+
     url: str = ""
     mime_type: str = ""
     size: int = 0
-    width: Optional[int] = None
-    height: Optional[int] = None
-    duration: Optional[float] = None  # 音视频时长(秒)
-    thumbnail: Optional[str] = None    # 缩略图 URL
+    width: int | None = None
+    height: int | None = None
+    duration: float | None = None  # 音视频时长(秒)
+    thumbnail: str | None = None  # 缩略图 URL
 
 
 @dataclass
 class MessageContent:
     """消息内容"""
+
     text: str = ""
-    media: Optional[MediaContent] = None
+    media: MediaContent | None = None
 
     # 扩展字段
     extras: dict[str, Any] = field(default_factory=dict)
@@ -69,19 +75,21 @@ class MessageContent:
 @dataclass
 class MessageReceipt:
     """消息回执"""
+
     message_id: str
     status: MessageReceiptStatus = MessageReceiptStatus.PENDING
-    sent_at: Optional[datetime] = None
-    delivered_at: Optional[datetime] = None
-    read_at: Optional[datetime] = None
-    error: Optional[str] = None
+    sent_at: datetime | None = None
+    delivered_at: datetime | None = None
+    read_at: datetime | None = None
+    error: str | None = None
 
-    platform_id: Optional[str] = None  # 平台返回的原始 ID
+    platform_id: str | None = None  # 平台返回的原始 ID
 
 
 @dataclass
 class InboundMessage:
     """收到的消息"""
+
     message_id: str
     channel_id: str
 
@@ -111,32 +119,35 @@ class InboundMessage:
 @dataclass
 class OutboundMessage:
     """发送的消息"""
+
     content: MessageContent
     to_user_id: str
-    to_session_id: Optional[str] = None
+    to_session_id: str | None = None
 
     # 消息类型
     message_type: MessageType = MessageType.TEXT
 
     # 回复
-    reply_to_message_id: Optional[str] = None
+    reply_to_message_id: str | None = None
 
     # 选项
     options: dict[str, Any] = field(default_factory=dict)
 
     # 回执回调
-    receipt_callback: Optional[Callable] = None
+    receipt_callback: Callable | None = None
 
 
 @dataclass
 class TypingIndicator:
     """打字状态"""
+
     session_id: str
     user_id: str
     is_typing: bool = True
 
 
 # ========== Channel Message Adapter 接口 ==========
+
 
 class ChannelMessageAdapter(ABC):
     """通道消息适配器接口

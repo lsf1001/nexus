@@ -12,26 +12,23 @@
 - EvolutionService: 进化服务
 """
 
-import re
 import logging
-
-logger = logging.getLogger(__name__)
+import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from langchain_openai import ChatOpenAI
 from deepagents import create_deep_agent
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
-from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemPermission
-from deepagents.middleware.memory import MemoryMiddleware
-from deepagents.middleware.subagents import SubAgent, SubAgentMiddleware
+from deepagents.middleware.subagents import SubAgent
+from langchain_openai import ChatOpenAI
 
 from .config import CONFIG
-from .memory import MemoryService, EvolutionService
+from .memory import MemoryService
 
+logger = logging.getLogger(__name__)
 
 # 预编译正则表达式，提升扫描性能
 _INJECTION_PATTERNS = [
@@ -46,6 +43,8 @@ _INJECTION_PATTERNS = [
     re.compile(r"repeat\s+(?:the\s+)?(?:above\s+)?instructions?", re.IGNORECASE),
     re.compile(r"output\s+(?:the\s+)?(?:previous|above)\s+(?:system\s+)?prompt", re.IGNORECASE),
     re.compile(r"you\s+(?:can|may|should)\s+(?:now\s+)?ignore", re.IGNORECASE),
+    re.compile(r"do\s+not\s+(?:tell|inform|reveal|show)\s+(?:the\s+)?user", re.IGNORECASE),
+    re.compile(r"hide\s+(?:this|the)\s+from\s+(?:the\s+)?user", re.IGNORECASE),
 ]
 
 
@@ -184,7 +183,7 @@ def _create_backend(project_root: Path) -> CompositeBackend:
         routes={
             ".nexus/state/": StateBackend(),
             ".nexus/store/": StoreBackend(),
-        }
+        },
     )
 
 
@@ -292,7 +291,9 @@ def create_agent(
         memory=memory_files,
         skills=[
             ".nexus/skills",
-        ] if skills_dir.exists() else [],
+        ]
+        if skills_dir.exists()
+        else [],
     )
 
 

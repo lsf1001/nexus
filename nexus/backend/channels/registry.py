@@ -1,7 +1,7 @@
 """ChannelRegistry - Channel 实例的工厂和生命周期管理器"""
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from .base import Channel, ChannelConfig, ChannelType
 
@@ -34,7 +34,7 @@ class ChannelRegistry:
             self._channels.pop(channel_id)
             logger.info(f"Channel unregistered: {channel_id}")
 
-    def get(self, channel_id: str) -> Optional[Channel]:
+    def get(self, channel_id: str) -> Channel | None:
         """获取 Channel 实例
 
         Args:
@@ -101,11 +101,13 @@ def create_channel_from_config(
 
     if channel_type == ChannelType.WEBSOCKET:
         from .websocket import WebSocketChannel
+
         token = kwargs.get("token", "")
         return WebSocketChannel(config=config, token=token)
 
     elif channel_type == ChannelType.WECHAT:
         from .wechat import WeChatChannel
+
         token = kwargs.get("token", "")
         return WeChatChannel(config=config, token=token)
 

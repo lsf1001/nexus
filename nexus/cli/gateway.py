@@ -1,6 +1,6 @@
 """Nexus Gateway 子命令。"""
+
 import platform
-import subprocess
 import sys
 from pathlib import Path
 
@@ -31,12 +31,13 @@ def run_gateway() -> None:
     python_path = _get_venv_python()
 
     if not python_path.exists():
-        console.print(f"[red]错误[/red]: 虚拟环境未找到，请运行安装脚本")
+        console.print("[red]错误[/red]: 虚拟环境未找到，请运行安装脚本")
         raise typer.Exit(code=1)
 
-    console.print(f"[green]启动 Nexus 网关...[/green]")
+    console.print("[green]启动 Nexus 网关...[/green]")
 
     import os
+
     import uvicorn
 
     os.environ["NEXUS_HOME"] = str(nexus_home)
@@ -56,17 +57,18 @@ def run_cmd(
     port: int = typer.Option(30000, help="监听端口"),
 ) -> None:
     """前台运行网关（开发模式）。"""
-    console.print(f"[green]启动 Nexus 网关 (前台模式)[/green]")
+    console.print("[green]启动 Nexus 网关 (前台模式)[/green]")
     console.print(f"地址: [cyan]{host}:{port}[/cyan]")
 
     nexus_home = _get_nexus_home()
     python_path = _get_venv_python()
 
     if not python_path.exists():
-        console.print(f"[red]错误[/red]: 虚拟环境未找到")
+        console.print("[red]错误[/red]: 虚拟环境未找到")
         raise typer.Exit(code=1)
 
     import os
+
     import uvicorn
 
     os.environ["NEXUS_HOME"] = str(nexus_home)
@@ -88,12 +90,12 @@ def start_cmd(
     manager = get_daemon_manager()
 
     if manager.is_running() and not replace:
-        console.print(f"[yellow]网关已在运行中[/yellow]，使用 [cyan]nexus gateway restart[/cyan] 重启")
+        console.print("[yellow]网关已在运行中[/yellow]，使用 [cyan]nexus gateway restart[/cyan] 重启")
         return
 
-    console.print(f"[green]启动 Nexus 网关 (后台模式)[/green]")
+    console.print("[green]启动 Nexus 网关 (后台模式)[/green]")
     manager.start()
-    console.print(f"[green]✔ 网关已启动[/green]")
+    console.print("[green]✔ 网关已启动[/green]")
 
 
 @gateway_app.command("stop")
@@ -102,21 +104,21 @@ def stop_cmd() -> None:
     manager = get_daemon_manager()
 
     if not manager.is_running():
-        console.print(f"[yellow]网关未运行[/yellow]")
+        console.print("[yellow]网关未运行[/yellow]")
         return
 
-    console.print(f"[green]停止 Nexus 网关...[/green]")
+    console.print("[green]停止 Nexus 网关...[/green]")
     manager.stop()
-    console.print(f"[green]✔ 网关已停止[/green]")
+    console.print("[green]✔ 网关已停止[/green]")
 
 
 @gateway_app.command("restart")
 def restart_cmd() -> None:
     """重启网关服务。"""
-    console.print(f"[green]重启 Nexus 网关...[/green]")
+    console.print("[green]重启 Nexus 网关...[/green]")
     manager = get_daemon_manager()
     manager.restart()
-    console.print(f"[green]✔ 网关已重启[/green]")
+    console.print("[green]✔ 网关已重启[/green]")
 
 
 @gateway_app.command("status")
@@ -136,7 +138,7 @@ def status_cmd() -> None:
     else:
         console.print(
             Panel(
-                f"[red]● 未运行[/red]",
+                "[red]● 未运行[/red]",
                 title="Nexus Gateway",
                 border_style="red",
             )
@@ -148,8 +150,8 @@ def install_cmd() -> None:
     """注册为系统服务（launchd/systemd）。"""
     manager = get_daemon_manager()
     manager.install()
-    console.print(f"[green]✔ 已注册为系统服务[/green]")
-    console.print(f"使用 [cyan]nexus gateway start[/cyan] 启动服务")
+    console.print("[green]✔ 已注册为系统服务[/green]")
+    console.print("使用 [cyan]nexus gateway start[/cyan] 启动服务")
 
 
 @gateway_app.command("uninstall")
@@ -158,8 +160,8 @@ def uninstall_cmd() -> None:
     manager = get_daemon_manager()
 
     if manager.is_running():
-        console.print(f"[yellow]先停止服务...[/yellow]")
+        console.print("[yellow]先停止服务...[/yellow]")
         manager.stop()
 
     manager.uninstall()
-    console.print(f"[green]✔ 已移除系统服务注册[/green]")
+    console.print("[green]✔ 已移除系统服务注册[/green]")
