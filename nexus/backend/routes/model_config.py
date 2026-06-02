@@ -1,5 +1,7 @@
 """模型配置路由：CRUD + 切换激活模型。"""
 
+from __future__ import annotations
+
 from threading import Lock
 
 from fastapi import APIRouter, HTTPException, status
