@@ -1,4 +1,5 @@
 import datetime
+import logging
 from pathlib import Path
 
 import requests
@@ -10,12 +11,12 @@ from langchain_community.tools.file_management import (
     ReadFileTool,
     WriteFileTool,
 )
-from langchain_community.tools.wikipedia.tool import WikipediaQueryRun
-from langchain_community.utilities.wikipedia import WikipediaAPIWrapper
 from langchain_core.tools import tool as langchain_tool
 
 from .config import CONFIG
 from .memory import EvolutionService, MemoryService
+
+logger = logging.getLogger(__name__)
 
 # 全局服务实例
 _memory_service: MemoryService | None = None
@@ -110,9 +111,21 @@ def yandex_search(query: str) -> str:
         return f"Yandex搜索错误：{str(e)}"
 
 
-# 搜索工具
-web_search = DuckDuckGoSearchRun(name="web_search", description="搜索网络信息（国外服务，可能超时）")
-wikipedia = WikipediaQueryRun(name="wikipedia", api_wrapper=WikipediaAPIWrapper())
+# 搜索工具（缺对应包时降级为 None，TOOLS 会自动过滤）
+try:
+    web_search = DuckDuckGoSearchRun(name="web_search", description="搜索网络信息（国外服务，可能超时）")
+except ImportError as e:
+    logger.warning("DuckDuckGo 工具不可用: %s", e)
+    web_search = None
+
+try:
+    from langchain_community.tools.wikipedia.tool import WikipediaQueryRun
+    from langchain_community.utilities.wikipedia import WikipediaAPIWrapper
+
+    wikipedia = WikipediaQueryRun(name="wikipedia", api_wrapper=WikipediaAPIWrapper())
+except ImportError as e:
+    logger.warning("Wikipedia 工具不可用: %s", e)
+    wikipedia = None
 
 # 文件管理工具
 read_file = ReadFileTool()
@@ -249,3 +262,4 @@ TOOLS = [
     search_memory,
     delete_memory,
 ]
+TOOLS = [t for t in TOOLS if t is not None]
