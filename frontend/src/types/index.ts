@@ -24,14 +24,25 @@ export interface SessionResponse {
 }
 
 export interface StreamEvent {
-  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage' | 'wechat_message';
+  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage' | 'wechat_message' | 'session_created';
   content?: string;
   token_count?: number;
   context_usage?: number;
+  session_id?: string;
+  title?: string;
 }
 
 export interface WSMessage {
   content: string;
   session_id?: string;
   title?: string;  // 用于创建新会话时传递标题
+}
+
+export interface Model {
+  id: string;
+  name: string;
+  api_key: string;
+  api_base: string;
+  temperature: number;
+  is_active: boolean;
 }

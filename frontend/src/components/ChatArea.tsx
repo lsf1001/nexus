@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../store/useStore';
+import { useWebSocket } from '../hooks/useWebSocket';
 import ChatBubble from './ChatBubble';
 import totoroGif from '../assets/totoro.gif';
 import type { StreamEvent, WSMessage, Message } from '../types';
@@ -7,12 +8,18 @@ import type { StreamEvent, WSMessage, Message } from '../types';
 interface ChatAreaProps {
   resetTrigger?: number;
   onConnectedChange?: (connected: boolean) => void;
-  onSaveConversation?: (messages: Message[]) => void;
+  onSessionCreated?: (sessionId: string, title: string) => void;
   conversationId?: string | null;
 }
 
-function ChatArea({ resetTrigger, onConnectedChange, conversationId: _conversationId }: ChatAreaProps) {
-  const wsRef = useRef<WebSocket | null>(null);
+const QUICK_PROMPTS: Array<{ title: string; desc: string; prompt: string }> = [
+  { title: '写代码', desc: 'Python、JavaScript...', prompt: '帮我写一段 Python 代码' },
+  { title: '分析数据', desc: 'Excel、CSV、JSON...', prompt: '帮我分析这份数据' },
+  { title: '知识问答', desc: '解释概念、回答问题...', prompt: '解释一下这个概念' },
+  { title: '写作助手', desc: '文章、邮件、报告...', prompt: '帮我写一篇文章' },
+];
+
+function ChatArea({ resetTrigger, onConnectedChange, onSessionCreated, conversationId: _conversationId }: ChatAreaProps) {
   const messagesRef = useRef<Message[]>([]);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -46,94 +53,85 @@ function ChatArea({ resetTrigger, onConnectedChange, conversationId: _conversati
     resetTriggerRef.current = resetTrigger ?? 0;
   }, [resetTrigger, clearConversationMessages]);
 
-  // 当 conversationId 有值时（从历史加载），加载对应消息
-  useEffect(() => {
-    if (_conversationId) {
-      // 消息已在 App.tsx 通过 setConversationMessages 设置
-    }
-  }, [_conversationId]);
+  // 注：历史消息加载由 App.tsx 通过 setConversationMessages 完成，本组件无需处理。
 
-  // WebSocket 连接
-  useEffect(() => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/api/ws?token=nexus-default-token`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+  // 处理 WebSocket 消息
+  const handleWsMessage = useCallback((raw: StreamEvent | unknown) => {
+    const data = raw as StreamEvent;
+    if (!data || typeof data !== 'object' || !('type' in data)) return;
 
-    ws.onopen = () => {
-      setWsConnected(true);
-      onConnectedChange?.(true);
-    };
-
-    ws.onclose = () => {
-      setWsConnected(false);
-      onConnectedChange?.(false);
-    };
-
-    ws.onerror = () => {
-      setWsConnected(false);
-      onConnectedChange?.(false);
-    };
-
-    ws.onmessage = (event) => {
-      const data: StreamEvent = JSON.parse(event.data);
-
-      switch (data.type) {
-        case 'thinking': {
-          if (messagesRef.current.length > 0) {
-            const lastIdx = messagesRef.current.length - 1;
-            messagesRef.current[lastIdx].thinking =
-              (messagesRef.current[lastIdx].thinking || '') + data.content;
-            setConversationMessages([...messagesRef.current]);
-          }
-          break;
-        }
-        case 'chunk': {
-          if (messagesRef.current.length > 0) {
-            const lastIdx = messagesRef.current.length - 1;
-            if (messagesRef.current[lastIdx].role === 'assistant') {
-              messagesRef.current[lastIdx].content += data.content;
-            }
-            setConversationMessages([...messagesRef.current]);
-          }
-          break;
-        }
-        case 'final': {
-          if (messagesRef.current.length > 0) {
-            const lastIdx = messagesRef.current.length - 1;
-            messagesRef.current[lastIdx].content = data.content || '';
-            setConversationMessages([...messagesRef.current]);
-          }
-          setIsLoading(false);
-          break;
-        }
-        case 'done': {
-          setIsLoading(false);
-          break;
-        }
-        case 'error': {
-          setIsLoading(false);
-          break;
-        }
-        case 'wechat_message': {
-          // 处理微信消息
-          const wechatMsg: Message = {
-            id: crypto.randomUUID(),
-            role: 'user',
-            content: data.content || '',
-            createdAt: new Date(),
-          };
-          messagesRef.current.push(wechatMsg);
+    switch (data.type) {
+      case 'thinking': {
+        if (messagesRef.current.length > 0) {
+          const lastIdx = messagesRef.current.length - 1;
+          messagesRef.current[lastIdx].thinking =
+            (messagesRef.current[lastIdx].thinking || '') + data.content;
           setConversationMessages([...messagesRef.current]);
-          break;
         }
+        break;
       }
-    };
+      case 'chunk': {
+        if (messagesRef.current.length > 0) {
+          const lastIdx = messagesRef.current.length - 1;
+          if (messagesRef.current[lastIdx].role === 'assistant') {
+            messagesRef.current[lastIdx].content += data.content;
+          }
+          setConversationMessages([...messagesRef.current]);
+        }
+        break;
+      }
+      case 'final': {
+        if (messagesRef.current.length > 0) {
+          const lastIdx = messagesRef.current.length - 1;
+          messagesRef.current[lastIdx].content = data.content || '';
+          setConversationMessages([...messagesRef.current]);
+        }
+        setIsLoading(false);
+        break;
+      }
+      case 'done': {
+        setIsLoading(false);
+        break;
+      }
+      case 'error': {
+        setIsLoading(false);
+        break;
+      }
+      case 'wechat_message': {
+        const wechatMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: data.content || '',
+          createdAt: new Date(),
+        };
+        messagesRef.current.push(wechatMsg);
+        setConversationMessages([...messagesRef.current]);
+        break;
+      }
+      case 'session_created': {
+        onSessionCreated?.(data.session_id || '', data.title || '新会话');
+        break;
+      }
+    }
+  }, [onSessionCreated, setConversationMessages, setIsLoading]);
 
-    return () => {
-      ws.close();
-    };
-  }, []);
+  // WebSocket 连接（含自动重连）
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${window.location.host}/api/ws?token=nexus-default-token`;
+  const { connected: wsHookConnected, send: wsSend } = useWebSocket<StreamEvent>({
+    url: wsUrl,
+    onMessage: handleWsMessage,
+  });
+
+  // 用 ref 持有最新 send，避免 handleSend 闭包过期
+  const sendRef = useRef(wsSend);
+  sendRef.current = wsSend;
+
+  // 把 hook 连接状态同步到 store / 父组件
+  useEffect(() => {
+    setWsConnected(wsHookConnected);
+    onConnectedChange?.(wsHookConnected);
+  }, [wsHookConnected, setWsConnected, onConnectedChange]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -171,7 +169,7 @@ function ChatArea({ resetTrigger, onConnectedChange, conversationId: _conversati
     } else {
       msg.session_id = sessionIdRef.current;
     }
-    wsRef.current?.send(JSON.stringify(msg));
+    sendRef.current(msg);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -187,7 +185,10 @@ function ChatArea({ resetTrigger, onConnectedChange, conversationId: _conversati
   };
 
   const handleCopyMessage = (content: string) => {
-    navigator.clipboard.writeText(content).then(() => {});
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(content).catch((err) => {
+      console.warn('复制失败:', err);
+    });
   };
 
   const bgClass = darkMode ? 'bg-[#0a0a0a]' : 'bg-[#f5f7f2]';
@@ -195,12 +196,12 @@ function ChatArea({ resetTrigger, onConnectedChange, conversationId: _conversati
   const inputTextClass = darkMode ? 'text-white placeholder-gray-500' : 'text-[#2d4a3a] placeholder-[#8a9a7a]';
 
   return (
-    <div className={`flex-1 flex flex-col ${bgClass}`}>
+    <div className={`flex-1 flex flex-col ${bgClass}`} style={{ minHeight: 0 }}>
       {/* 消息区域 */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="chat-scroll flex flex-col flex-1 min-h-0 overflow-y-auto" style={{ minHeight: 0 }}>
         {displayMessages.length === 0 && !isLoading ? (
           /* 欢迎界面 */
-          <div className="flex flex-col items-center justify-center h-full px-4">
+          <div className="flex flex-col items-center justify-center px-4">
             <div className="mb-6">
               <img
                 src={totoroGif}
@@ -212,34 +213,16 @@ function ChatArea({ resetTrigger, onConnectedChange, conversationId: _conversati
             <p className={darkMode ? 'text-gray-500 mb-8' : 'text-[#5a6b52] mb-8'}>我可以帮你解答问题、编写代码、分析数据...</p>
 
             <div className="grid grid-cols-2 gap-3 w-full max-w-md">
-              <button
-                onClick={() => insertPrompt('帮我写一段 Python 代码')}
-                className={`p-4 rounded-xl ${darkMode ? 'bg-[#1a1a1a] hover:bg-[#252525] border-[#2a2a2a]' : 'bg-white hover:bg-[#f5f7f2] border-[#e0e5dc]'} border text-left transition-colors`}
-              >
-                <div className={`text-sm font-medium mb-1 ${darkMode ? 'text-white' : 'text-[#2d4a3a]'}`}>写代码</div>
-                <div className={`text-xs ${darkMode ? 'text-gray-500' : 'text-[#8a9a7a]'}`}>Python、JavaScript...</div>
-              </button>
-              <button
-                onClick={() => insertPrompt('帮我分析这份数据')}
-                className={`p-4 rounded-xl ${darkMode ? 'bg-[#1a1a1a] hover:bg-[#252525] border-[#2a2a2a]' : 'bg-white hover:bg-[#f5f7f2] border-[#e0e5dc]'} border text-left transition-colors`}
-              >
-                <div className={`text-sm font-medium mb-1 ${darkMode ? 'text-white' : 'text-[#2d4a3a]'}`}>分析数据</div>
-                <div className={`text-xs ${darkMode ? 'text-gray-500' : 'text-[#8a9a7a]'}`}>Excel、CSV、JSON...</div>
-              </button>
-              <button
-                onClick={() => insertPrompt('解释一下这个概念')}
-                className={`p-4 rounded-xl ${darkMode ? 'bg-[#1a1a1a] hover:bg-[#252525] border-[#2a2a2a]' : 'bg-white hover:bg-[#f5f7f2] border-[#e0e5dc]'} border text-left transition-colors`}
-              >
-                <div className={`text-sm font-medium mb-1 ${darkMode ? 'text-white' : 'text-[#2d4a3a]'}`}>知识问答</div>
-                <div className={`text-xs ${darkMode ? 'text-gray-500' : 'text-[#8a9a7a]'}`}>解释概念、回答问题...</div>
-              </button>
-              <button
-                onClick={() => insertPrompt('帮我写一篇文章')}
-                className={`p-4 rounded-xl ${darkMode ? 'bg-[#1a1a1a] hover:bg-[#252525] border-[#2a2a2a]' : 'bg-white hover:bg-[#f5f7f2] border-[#e0e5dc]'} border text-left transition-colors`}
-              >
-                <div className={`text-sm font-medium mb-1 ${darkMode ? 'text-white' : 'text-[#2d4a3a]'}`}>写作助手</div>
-                <div className={`text-xs ${darkMode ? 'text-gray-500' : 'text-[#8a9a7a]'}`}>文章、邮件、报告...</div>
-              </button>
+              {QUICK_PROMPTS.map(p => (
+                <button
+                  key={p.title}
+                  onClick={() => insertPrompt(p.prompt)}
+                  className={`p-4 rounded-xl ${darkMode ? 'bg-[#1a1a1a] hover:bg-[#252525] border-[#2a2a2a]' : 'bg-white hover:bg-[#f5f7f2] border-[#e0e5dc]'} border text-left transition-colors`}
+                >
+                  <div className={`text-sm font-medium mb-1 ${darkMode ? 'text-white' : 'text-[#2d4a3a]'}`}>{p.title}</div>
+                  <div className={`text-xs ${darkMode ? 'text-gray-500' : 'text-[#8a9a7a]'}`}>{p.desc}</div>
+                </button>
+              ))}
             </div>
           </div>
         ) : (
@@ -270,7 +253,7 @@ function ChatArea({ resetTrigger, onConnectedChange, conversationId: _conversati
       </div>
 
       {/* 输入区域 */}
-      <div className={`p-4 border-t ${darkMode ? 'border-[#1f1f1f] bg-[#0f0f0f]' : 'border-[#e0e5dc] bg-white'}`}>
+      <div className={`p-4 border-t flex-shrink-0 ${darkMode ? 'border-[#1f1f1f] bg-[#0f0f0f]' : 'border-[#e0e5dc] bg-white'}`} style={{ flex: '0 0 auto' }}>
         <div className="max-w-3xl mx-auto">
           <div className={`flex items-end gap-3 ${inputBgClass} rounded-xl border px-4 py-3 focus-within:border-[#4a7c59] transition-colors`}>
             <textarea

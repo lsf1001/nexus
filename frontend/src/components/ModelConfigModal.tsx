@@ -1,14 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-
-interface Model {
-  id: string;
-  name: string;
-  api_key: string;
-  api_base: string;
-  temperature: number;
-  is_active: boolean;
-}
+import type { Model } from '../types';
 
 interface ModelConfigModalProps {
   isOpen: boolean;
@@ -37,6 +29,15 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
     if (isOpen) {
       loadModels();
     }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [isOpen]);
 
   const loadModels = async () => {
@@ -178,8 +179,8 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50" onClick={handleClose}>
+      <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 bg-[#2d4a3a]">
           <h2 className="text-lg font-semibold text-white">模型配置</h2>

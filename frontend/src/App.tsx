@@ -2,13 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import ChatArea from './components/ChatArea';
 import ModelConfigModal from './components/ModelConfigModal';
 import WechatPluginModal from './components/WechatPluginModal';
+import SessionList from './components/SessionList';
 import { useStore } from './store/useStore';
 import type { Message, SessionResponse, Conversation } from './types';
 
 function App() {
   const [showModelConfig, setShowModelConfig] = useState(false);
   const [showWechatPlugin, setShowWechatPlugin] = useState(false);
-  const [, setModelName] = useState('MiniMax-M2.7');
   const [wsConnected, setWsConnected] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
@@ -16,9 +16,12 @@ function App() {
   const [resetCounter, setResetCounter] = useState(0);
   const [wechatConnected, setWechatConnected] = useState(false);
   const darkMode = useStore((s) => s.darkMode);
+  const showThinking = useStore((s) => s.showThinking);
   const setDarkMode = useStore((s) => s.setDarkMode);
+  const setShowThinking = useStore((s) => s.setShowThinking);
   const clearConversationMessages = useStore((s) => s.clearConversationMessages);
   const setConversationMessages = useStore((s) => s.setConversationMessages);
+  const setModelName = useStore((s) => s.setModelName);
 
   // 加载会话列表
   useEffect(() => {
@@ -72,43 +75,7 @@ function App() {
         }
       })
       .catch(() => {});
-  }, []);
-
-  const handleSaveConversation = useCallback(async (messages: Message[]) => {
-    if (messages.length === 0) return;
-
-    const title = messages[0].content.slice(0, 30) + (messages[0].content.length > 30 ? '...' : '');
-
-    if (currentConversationId) {
-      // 更新已有会话
-      await fetch(`/api/sessions/${currentConversationId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      }).catch(() => {});
-      return currentConversationId;
-    }
-
-    // 创建新会话
-    try {
-      const res = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      });
-      const data = await res.json();
-      setCurrentConversationId(data.id);
-      setConversations(prev => [{
-        id: data.id,
-        title: data.title || title,
-        messages: [],
-        createdAt: new Date(data.created_at),
-        updatedAt: data.updated_at,
-      }, ...prev]);
-      return data.id;
-    } catch (e) {}
-    return null;
-  }, [currentConversationId, setConversations]);
+  }, [setModelName]);
 
   const handleLoadConversation = useCallback(async (conv: Conversation) => {
     setCurrentConversationId(conv.id);
@@ -151,10 +118,21 @@ function App() {
     setDarkMode(!darkMode);
   };
 
+  const handleSessionCreated = useCallback((sessionId: string, title: string) => {
+    setCurrentConversationId(sessionId);
+    setConversations(prev => [{
+      id: sessionId,
+      title,
+      messages: [],
+      createdAt: new Date(),
+      updatedAt: new Date().toISOString(),
+    }, ...prev]);
+  }, []);
+
   return (
     <div className={`flex h-screen ${darkMode ? 'dark' : ''}`}>
       {/* 左侧边栏 */}
-      <aside className={`${showSidebar ? 'w-64' : 'w-0'} h-full ${darkMode ? 'bg-[#0f0f0f] border-[#1f1f1f]' : 'bg-white border-[#e0e5dc]'} border-r flex flex-col transition-all duration-200 overflow-hidden`}>
+      <aside className={`${showSidebar ? 'w-64' : 'w-0'} h-full min-h-0 flex flex-col ${darkMode ? 'bg-[#0f0f0f] border-[#1f1f1f]' : 'bg-white border-[#e0e5dc]'} border-r transition-all duration-200 overflow-hidden`}>
         <div className="flex items-center gap-3 px-4 py-4 border-b ${darkMode ? 'border-[#1f1f1f]' : 'border-[#e0e5dc]'}">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4a7c59] to-[#2d4a3a] flex items-center justify-center">
             <span className="text-white font-bold">N</span>
@@ -177,81 +155,25 @@ function App() {
 
         {/* 历史会话 */}
         <div className="flex-1 overflow-y-auto px-3">
-          {/* 主会话 */}
           <div className={`text-xs uppercase px-3 py-2 ${darkMode ? 'text-gray-500' : 'text-[#6b7c6b]'}`}>主会话</div>
-          {conversations.filter(c => c.channel !== 'wechat').length === 0 ? (
-            <p className={`text-xs text-center py-4 ${darkMode ? 'text-gray-600' : 'text-[#a0a090]'}`}>暂无主会话</p>
-          ) : (
-            <div className="space-y-1">
-              {conversations.filter(c => c.channel !== 'wechat').map(conv => (
-                <div
-                  key={conv.id}
-                  onClick={() => handleLoadConversation(conv)}
-                  className={`group px-3 py-2 rounded-lg cursor-pointer transition-colors ${
-                    currentConversationId === conv.id
-                      ? darkMode ? 'bg-[#252525] text-white' : 'bg-[#e8ece5] text-[#2d4a3a]'
-                      : darkMode ? 'hover:bg-[#1a1a1a] text-gray-400' : 'hover:bg-[#f0f2ed] text-[#5a6b52]'
-                  }`}
-                >
-                  <div className="text-sm truncate">{conv.title}</div>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className={`text-xs ${darkMode ? 'text-gray-600' : 'text-[#8a9a7a]'}`}>
-                      {new Date(conv.updatedAt || conv.createdAt).toLocaleDateString()}
-                    </span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteConversation(conv.id);
-                      }}
-                      className={`opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity ${darkMode ? 'hover:bg-red-900/30 text-red-500' : 'hover:bg-red-100 text-red-500'}`}
-                    >
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <SessionList
+            conversations={conversations}
+            channel="main"
+            currentConversationId={currentConversationId}
+            darkMode={darkMode}
+            onSelect={handleLoadConversation}
+            onDelete={handleDeleteConversation}
+          />
 
-          {/* 微信会话 */}
           <div className={`text-xs uppercase px-3 py-2 mt-3 ${darkMode ? 'text-gray-500' : 'text-[#6b7c6b]'}`}>微信会话</div>
-          {conversations.filter(c => c.channel === 'wechat').length === 0 ? (
-            <p className={`text-xs text-center py-4 ${darkMode ? 'text-gray-600' : 'text-[#a0a090]'}`}>暂无微信会话</p>
-          ) : (
-            <div className="space-y-1">
-              {conversations.filter(c => c.channel === 'wechat').map(conv => (
-                <div
-                  key={conv.id}
-                  onClick={() => handleLoadConversation(conv)}
-                  className={`group px-3 py-2 rounded-lg cursor-pointer transition-colors ${
-                    currentConversationId === conv.id
-                      ? darkMode ? 'bg-[#252525] text-white' : 'bg-[#e8ece5] text-[#2d4a3a]'
-                      : darkMode ? 'hover:bg-[#1a1a1a] text-gray-400' : 'hover:bg-[#f0f2ed] text-[#5a6b52]'
-                  }`}
-                >
-                  <div className="text-sm truncate">{conv.title}</div>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className={`text-xs ${darkMode ? 'text-gray-600' : 'text-[#8a9a7a]'}`}>
-                      {new Date(conv.updatedAt || conv.createdAt).toLocaleDateString()}
-                    </span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteConversation(conv.id);
-                      }}
-                      className={`opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity ${darkMode ? 'hover:bg-red-900/30 text-red-500' : 'hover:bg-red-100 text-red-500'}`}
-                    >
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <SessionList
+            conversations={conversations}
+            channel="wechat"
+            currentConversationId={currentConversationId}
+            darkMode={darkMode}
+            onSelect={handleLoadConversation}
+            onDelete={handleDeleteConversation}
+          />
         </div>
 
         {/* 底部设置 */}
@@ -260,8 +182,8 @@ function App() {
           <div className={`flex items-center justify-between px-3 py-2 rounded-lg mb-2 ${darkMode ? 'bg-[#1a1a1a]' : 'bg-[#f0f2ed]'}`}>
             <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-[#5a6b52]'}`}>显示思考过程</span>
             <button
-              onClick={() => useStore.getState().setShowThinking(!useStore.getState().showThinking)}
-              className={`toggle-switch ${useStore.getState().showThinking ? '' : 'off'}`}
+              onClick={() => setShowThinking(!showThinking)}
+              className={`toggle-switch ${showThinking ? '' : 'off'}`}
               aria-label="切换显示思考"
             />
           </div>
@@ -288,7 +210,7 @@ function App() {
       </aside>
 
       {/* 主内容区 */}
-      <div className="flex-1 flex flex-col bg-[#f5f7f2] overflow-hidden">
+      <div className="flex-1 flex flex-col bg-[#f5f7f2] overflow-hidden" style={{ minHeight: 0 }}>
         {/* 顶部工具栏 */}
         <header className={`flex items-center justify-between px-4 py-3 ${darkMode ? 'bg-[#0f0f0f] border-[#1f1f1f]' : 'bg-white border-[#e0e5dc]'} border-b`}>
           <div className="flex items-center gap-4">
@@ -338,12 +260,14 @@ function App() {
         </header>
 
         {/* 对话区域 */}
+        <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column', flex: 1 }}>
         <ChatArea
           resetTrigger={resetCounter}
           onConnectedChange={setWsConnected}
-          onSaveConversation={handleSaveConversation}
           conversationId={currentConversationId}
+          onSessionCreated={handleSessionCreated}
         />
+        </div>
       </div>
 
       {/* 模型配置弹窗 */}
