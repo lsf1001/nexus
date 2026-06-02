@@ -39,8 +39,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
-    "pytest-asyncio",
     "black",
     "ruff",
 ]
@@ -50,10 +48,6 @@ nexus = "nexus.cli.main:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["nexus", "nexus/cli"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests", "nexus/backend/tests"]
-asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 120
@@ -74,9 +68,6 @@ ignore = [
     "E501",  # line length (由 formatter 处理)
     "B008",  # FastAPI 依赖注入里常见
 ]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/**" = ["B", "N"]
 
 [tool.black]
 line-length = 120

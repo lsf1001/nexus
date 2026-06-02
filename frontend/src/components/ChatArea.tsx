@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../store/useStore';
 import { useWebSocket } from '../hooks/useWebSocket';
 import ChatBubble from './ChatBubble';
-import totoroGif from '../assets/totoro.gif';
 import type { StreamEvent, WSMessage, Message } from '../types';
 
 interface ChatAreaProps {
@@ -210,7 +209,7 @@ function ChatArea({ resetTrigger, onConnectedChange, onSessionCreated, conversat
           <div className="flex flex-col items-center justify-center px-4">
             <div className="mb-6">
               <img
-                src={totoroGif}
+                src="/totoro.gif"
                 alt="龙猫"
                 className="w-24 h-24 rounded-2xl object-cover"
               />
