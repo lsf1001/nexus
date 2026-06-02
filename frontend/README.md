@@ -1,73 +1,83 @@
-# React + TypeScript + Vite
+# Nexus Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Nexus AI Gateway 的 Web 前端 (React + TypeScript + Vite + Tailwind CSS + Zustand)。
 
-Currently, two official plugins are available:
+## 启动
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+# 安装依赖
+npm install
 
-## React Compiler
+# 开发模式 (默认 :30077)
+npm run dev
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+# 类型检查 + 生产构建
+npm run build
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# 代码检查
+npm run lint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+> 开发服务默认监听 **30077**。可通过 `VITE_API_TARGET` 指定后端地址,默认 `http://localhost:30000`。
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## 环境变量
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `VITE_API_TARGET` | `http://localhost:30000` | 后端 HTTP/WS 地址（开发期 Vite 代理目标） |
+
+## 目录结构
+
 ```
+frontend/
+├── src/
+│   ├── components/   # 视图组件
+│   │   ├── ChatArea.tsx         # 主对话区 + 输入
+│   │   ├── ChatBubble.tsx       # 单条消息渲染
+│   │   ├── SessionList.tsx      # 侧边栏会话列表
+│   │   ├── Sidebar.tsx          # 侧边栏壳
+│   │   ├── ModelConfigModal.tsx # 模型配置弹窗
+│   │   ├── WechatPluginModal.tsx# 微信通道二维码
+│   │   └── ErrorBoundary.tsx    # 错误边界
+│   ├── hooks/        # 自定义 Hook
+│   ├── store/        # Zustand 全局状态
+│   ├── types/        # TypeScript 类型定义
+│   ├── assets/       # 静态资源
+│   ├── App.tsx       # 根组件
+│   └── main.tsx      # 入口
+├── tests/
+│   └── e2e/          # 端到端测试 (Playwright + Node WS)
+└── vite.config.ts    # Vite 配置 (端口、代理)
+```
+
+## E2E 测试
+
+```bash
+# 后端 REST + WS 鉴权 (不依赖 LLM)
+npm run e2e:backend
+
+# 真实 LLM 流式响应 (需后端配置 API Key)
+npm run e2e:llm
+
+# UI 全流程 (需前后端均启动)
+npm run e2e
+
+# 顺序跑全部
+npm run e2e:all
+```
+
+测试产物 (截图、JSON 结果) 落在 `tests/e2e/artifacts/`,已 `.gitignore`,不会入库。
+
+## WebSocket 协议
+
+前端通过 `ws://<host>/api/ws?token=<NEXUS_WS_TOKEN>` 与后端建立长连接,事件顺序:
+
+```
+client send: { content, session_id? }
+server send: session_created → thinking? → chunk* → final → done
+```
+
+- `session_created` 携带 `session_id`,前端用于后续同会话追问
+- `chunk` 增量内容,累加应等于 `final.content`
+- `thinking` 仅在模型支持思维链时出现
+- 连接断开后会自动指数退避重连

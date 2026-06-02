@@ -12,7 +12,7 @@ curl -fsSL https://raw.githubusercontent.com/lsf1001/nexus/main/install.sh | bas
 nexus start
 ```
 
-访问 http://localhost:30000/app/
+访问 http://localhost:30077/
 
 ## 功能
 
@@ -82,7 +82,13 @@ ws.send(JSON.stringify({ content: '你好' }));
 
 ## 配置
 
-环境变量：`MINIMAX_API_KEY`、`NEXUS_WS_TOKEN`、`NEXUS_PORT`
+环境变量（按优先级匹配）：
+
+- `MINIMAX_API_KEY` / `MINIMAX_API_BASE`（首选）
+- `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL`（兼容 Anthropic 风格）
+- `NEXUS_WS_TOKEN`（默认 `nexus-default-token`）
+- `NEXUS_PORT`（默认 `30000`）
+- `NEXUS_ALLOWED_ORIGINS`（CORS 白名单，逗号分隔；dev 默认通配）
 
 配置目录：`~/.nexus/`
 
@@ -92,11 +98,12 @@ ws.send(JSON.stringify({ content: '你好' }));
 
 ## 服务
 
-| 项目  | 值                           |
-| --- | --------------------------- |
-| 端口  | 30000                       |
-| 进程名 | nexus-gateway               |
-| 前端  | http://localhost:30000/app/ |
+| 项目  | 值                |
+| --- | ---------------- |
+| 后端端口 | 30000            |
+| 前端端口 | 30077            |
+| 进程名 | nexus-gateway    |
+| 前端  | http://localhost:30077/ |
 
 ## 文档
 
