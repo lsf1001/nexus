@@ -67,8 +67,8 @@ class WebSocketChannel(Channel):
         try:
             # 发送文本响应
             if message.content:
-                # 分块发送
-                chunk_size = 3
+                # 分块发送：每帧约 16 字符，UI 打字效果更顺滑
+                chunk_size = 16
                 for i in range(0, len(message.content), chunk_size):
                     chunk = message.content[i:i + chunk_size]
                     await ws.send_json({

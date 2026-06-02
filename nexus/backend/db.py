@@ -28,6 +28,10 @@ def get_db():
     """获取数据库连接的上下文管理器。"""
     conn = sqlite3.connect(str(_get_db_path()))
     conn.row_factory = sqlite3.Row
+    # 启用外键级联（SQLite 默认关闭）+ WAL 模式（提升并发读）+ 降低同步频率
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     try:
         yield conn
         conn.commit()
@@ -53,10 +57,7 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_deleted_at ON sessions(deleted_at)")
 
         # 迁移：添加 channel 列（如果不存在）
-        try:
-            conn.execute("ALTER TABLE sessions ADD COLUMN channel TEXT DEFAULT 'main'")
-        except sqlite3.OperationalError:
-            pass  # 列已存在
+        _ensure_column(conn, "sessions", "channel", "TEXT DEFAULT 'main'")
 
         # 创建消息表
         conn.execute("""
@@ -71,6 +72,9 @@ def init_db() -> None:
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)")
+
+        # 迁移：添加 thinking_content 列（如果不存在）
+        _ensure_column(conn, "messages", "thinking_content", "TEXT")
 
         # 创建统一记忆表
         conn.execute("""
@@ -130,6 +134,17 @@ def _migrate_deleted_at() -> None:
                 conn.execute("DROP INDEX _migrate_deleted_at_idx")
     except Exception:
         pass
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    """确保表中存在指定列，若不存在则 ALTER TABLE 添加。
+
+    使用 PRAGMA table_info 显式判断，避免 try/except 静默吞错。
+    """
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    existing = {row[1] for row in rows}  # row[1] = name
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 # ============================================================================

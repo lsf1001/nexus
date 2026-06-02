@@ -82,6 +82,9 @@ class MemoryService:
         self.user_id = "default"
         self._bm25: Optional[BM25Okapi] = None
         self._bm25_memories: list[dict] = []
+        # 缓存分词结果，避免 dirty 重建时对未变化的文档重复分词
+        self._bm25_tokens: list[list[str]] = []
+        self._bm25_token_by_id: dict[str, list[str]] = {}
         self._bm25_dirty = True
 
     def _invalidate_bm25(self) -> None:
@@ -89,21 +92,44 @@ class MemoryService:
         self._bm25_dirty = True
 
     def _ensure_bm25(self) -> None:
-        """确保 BM25 索引已构建。"""
+        """确保 BM25 索引已构建。
+
+        增量优化：复用上次分词缓存，仅对新增/修改的文档重新分词。
+        rank_bm25 不支持真正的增量构建，但分词结果可以复用。
+        """
         if not BM25_AVAILABLE:
             return
 
-        if self._bm25_dirty or self._bm25 is None:
-            memories = db_list_user_memory()
-            if memories:
-                corpus = [f"{m['key']} {m['value']}" for m in memories]
-                tokenized = [doc.split() for doc in corpus]
-                self._bm25 = BM25Okapi(tokenized)
-                self._bm25_memories = memories
-            else:
-                self._bm25 = None
-                self._bm25_memories = []
+        if not self._bm25_dirty and self._bm25 is not None:
+            return
+
+        memories = db_list_user_memory()
+        if not memories:
+            self._bm25 = None
+            self._bm25_memories = []
+            self._bm25_tokens = []
+            self._bm25_token_by_id = {}
             self._bm25_dirty = False
+            return
+
+        # 复用未变化文档的分词缓存（按 id + (key,value) 校验）
+        corpus: list[list[str]] = []
+        new_token_by_id: dict[str, list[str]] = {}
+        for m in memories:
+            cached = self._bm25_token_by_id.get(m["id"])
+            sig = f"{m['key']} {m['value']}"
+            if cached is not None and " ".join(cached) == sig:
+                tokens = cached
+            else:
+                tokens = sig.split()
+            corpus.append(tokens)
+            new_token_by_id[m["id"]] = tokens
+
+        self._bm25 = BM25Okapi(corpus)
+        self._bm25_memories = memories
+        self._bm25_tokens = corpus
+        self._bm25_token_by_id = new_token_by_id
+        self._bm25_dirty = False
 
     def save_memory(
         self,

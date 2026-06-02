@@ -19,6 +19,7 @@ from .models_config import load_models, get_active_model, set_active_model, save
 from .mcp import load_all_mcp_tools
 from .models import SwitchModelRequest, SwitchModelResponse
 from .sessions import router as sessions_router
+from .routes import model_config as model_config_routes
 
 _agent = None
 _mcp_tools: list[Any] = []
@@ -28,6 +29,7 @@ _clients_lock = threading.RLock()
 
 # 微信消息处理线程池（全局复用）
 _wechat_executor: ThreadPoolExecutor | None = None
+_main_loop: asyncio.AbstractEventLoop | None = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -58,9 +60,12 @@ def _handle_wechat_message(channel_message) -> None:
 
         for client in clients:
             try:
-                asyncio.get_event_loop().create_task(client.send_json(message_data))
-            except Exception:
-                pass
+                if _main_loop and not _main_loop.is_closed():
+                    asyncio.run_coroutine_threadsafe(client.send_json(message_data), _main_loop)
+                else:
+                    logger.warning("主事件循环不可用，跳过 WebSocket 广播")
+            except Exception as e:
+                logger.warning(f"广播失败: {e}")
 
         # 在线程池中执行异步处理
         global _wechat_executor
@@ -76,13 +81,21 @@ _wechat_sessions: dict[str, str] = {}  # user_id -> session_id
 
 
 def _process_wechat_message_sync(channel_message) -> None:
-    """在线程池中同步调用异步处理函数"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    """在线程池中调用异步处理函数：将协程提交到主事件循环执行。
+
+    这样 DeepAgents 内部的连接池、句柄都能复用主循环资源，
+    而非每次创建销毁临时循环。
+    """
+    if _main_loop is None or _main_loop.is_closed():
+        logger.error("主事件循环不可用，跳过微信消息处理")
+        return
     try:
-        loop.run_until_complete(_process_wechat_message(channel_message))
-    finally:
-        loop.close()
+        future = asyncio.run_coroutine_threadsafe(
+            _process_wechat_message(channel_message), _main_loop
+        )
+        future.result(timeout=300)
+    except Exception as e:
+        logger.error(f"处理微信消息失败: {e}")
 
 
 async def _process_wechat_message(channel_message) -> None:
@@ -233,7 +246,10 @@ def _create_agent_with_model(model_config: dict | None = None, mcp_tools: list[A
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动时初始化，关闭时清理。"""
-    global _agent, _mcp_tools, _wechat_executor
+    global _agent, _mcp_tools, _wechat_executor, _main_loop
+    # 保存主事件循环引用，供子线程提交协程使用
+    _main_loop = asyncio.get_running_loop()
+    app.state.main_loop = _main_loop
     # 初始化数据库
     from .db import init_db
     init_db()
@@ -244,6 +260,16 @@ async def lifespan(app: FastAPI):
         _mcp_tools = []
         logger.info("MCP 功能已禁用")
     _agent = _create_agent_with_model(mcp_tools=_mcp_tools)
+    # 注入共享依赖到 model_config 路由
+    model_config_routes.init_router(
+        agent_lock=_agent_lock,
+        mcp_tools=_mcp_tools,
+        create_agent_with_model=_create_agent_with_model,
+        set_global_agent=_set_global_agent,
+    )
+    # 初始化通道注册表（lifespan 必须设置，否则 /api/channels 会 500）
+    from .channels import ChannelRegistry
+    app.state.channel_registry = ChannelRegistry()
     logger.info(f"Nexus Backend 已初始化 (MCP 工具: {len(_mcp_tools)} 个)")
     yield
     logger.info("Nexus Backend 关闭中")
@@ -255,14 +281,32 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Nexus Backend", lifespan=lifespan)
 
+
+def _set_global_agent(agent) -> None:
+    """线程安全地替换全局 Agent 实例。供子模块（如 model_config 路由）调用。"""
+    global _agent
+    with _agent_lock:
+        _agent = agent
+
 API_PREFIX = "/api"
 
 # 注册会话路由
 app.include_router(sessions_router)
+# 注册模型配置路由
+app.include_router(model_config_routes.router)
 
+# CORS 白名单：环境变量 NEXUS_ALLOWED_ORIGINS 逗号分隔；默认本地开发地址
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "NEXUS_ALLOWED_ORIGINS",
+        "http://localhost:30077,http://127.0.0.1:30077,http://localhost:8000,http://127.0.0.1:8000,tauri://localhost",
+    ).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -354,165 +398,6 @@ async def get_model_info():
     }
 
 
-@app.get(f"{API_PREFIX}/models")
-async def get_models():
-    """获取所有模型列表。"""
-    config = load_models()
-    return config.get("models", [])
-
-
-@app.post(f"{API_PREFIX}/models/switch", response_model=SwitchModelResponse)
-async def switch_model(body: SwitchModelRequest):
-    """切换当前激活的模型。"""
-    global _agent
-    model_id = body.id
-
-    # 先加载配置，找到目标模型
-    config = load_models()
-    target = None
-    for model in config.get("models", []):
-        if model.get("id") == model_id:
-            target = model
-            break
-
-    if not target:
-        return SwitchModelResponse(success=False, error="模型不存在")
-
-    # 检查 api_key 是否配置（检查后再设置激活状态）
-    api_key = target.get("api_key")
-    if not api_key:
-        return SwitchModelResponse(success=False, error=f"模型 {target.get('name')} 未配置 API Key，无法使用")
-
-    # 设置激活状态
-    set_active_model(model_id)
-
-    # 重新创建 Agent（保留 MCP 工具）
-    new_agent = _create_agent_with_model(target, _mcp_tools)
-    if new_agent is None:
-        return SwitchModelResponse(success=False, error=f"模型 {target.get('name')} 配置无效，无法使用")
-
-    with _agent_lock:
-        global _agent
-        _agent = new_agent
-
-    return SwitchModelResponse(
-        success=True,
-        active_model={
-            "id": target.get("id"),
-            "name": target.get("name"),
-        }
-    )
-
-
-class CreateModelRequest(BaseModel):
-    """创建模型请求。"""
-    id: str = Field(..., min_length=1, description="模型ID")
-    name: str = Field(default="New Model", description="模型名称")
-    api_key: str = Field(default="", description="API密钥")
-    api_base: str = Field(default="https://api.minimaxi.com/v1", description="API端点")
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="温度参数")
-
-
-class UpdateModelRequest(BaseModel):
-    """更新模型请求。"""
-    name: Optional[str] = Field(default=None, description="模型名称")
-    api_key: Optional[str] = Field(default=None, description="API密钥")
-    api_base: Optional[str] = Field(default=None, description="API端点")
-    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0, description="温度参数")
-
-
-@app.post(f"{API_PREFIX}/models")
-async def create_model(body: CreateModelRequest):
-    """创建新模型。"""
-    config = load_models()
-
-    # 检查 ID 是否已存在
-    for model in config.get("models", []):
-        if model.get("id") == body.id:
-            return {"success": False, "error": f"模型 ID '{body.id}' 已存在"}
-
-    new_model = {
-        "id": body.id,
-        "name": body.name,
-        "api_key": body.api_key,
-        "api_base": body.api_base,
-        "temperature": body.temperature,
-        "is_active": False,
-    }
-    config["models"].append(new_model)
-    save_models(config)
-
-    return {"success": True, "model": new_model}
-
-
-@app.put(f"{API_PREFIX}/models/{{model_id}}")
-async def update_model(model_id: str, body: UpdateModelRequest):
-    """更新模型配置。"""
-    config = load_models()
-
-    # 查找模型
-    target = None
-    for model in config.get("models", []):
-        if model.get("id") == model_id:
-            target = model
-            break
-
-    if not target:
-        return {"success": False, "error": "模型不存在"}
-
-    # 更新字段
-    if body.name is not None:
-        target["name"] = body.name
-    if body.api_key is not None:
-        target["api_key"] = body.api_key
-    if body.api_base is not None:
-        target["api_base"] = body.api_base
-    if body.temperature is not None:
-        target["temperature"] = body.temperature
-
-    save_models(config)
-    return {"success": True, "model": target}
-
-
-@app.delete(f"{API_PREFIX}/models/{{model_id}}")
-async def delete_model(model_id: str):
-    """删除模型。"""
-    global _agent
-
-    config = load_models()
-    models = config.get("models", [])
-
-    # 检查是否是最后一个模型
-    if len(models) <= 1:
-        return {"success": False, "error": "至少需要保留一个模型"}
-
-    # 查找要删除的模型
-    target = None
-    for model in models:
-        if model.get("id") == model_id:
-            target = model
-            break
-
-    if not target:
-        return {"success": False, "error": "模型不存在"}
-
-    # 如果删除的是激活的模型，需要切换到另一个
-    if target.get("is_active"):
-        # 激活另一个模型
-        for model in models:
-            if model.get("id") != model_id and model.get("api_key"):
-                set_active_model(model["id"])
-                new_agent = _create_agent_with_model(model, _mcp_tools)
-                with _agent_lock:
-                    global _agent
-                    _agent = new_agent
-                break
-
-    # 删除模型
-    config["models"] = [m for m in models if m.get("id") != model_id]
-    save_models(config)
-
-    return {"success": True}
 
 
 def _estimate_tokens(text: str) -> tuple[int, int]:
@@ -530,6 +415,22 @@ def _estimate_tokens(text: str) -> tuple[int, int]:
     estimated_tokens = int(chinese_chars * 2.5 + english_chars * 0.25 + other_chars * 0.5)
     context_usage = min(int((estimated_tokens / 200000) * 100), 100)
     return estimated_tokens, context_usage
+
+
+def _extract_request_token(request: Request) -> str:
+    """从 header / query 提取 token；REST 鉴权用。"""
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return request.query_params.get("token", "")
+
+
+def require_token(request: Request) -> None:
+    """FastAPI 依赖：校验 REST 请求 token。失败抛 401。"""
+    token = _extract_request_token(request)
+    expected = CONFIG.get("ws_token", "")
+    if not expected or token != expected:
+        raise HTTPException(status_code=401, detail="未授权")
 
 
 @app.websocket(f"{API_PREFIX}/ws")
@@ -565,12 +466,22 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
             # 创建或获取会话
+            new_session_created = False
             if session_id is None:
                 session_id = data.get("session_id")
                 if not session_id:
                     from .db import create_session
                     session_id = str(uuid.uuid4())
-                    create_session(session_id, title="新会话", channel="main")
+                    title = data.get("title") or "新会话"
+                    create_session(session_id, title=title, channel="main")
+                    new_session_created = True
+
+            if new_session_created:
+                await websocket.send_json({
+                    "type": "session_created",
+                    "session_id": session_id,
+                    "title": title,
+                })
 
             # 添加用户消息到历史
             from .db import add_message
@@ -637,7 +548,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
 
                 if response_text:
-                    chunk_size = 3
+                    # 分块发送：每帧约 16 字符（约 4-5 个 token），UI 打字效果更顺滑
+                    chunk_size = 16
                     for i in range(0, len(response_text), chunk_size):
                         chunk = response_text[i:i+chunk_size]
                         await websocket.send_json({
@@ -812,7 +724,7 @@ async def wechat_unbind():
 
 
 @app.get(f"{API_PREFIX}/channels")
-async def get_channels():
+async def get_channels(request: Request):
     """获取所有通道状态"""
     from .channels import ChannelRegistry
     registry: ChannelRegistry = request.app.state.channel_registry

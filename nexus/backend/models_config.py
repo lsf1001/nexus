@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -32,10 +34,25 @@ def load_models() -> dict[str, Any]:
 
 
 def save_models(config: dict[str, Any]) -> None:
-    """保存模型配置到 ~/.nexus/models.json。"""
+    """原子保存模型配置到 ~/.nexus/models.json。
+
+    先写到同目录下临时文件，再 os.replace 原子替换，避免写入中途崩溃损坏配置。
+    """
     MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(MODELS_FILE, "w") as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(MODELS_FILE.parent), prefix=".models.", suffix=".json.tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, MODELS_FILE)
+    except Exception:
+        # 清理临时文件，避免遗留
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
 
 
 def get_active_model() -> dict[str, Any] | None:

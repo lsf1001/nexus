@@ -68,7 +68,10 @@ class SessionManager:
         memory_context = self.memory_service.build_context(session_id)
 
         # 2. 获取对话历史
+        #    若最后一条就是当前 user 消息（调用方先入库再调本方法），去掉以免重复
         history = get_conversation_history(session_id)
+        if history and history[-1].get("role") == "user" and history[-1].get("content") == user_message:
+            history = history[:-1]
 
         # 3. 构建 system prompt
         system_content = ""
