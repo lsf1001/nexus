@@ -38,8 +38,12 @@ screenshots/
 test_message.txt
 
 # Frontend
-frontend/package-lock.json
+# 注意：package-lock.json 应入库以保证依赖复现
 
 # Local config
 .claude/settings.local.json
 .pytest_cache/
+
+# Vite 缓存（不应入 git；历史误建在 nexus/.vite/）
+.vite/
+**/.vite/

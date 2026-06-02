@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "e2e": "node tests/e2e/full-flow.mjs",
+    "e2e:backend": "node tests/e2e/backend-api.mjs",
+    "e2e:llm": "node tests/e2e/llm-streaming.mjs",
+    "e2e:all": "node tests/e2e/backend-api.mjs && node tests/e2e/llm-streaming.mjs && node tests/e2e/full-flow.mjs"
   },
   "dependencies": {
     "@playwright/test": "^1.60.0",

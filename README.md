@@ -63,14 +63,14 @@ nexus doctor     # 诊断
 
 ## API
 
-| 接口 | 方法 | 说明 |
-|------|------|------|
-| `/health` | GET | 健康检查 |
-| `/api/sessions` | GET/POST | 会话 |
-| `/api/model` | GET | 当前模型 |
-| `/api/models` | GET/POST | 模型列表 |
-| `/api/models/switch` | POST | 切换模型 |
-| `/api/ws` | WebSocket | 实时对话 |
+| 接口                   | 方法        | 说明   |
+| -------------------- | --------- | ---- |
+| `/health`            | GET       | 健康检查 |
+| `/api/sessions`      | GET/POST  | 会话   |
+| `/api/model`         | GET       | 当前模型 |
+| `/api/models`        | GET/POST  | 模型列表 |
+| `/api/models/switch` | POST      | 切换模型 |
+| `/api/ws`            | WebSocket | 实时对话 |
 
 ### WebSocket 示例
 
@@ -85,17 +85,18 @@ ws.send(JSON.stringify({ content: '你好' }));
 环境变量：`MINIMAX_API_KEY`、`NEXUS_WS_TOKEN`、`NEXUS_PORT`
 
 配置目录：`~/.nexus/`
+
 - `models.json` - 模型配置
 - `nexus.db` - 数据存储
 - `logs/` - 日志文件
 
 ## 服务
 
-| 项目 | 值 |
-|------|-----|
-| 端口 | 30000 |
-| 进程名 | nexus-gateway |
-| 前端 | http://localhost:30000/app/ |
+| 项目  | 值                           |
+| --- | --------------------------- |
+| 端口  | 30000                       |
+| 进程名 | nexus-gateway               |
+| 前端  | http://localhost:30000/app/ |
 
 ## 文档
 

@@ -27,22 +27,36 @@ body {
   color: #1a1a1a;
 }
 
-/* 滚动条样式 */
+/* 滚动条样式 - 加强可见性 */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c8d4c0;
-  border-radius: 3px;
+  background: rgba(74, 124, 89, 0.45);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  min-height: 30px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a8b8a0;
+  background: rgba(74, 124, 89, 0.75);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* 聊天滚动容器专用：Firefox 兼容 + 稳定 gutter */
+.chat-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(74, 124, 89, 0.45) rgba(0, 0, 0, 0.04);
+  scrollbar-gutter: stable;
 }
 
 /* Prose 样式调整 */
@@ -79,11 +93,15 @@ body {
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #2a2a2a;
+  background: rgba(155, 155, 155, 0.35);
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3a;
+  background: rgba(155, 155, 155, 0.6);
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .dark .prose pre {

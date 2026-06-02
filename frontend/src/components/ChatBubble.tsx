@@ -18,16 +18,17 @@ function ChatBubble({ message, showThinking = true, onCopy }: ChatBubbleProps) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[75%] px-4 py-3 ${
+        className={`relative max-w-[75%] px-4 py-3 break-words ${
           isUser
             ? 'bg-[#4a7c59] text-white rounded-2xl rounded-br-sm'
             : 'bg-[#1a1a1a] border border-[#2a2a2a] text-gray-200 rounded-2xl rounded-bl-sm'
         }`}
+        style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}
       >
         {!isUser && onCopy && (
           <button
             onClick={handleCopy}
-            className="float-right ml-2 p-1 rounded hover:bg-[#2a2a2a] text-gray-500 hover:text-gray-300 transition-colors"
+            className="absolute top-2 right-2 p-1 rounded hover:bg-[#2a2a2a] text-gray-500 hover:text-gray-300 transition-colors"
             title="复制内容"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -40,10 +41,10 @@ function ChatBubble({ message, showThinking = true, onCopy }: ChatBubbleProps) {
             <div className="text-xs text-[#4a7c59] font-medium mb-2 flex items-center gap-1">
               <span>🌿</span> 思考过程
             </div>
-            <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono">{message.thinking}</pre>
+            <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono overflow-x-auto" style={{ wordBreak: 'break-word' }}>{message.thinking}</pre>
           </div>
         )}
-        <div className={`prose prose-sm max-w-none ${isUser ? 'text-white' : 'text-gray-200'} prose-p:my-1`}>
+        <div className={`prose prose-sm max-w-none ${isUser ? 'text-white' : 'text-gray-200'} prose-p:my-1`} style={{ wordBreak: 'break-word' }}>
           <ReactMarkdown>{message.content}</ReactMarkdown>
         </div>
       </div>

@@ -63,6 +63,33 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
       });
   }, [isOpen]);
 
+  // 轮询绑定状态：scanning 时启用，离开时自动清理
+  useEffect(() => {
+    if (step !== 'scanning' || !qrData?.session_key) return;
+    const sessionKey = qrData.session_key;
+    const timer = window.setInterval(async () => {
+      try {
+        const res = await fetch(`${apiUrl}/channels/wechat/status/${sessionKey}?timeout_ms=5000`);
+        const status = await res.json();
+        if (status.connected) {
+          setStatusMessage('绑定成功！');
+          setStep('success');
+          onSuccess?.(status.account_id);
+        } else if (status.message === 'QR code expired, please get a new one') {
+          setError('二维码已过期，请重新获取');
+          setStep('error');
+        }
+      } catch (e) {
+        console.error('Poll error:', e);
+      }
+    }, 2000);
+    pollTimerRef.current = timer;
+    return () => {
+      window.clearInterval(timer);
+      pollTimerRef.current = null;
+    };
+  }, [step, qrData?.session_key, apiUrl, onSuccess]);
+
   // 绘制二维码
   useEffect(() => {
     if (qrData?.qrcode_url && canvasRef.current) {
@@ -92,30 +119,7 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
       setQrData(data);
       setStatusMessage('请使用微信扫描二维码');
       setStep('scanning');
-
-      // 启动轮询
-      pollTimerRef.current = window.setInterval(async () => {
-        try {
-          const statusRes = await fetch(`${apiUrl}/channels/wechat/status/${data.session_key}?timeout_ms=5000`);
-          const status = await statusRes.json();
-
-          if (status.connected) {
-            clearInterval(pollTimerRef.current!);
-            pollTimerRef.current = null;
-            setStatusMessage('绑定成功！');
-            setStep('success');
-            onSuccess?.(status.account_id);
-          } else if (status.message === 'QR code expired, please get a new one') {
-            clearInterval(pollTimerRef.current!);
-            pollTimerRef.current = null;
-            setError('二维码已过期，请重新获取');
-            setStep('error');
-          }
-        } catch (e) {
-          console.error('Poll error:', e);
-        }
-      }, 2000);
-
+      // 轮询由下面 useEffect 接管
     } catch (e: any) {
       setError(e.message || '获取二维码失败');
       setStep('error');
@@ -130,6 +134,15 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
     }
     onClose();
   };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen]);
 
   // 重新获取二维码
   const handleRetry = () => {

@@ -116,21 +116,8 @@ if [ -f "$(dirname "$0")/pyproject.toml" ]; then
   log_info "从 pyproject.toml 安装..."
   uv pip install --python "$NEXUS_HOME/.venv/bin/python" -e "$(dirname "$0")"
 else
-  # 直接安装依赖列表
-  uv pip install --python "$NEXUS_HOME/.venv/bin/python" \
-    fastapi "uvicorn[standard]" \
-    "deepagents==0.5.3" \
-    langchain-openai \
-    langchain-community \
-    duckduckgo-search \
-    ddgs \
-    wikipedia \
-    aiosqlite \
-    pydantic \
-    python-dotenv \
-    typer \
-    rich \
-    beautifulsoup4
+  log_error "未找到 pyproject.toml；项目必须通过 pyproject 管理依赖"
+  exit 1
 fi
 
 log_success "依赖安装完成"

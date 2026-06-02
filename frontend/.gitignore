@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# E2E 测试产物（截图 + JSON 报告）
+tests/**/artifacts/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
