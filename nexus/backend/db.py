@@ -14,6 +14,9 @@ from .config import CONFIG
 # 数据库路径
 DB_PATH = Path.home() / ".nexus" / "nexus.db"
 
+# 是否已执行过表初始化(进程内单次)
+_INITED = False
+
 
 def _get_db_path() -> Path:
     """获取数据库路径，确保目录存在。"""
@@ -24,13 +27,17 @@ def _get_db_path() -> Path:
 
 @contextmanager
 def get_db():
-    """获取数据库连接的上下文管理器。"""
+    """获取数据库连接的上下文管理器。首次访问时自动建表。"""
+    global _INITED
     conn = sqlite3.connect(str(_get_db_path()))
     conn.row_factory = sqlite3.Row
     # 启用外键级联（SQLite 默认关闭）+ WAL 模式（提升并发读）+ 降低同步频率
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    if not _INITED:
+        _INITED = True
+        _create_tables(conn)
     try:
         yield conn
         conn.commit()
@@ -38,89 +45,87 @@ def get_db():
         conn.close()
 
 
+def _create_tables(conn: sqlite3.Connection) -> None:
+    """建表 + 索引 + 列迁移。"""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT,
+            channel TEXT DEFAULT 'main'
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_deleted_at ON sessions(deleted_at)")
+
+    _ensure_column(conn, "sessions", "channel", "TEXT DEFAULT 'main'")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+            content TEXT NOT NULL,
+            thinking_content TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)")
+
+    _ensure_column(conn, "messages", "thinking_content", "TEXT")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS memory (
+            id TEXT PRIMARY KEY,
+            memory_type TEXT NOT NULL CHECK (memory_type IN ('explicit', 'evolved', 'session')),
+            category TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            metadata TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            expires_at TEXT,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_type ON memory(memory_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_category ON memory(category)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_key ON memory(key)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_updated ON memory(updated_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_active ON memory(is_active)")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tool_stats (
+            tool_name TEXT PRIMARY KEY,
+            success_count INTEGER DEFAULT 0,
+            failure_count INTEGER DEFAULT 0,
+            total_latency REAL DEFAULT 0,
+            last_used TEXT
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_stats (
+            session_id TEXT PRIMARY KEY,
+            message_count INTEGER DEFAULT 0,
+            tool_call_count INTEGER DEFAULT 0,
+            success_outcomes INTEGER DEFAULT 0,
+            failure_outcomes INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            ended_at TEXT
+        )
+    """)
+
+
 def init_db() -> None:
-    """初始化数据库表。"""
+    """显式初始化数据库表。get_db() 已自动调用,此函数主要给 CLI/启动入口使用。"""
+    global _INITED
     with get_db() as conn:
-        # 创建会话表
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                title TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                deleted_at TEXT,
-                channel TEXT DEFAULT 'main'
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_deleted_at ON sessions(deleted_at)")
-
-        # 迁移：添加 channel 列（如果不存在）
-        _ensure_column(conn, "sessions", "channel", "TEXT DEFAULT 'main'")
-
-        # 创建消息表
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
-                content TEXT NOT NULL,
-                thinking_content TEXT,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)")
-
-        # 迁移：添加 thinking_content 列（如果不存在）
-        _ensure_column(conn, "messages", "thinking_content", "TEXT")
-
-        # 创建统一记忆表
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS memory (
-                id TEXT PRIMARY KEY,
-                memory_type TEXT NOT NULL CHECK (memory_type IN ('explicit', 'evolved', 'session')),
-                category TEXT NOT NULL,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                metadata TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                expires_at TEXT,
-                is_active INTEGER DEFAULT 1
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_type ON memory(memory_type)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_category ON memory(category)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_key ON memory(key)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_updated ON memory(updated_at DESC)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_active ON memory(is_active)")
-
-        # 创建工具统计表
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS tool_stats (
-                tool_name TEXT PRIMARY KEY,
-                success_count INTEGER DEFAULT 0,
-                failure_count INTEGER DEFAULT 0,
-                total_latency REAL DEFAULT 0,
-                last_used TEXT
-            )
-        """)
-
-        # 创建会话统计表
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS session_stats (
-                session_id TEXT PRIMARY KEY,
-                message_count INTEGER DEFAULT 0,
-                tool_call_count INTEGER DEFAULT 0,
-                success_outcomes INTEGER DEFAULT 0,
-                failure_outcomes INTEGER DEFAULT 0,
-                created_at TEXT NOT NULL,
-                ended_at TEXT
-            )
-        """)
-
-    # 执行迁移
+        _create_tables(conn)
+    _INITED = True
     _migrate_deleted_at()
 
 
