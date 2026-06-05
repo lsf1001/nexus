@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Any, Protocol, runtime_checkable
 
@@ -70,22 +71,6 @@ class _ClassifiedRetry(retry_base):
         # tenacity 的 attempt_number 从 1 开始；policy 用 0 起始的 attempt
         attempt = retry_state.attempt_number - 1
         return self._policy.should_retry(attempt, classified)
-
-
-def _classify_timeout(exc: BaseException) -> ClassifiedError:
-    """把 ``asyncio.TimeoutError`` 归一为 :class:`LLMErrorKind.TIMEOUT`。
-
-    ``classify`` 仅识别 OpenAI 的 ``APITimeoutError``；``asyncio.wait_for`` 抛的是
-    标准库的 ``TimeoutError``（在 asyncio 上下文里就是 ``asyncio.TimeoutError``），
-    不在 ``classify`` 路径内。本函数提供一个等价的分类结果，让上层一致地看到
-    ``kind=TIMEOUT``。
-    """
-    return ClassifiedError(
-        kind=LLMErrorKind.TIMEOUT,
-        retryable=True,
-        original=exc,
-        message=f"[timeout] {type(exc).__name__}: {exc}",
-    )
 
 
 class _PolicyBasedWait:
@@ -153,6 +138,11 @@ class ResilientRunnable:
         """超时策略。"""
         return self._timeout_policy
 
+    @property
+    def fallback_policy(self) -> FallbackPolicy:
+        """降级判定策略。"""
+        return self._fallback_policy
+
     # ------------------------------------------------------------------
     # 公开 API
     # ------------------------------------------------------------------
@@ -213,7 +203,8 @@ class ResilientRunnable:
         except ClassifiedError:
             raise
         except TimeoutError as exc:
-            raise _classify_timeout(exc) from exc
+            # ``classify`` 入口已覆盖 asyncio.TimeoutError → TIMEOUT。
+            raise classify(exc) from exc
         except Exception as exc:  # noqa: BLE001 — 边界统一收口
             raise classify(exc) from exc
 
@@ -252,7 +243,7 @@ class ResilientRunnable:
                             coro, self._timeout_policy.per_call
                         )
                     except TimeoutError as exc:
-                        classified = _classify_timeout(exc)
+                        classified = classify(exc)
                     except ClassifiedError as exc:
                         classified = exc
                     except Exception as exc:  # noqa: BLE001 — 边界收口
@@ -291,7 +282,7 @@ class ResilientRunnable:
             coro = self._fallback.ainvoke(input, **kwargs)
             return await asyncio.wait_for(coro, self._timeout_policy.per_call)
         except TimeoutError as exc:
-            raise _classify_timeout(exc) from exc
+            raise classify(exc) from exc
         except ClassifiedError:
             raise
         except Exception as exc:  # noqa: BLE001 — 边界收口
@@ -301,15 +292,26 @@ class ResilientRunnable:
 async def _iter_with_timeout(
     iterator: AsyncIterator[Any], timeout: float
 ) -> AsyncIterator[Any]:
-    """对 async iterator 施加全局超时：超过 ``timeout`` 秒未取到下一个 chunk 则抛 TimeoutError。
+    """对 async iterator 施加**累计**超时：整个流式响应超过 ``timeout`` 秒则抛 :class:`TimeoutError`。
 
     实现要点：
-      - 把每个 ``__anext__`` 调用包到 :func:`asyncio.wait_for`。
-      - 等待下一个 chunk 的最长时间为 ``timeout`` 秒。
+      - 记下开始时间 ``start = time.monotonic()``，预算上限 ``deadline = start + timeout``。
+      - 每次取 chunk 前计算 ``remaining = deadline - time.monotonic()``，
+        把这个**递减**的值传给 :func:`asyncio.wait_for`。
+      - 这样做可以保证"无论 chunk 间隔多少，总耗时到 ``timeout`` 时一定被 kill"，
+        严格满足 :attr:`TimeoutPolicy.per_stream` "整个流式响应的总时长上限" 的语义。
+      - ``remaining <= 0`` 时直接抛 :class:`TimeoutError`（Python 3.11+ 即
+        :class:`asyncio.TimeoutError` 的别名），避免发起一次必超时的等待。
+      - :class:`StopAsyncIteration` 是正常结束，return 即可。
     """
+    start = time.monotonic()
+    deadline = start + timeout
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("per_stream total duration exceeded")
         try:
-            chunk = await asyncio.wait_for(iterator.__anext__(), timeout=timeout)
+            chunk = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
         except StopAsyncIteration:
             return
         yield chunk

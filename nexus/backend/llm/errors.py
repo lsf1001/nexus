@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from enum import StrEnum
 from typing import Final
 
@@ -144,6 +145,14 @@ def _build_message(kind: LLMErrorKind, exc: BaseException) -> str:
 def classify(exc: BaseException) -> ClassifiedError:
     """把任意异常归类为 :class:`ClassifiedError`。
 
+    支持识别的异常类型：
+      - OpenAI SDK 异常：:class:`RateLimitError`、:class:`APITimeoutError`、
+        :class:`AuthenticationError`、:class:`BadRequestError`。
+      - 通用超时：:class:`asyncio.TimeoutError` / :class:`TimeoutError`
+        （在 Python 3.11+ 二者是同一类），被归为 :attr:`LLMErrorKind.TIMEOUT`。
+        这条覆盖 :func:`asyncio.wait_for` 抛出的标准超时，让 wrapper
+        不再需要额外的分类补丁。
+
     Args:
         exc: 任意 Python 异常。
 
@@ -153,6 +162,10 @@ def classify(exc: BaseException) -> ClassifiedError:
     """
     if isinstance(exc, RateLimitError):
         kind = LLMErrorKind.RATE_LIMIT
+    elif isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        # Python 3.11+ asyncio.TimeoutError 就是内置 TimeoutError 的别名，
+        # 写两个是为兼容旧文档/类型检查器；运行时只命中其中一个。
+        kind = LLMErrorKind.TIMEOUT
     elif isinstance(exc, APITimeoutError):
         kind = LLMErrorKind.TIMEOUT
     elif isinstance(exc, AuthenticationError):

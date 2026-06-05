@@ -269,6 +269,32 @@ class TestTimeout:
         assert primary.ainvoke.await_count == 3
         assert fallback.ainvoke.await_count == 1
 
+    async def test_fallback_timeout_raises_classified(self) -> None:
+        """primary 超时 + fallback 也超时 → 抛 ClassifiedError(TIMEOUT, retryable=True)。"""
+
+        async def _slow(_: Any) -> Any:
+            await asyncio.sleep(5.0)
+
+        primary = MagicMock()
+        primary.ainvoke = AsyncMock(side_effect=_slow)
+
+        fallback = MagicMock()
+        fallback.ainvoke = AsyncMock(side_effect=_slow)
+
+        resilient = build_resilient_llm(
+            primary=primary,
+            fallback=fallback,
+            retry=RetryPolicy(max_attempts=3, base_delay=0.001),
+            timeout=TimeoutPolicy(per_call=0.05),
+        )
+        with pytest.raises(ClassifiedError) as exc_info:
+            await resilient.ainvoke({})
+        assert exc_info.value.kind == LLMErrorKind.TIMEOUT
+        assert exc_info.value.retryable is True
+        # primary 用尽 3 次；fallback 被调 1 次（不重试）。
+        assert primary.ainvoke.await_count == 3
+        assert fallback.ainvoke.await_count == 1
+
 
 # ----------------------------------------------------------------------
 # classify 边界
@@ -334,6 +360,36 @@ class TestFallbackPolicy:
         assert exc_info.value.kind == LLMErrorKind.BAD_REQUEST
         assert fallback.ainvoke.await_count == 0
 
+    async def test_fallback_policy_property_exposes_passed_in_policy(self) -> None:
+        """``ResilientRunnable.fallback_policy`` 应回显构造时传入的策略对象。
+
+        修复前只暴露 primary / fallback / retry_policy / timeout_policy，
+        唯独没有 ``fallback_policy``，调用方拿不到自己传进来的策略。
+        """
+        from nexus.backend.llm.policies import FallbackPolicy
+
+        primary = _make_fake_llm(["ok"])
+        custom_policy = FallbackPolicy(
+            fallback_kinds=frozenset({LLMErrorKind.RATE_LIMIT}),
+        )
+        resilient = build_resilient_llm(
+            primary=primary,
+            fallback_policy=custom_policy,
+        )
+        assert resilient.fallback_policy is custom_policy
+
+    async def test_fallback_policy_default_when_not_provided(self) -> None:
+        """``build_resilient_llm`` 不传 ``fallback_policy`` 时使用默认实例。"""
+        from nexus.backend.llm.policies import FallbackPolicy
+
+        primary = _make_fake_llm(["ok"])
+        resilient = build_resilient_llm(primary=primary)
+        assert isinstance(resilient.fallback_policy, FallbackPolicy)
+        # 默认应包含 RATE_LIMIT / TIMEOUT / UNKNOWN。
+        assert resilient.fallback_policy.should_fallback(
+            classify(_rate_limit_error())
+        )
+
 
 # ----------------------------------------------------------------------
 # astream
@@ -394,3 +450,43 @@ class TestAstream:
                 received.append(chunk)
         assert received == ["first"]
         assert exc_info.value.kind == LLMErrorKind.RATE_LIMIT
+
+    async def test_astream_total_duration_times_out(self) -> None:
+        """astream 每个 chunk 间隔很短但总时长超过 per_stream → 抛 ClassifiedError(TIMEOUT)。
+
+        验证修复：旧实现把 ``per_stream`` 当作"相邻 chunk 间隔上限"，
+        每 ``__anext__`` 都重置 budget；新实现是"流级累计预算"，
+        持续到达 chunk 也会在总时长到点时被 kill。
+        """
+        chunk_interval = 0.1
+        # 0.5s 预算下，每 0.1s 一个 chunk：理论上下 5 个 chunk 之后
+        # （t=0.5s）第 6 次 ``__anext__`` 时 remaining <= 0，应抛 TimeoutError。
+        # 用 0.5 而不是更紧的边界值，是为吸收 event loop 调度抖动，
+        # 让测试在慢机器/CI 上也能稳定通过。
+        per_stream = 0.5
+
+        async def _slow_but_steady_chunks() -> Any:
+            for i in range(20):
+                await asyncio.sleep(chunk_interval)
+                yield f"chunk_{i}"
+
+        primary = MagicMock()
+        primary.astream = MagicMock(return_value=_slow_but_steady_chunks())
+        resilient = build_resilient_llm(
+            primary=primary,
+            timeout=TimeoutPolicy(per_stream=per_stream),
+        )
+        received: list[Any] = []
+        with pytest.raises(ClassifiedError) as exc_info:
+            async for chunk in resilient.astream({}):
+                received.append(chunk)
+        assert exc_info.value.kind == LLMErrorKind.TIMEOUT
+        assert exc_info.value.retryable is True
+        # 关键断言：累计超时生效，chunks 在总时长到点时被砍断，
+        # 收到数量 < 无限超时情况下应有的 20。
+        assert 0 < len(received) < 20
+        # 进一步：在合理调度抖动下应收到 4-6 个 chunk。
+        assert 3 <= len(received) <= 6, (
+            f"unexpected chunk count: {len(received)}, "
+            f"expected stream-level cumulative timeout to cut it off"
+        )
