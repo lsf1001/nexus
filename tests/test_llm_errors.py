@@ -108,9 +108,14 @@ def test_classified_error_message_is_readable() -> None:
 
 
 def test_classified_error_is_an_exception() -> None:
-    """ClassifiedError 必须可作为异常使用（继承自 BaseException）。"""
+    """ClassifiedError 必须可作为异常使用（继承自 Exception，不是 BaseException）。
+
+    关键：业务异常必须继承 :class:`Exception`，否则上层的
+    ``except Exception`` 会漏掉它。
+    """
     err = classify(_timeout_error())
-    assert isinstance(err, BaseException)
+    assert isinstance(err, Exception)
+    assert isinstance(err, ClassifiedError)
     # 可正常 raise / str
     with pytest.raises(ClassifiedError):
         raise err
@@ -121,3 +126,48 @@ def test_kind_enum_values_are_distinct() -> None:
     """LLMErrorKind 的枚举值必须互不相同。"""
     values = {member.value for member in LLMErrorKind}
     assert len(values) == len(list(LLMErrorKind))
+
+
+def test_context_length_classification() -> None:
+    """BadRequestError 含 context_length_exceeded code 时归为 CONTEXT_LENGTH。"""
+    exc = BadRequestError(
+        "too long",
+        response=Mock(status_code=400),
+        body={"error": {"code": "context_length_exceeded", "message": "..."}},
+    )
+    err = classify(exc)
+    assert err.kind == LLMErrorKind.CONTEXT_LENGTH
+    assert err.retryable is False  # 重试没意义，要改 prompt
+
+
+def test_content_filter_classification() -> None:
+    """BadRequestError 含 content_policy_violation code 时归为 CONTENT_FILTER。"""
+    exc = BadRequestError(
+        "blocked",
+        response=Mock(status_code=400),
+        body={"error": {"code": "content_policy_violation", "message": "..."}},
+    )
+    err = classify(exc)
+    assert err.kind == LLMErrorKind.CONTENT_FILTER
+    assert err.retryable is True
+
+
+def test_bad_request_with_no_code_falls_back() -> None:
+    """BadRequestError body 里 code 缺失时，落到 BAD_REQUEST 兜底，不误判细分类型。"""
+    exc = BadRequestError(
+        "generic bad",
+        response=Mock(status_code=400),
+        body={"error": {"message": "no code"}},
+    )
+    err = classify(exc)
+    assert err.kind == LLMErrorKind.BAD_REQUEST
+    assert err.retryable is False
+
+
+def test_bad_request_with_malformed_body_falls_back() -> None:
+    """BadRequestError body 形态异常（缺 error 段）时，落到 BAD_REQUEST 兜底。"""
+    # body 完全没有 error 段
+    exc = BadRequestError("weird", response=Mock(status_code=400), body={"other": "shape"})
+    err = classify(exc)
+    assert err.kind == LLMErrorKind.BAD_REQUEST
+    assert err.retryable is False

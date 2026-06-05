@@ -25,8 +25,6 @@ __all__ = [
     "LLMErrorKind",
     "ClassifiedError",
     "classify",
-    "is_context_length_error",
-    "is_content_filter_error",
 ]
 
 
@@ -51,8 +49,11 @@ class LLMErrorKind(StrEnum):
     UNKNOWN = "unknown"
 
 
-class ClassifiedError(BaseException):
+class ClassifiedError(Exception):
     """经过分类的 LLM 异常。
+
+    继承自 :class:`Exception`（**不是** :class:`BaseException`），
+    以便上层的 ``except Exception`` 能正常捕获。
 
     携带：
       - ``kind``: 错误种类（见 :class:`LLMErrorKind`）。
@@ -124,12 +125,12 @@ def _extract_error_code(exc: BaseException) -> str:
     return str(code).lower() if code else ""
 
 
-def is_context_length_error(exc: BaseException) -> bool:
+def _is_context_length_error(exc: BaseException) -> bool:
     """判断异常是否为上下文长度超限。"""
     return _extract_error_code(exc) in _CONTEXT_LENGTH_CODES
 
 
-def is_content_filter_error(exc: BaseException) -> bool:
+def _is_content_filter_error(exc: BaseException) -> bool:
     """判断异常是否为内容审核拦截。"""
     return _extract_error_code(exc) in _CONTENT_FILTER_CODES
 
@@ -157,9 +158,9 @@ def classify(exc: BaseException) -> ClassifiedError:
     elif isinstance(exc, AuthenticationError):
         kind = LLMErrorKind.AUTH
     elif isinstance(exc, BadRequestError):
-        if is_context_length_error(exc):
+        if _is_context_length_error(exc):
             kind = LLMErrorKind.CONTEXT_LENGTH
-        elif is_content_filter_error(exc):
+        elif _is_content_filter_error(exc):
             kind = LLMErrorKind.CONTENT_FILTER
         else:
             kind = LLMErrorKind.BAD_REQUEST

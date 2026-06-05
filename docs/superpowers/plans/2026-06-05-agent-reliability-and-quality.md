@@ -5,6 +5,7 @@
 **Goal:** 把 Nexus 的 DeepAgent 调用从"靠运气"变成"工程化可靠"，并接入 Rubric 自评使输出质量可控、产出可喂蒸馏模型的偏好数据。
 
 **Architecture:** 两期交付。
+
 - **Phase 1 (容错)**: 引入 LLM 异常分类 → `get_llm` 加 `with_retry` + 超时 + 多模型 fallback；WebSocket 流式从 `astream` 迁到 `astream_events`，引入 resume token；SubAgent 加 per-node 策略。
 - **Phase 2 (Rubrics)**: 加 RubricJudge 节点，评分入 `quality_scores` 表，低分走 repair；工具结果自评；写记忆前先评分；导出 DPO/KTO 数据。
 
@@ -108,7 +109,7 @@ def test_auth_is_not_retryable():
 - [ ] **运行测试** 期望失败（模块不存在）。
 - [ ] **实现** `errors.py`：
   - `class LLMErrorKind(StrEnum): RATE_LIMIT, TIMEOUT, AUTH, BAD_REQUEST, CONTEXT_LENGTH, CONTENT_FILTER, UNKNOWN`
-  - `class ClassifiedError(BaseException)` 携带 `kind`、`retryable`、`original`
+  - `class ClassifiedError(Exception)` 携带 `kind`、`retryable`、`original`（**必须继承 Exception，不能继承 BaseException**——`BaseException` 是为 `KeyboardInterrupt` / `SystemExit` 保留的，业务异常继承它会让 `except Exception` 抓不到）
   - `def classify(exc: BaseException) -> ClassifiedError`
 - [ ] **运行测试** 期望通过。
 - [ ] **commit**: `feat(llm): add error taxonomy and classifier`
@@ -246,6 +247,7 @@ CREATE TABLE IF NOT EXISTS resume_tokens (
 - [ ] **commit**: `test(e2e): resilience scenarios + observability`
 
 **Phase 1 验收**:
+
 - 故意配一个无效 API Key 启动 → 立刻 `error_code=auth`，不刷屏重试
 - 故意 mock 上游 429 → 5/5 重试恢复成功
 - 故意断开 WS 30s 重连 → 续上继续流
@@ -382,6 +384,7 @@ def test_verdict_thresholds():
 - [ ] **commit**: `test(rubrics): add meta-evaluation harness`
 
 **Phase 2 验收**:
+
 - 故意给 LLM 一个诱导幻觉的问题 → REJECT，不入库
 - 故意触发 repair 路径 → 看到第二次调用日志
 - 跑 100 轮对话，导出 preference jsonl → 至少 30 条 (accepted, rejected) 配对
@@ -395,14 +398,14 @@ def test_verdict_thresholds():
 
 新增环境变量（写入 `nexus/backend/config.py`）：
 
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `NEXUS_LLM_MAX_RETRIES` | 2 | 默认重试次数 |
-| `NEXUS_LLM_TIMEOUT_S` | 60 | 单次 LLM 调用超时 |
-| `NEXUS_LLM_FALLBACK_MODEL` | (空) | 备用模型名（与 active 同样格式） |
-| `NEXUS_RESUME_TOKEN_TTL_S` | 1800 | resume token 有效期 |
-| `NEXUS_RUBRIC_ENABLED` | false | Phase 2 默认关 |
-| `NEXUS_RUBRIC_LLM` | (复用主 LLM) | 评分专用 LLM，可独立配 |
+| 变量                         | 默认        | 说明                   |
+| -------------------------- | --------- | -------------------- |
+| `NEXUS_LLM_MAX_RETRIES`    | 2         | 默认重试次数               |
+| `NEXUS_LLM_TIMEOUT_S`      | 60        | 单次 LLM 调用超时          |
+| `NEXUS_LLM_FALLBACK_MODEL` | (空)       | 备用模型名（与 active 同样格式） |
+| `NEXUS_RESUME_TOKEN_TTL_S` | 1800      | resume token 有效期     |
+| `NEXUS_RUBRIC_ENABLED`     | false     | Phase 2 默认关          |
+| `NEXUS_RUBRIC_LLM`         | (复用主 LLM) | 评分专用 LLM，可独立配        |
 
 ### 5.2 文档
 
@@ -419,16 +422,17 @@ def test_verdict_thresholds():
 
 ## 六、风险与开放问题
 
-| 风险 | 缓解 |
-|---|---|
-| StreamGuard "幂等重试" 会让用户重看一遍输出 | 前端按 event_id 去重；UI 标"重连中"过渡态 |
-| Rubric 评分 LLM 自身成本 | 评分用更便宜的小模型；只在 final 之前评一次，不评中间 chunk |
-| 中文 rubric 标注数据不足 | Phase 2 前两周先累积 export 数据做人评，再调 prompt |
-| SubAgent 工具调用的 timeout 与 LLM timeout 冲突 | 工具超时 > LLM timeout（避免 LLM 还没回完工具就死） |
-| 新表破坏老库迁移 | `_ensure_table` 模式；E2E 加"老库 schema 启动"测试 |
-| 端到端联调时间 | Phase 1 先做集成测试（mock LLM），最后做真 E2E |
+| 风险                                      | 缓解                                       |
+| --------------------------------------- | ---------------------------------------- |
+| StreamGuard "幂等重试" 会让用户重看一遍输出           | 前端按 event_id 去重；UI 标"重连中"过渡态             |
+| Rubric 评分 LLM 自身成本                      | 评分用更便宜的小模型；只在 final 之前评一次，不评中间 chunk     |
+| 中文 rubric 标注数据不足                        | Phase 2 前两周先累积 export 数据做人评，再调 prompt    |
+| SubAgent 工具调用的 timeout 与 LLM timeout 冲突 | 工具超时 > LLM timeout（避免 LLM 还没回完工具就死）      |
+| 新表破坏老库迁移                                | `_ensure_table` 模式；E2E 加"老库 schema 启动"测试 |
+| 端到端联调时间                                 | Phase 1 先做集成测试（mock LLM），最后做真 E2E        |
 
 **开放问题**（执行前请用户确认）:
+
 - Q1: Phase 1 第一刀只动 `get_llm` 还是同时改 WebSocket？建议**只动 get_llm**，WebSocket 留到第二批。
 - Q2: 备用模型从 `models_config` 选还是 env 配？建议 **env 配**（多模型配置是用户操作，不是运维操作）。
 - Q3: Rubric 评分 LLM 默认用什么？建议**复用主 LLM**（避免引入新 key），后续可独立配。
@@ -438,6 +442,7 @@ def test_verdict_thresholds():
 ## 七、Self-Review
 
 **1. Spec coverage**:
+
 - ✅ LangGraph retry/timeout → Tasks 1.1, 1.2, 1.3, 1.4
 - ✅ WebSocket resumption → Tasks 1.5, 1.6, 1.7, 1.8
 - ✅ SubAgent per-node policy → Task 1.4
@@ -451,6 +456,7 @@ def test_verdict_thresholds():
 **2. Placeholder scan**: 已检查。涉及具体实现处都给了代码骨架（异常分类 SQL、RetryPolicy 接口、Rubric 测试），无 TBD。
 
 **3. Type consistency**:
+
 - `ClassifiedError.kind` 在 1.1 定义，1.3/1.4 复用 → 一致
 - `ResumeToken` 在 1.5 定义，1.7/1.8 复用 → 一致
 - `RubricVerdict` 在 2.1 定义，2.4/2.5 复用 → 一致
@@ -465,6 +471,7 @@ def test_verdict_thresholds():
 **总任务数**: Phase 1 共 10 个 Task，Phase 2 共 9 个 Task。
 
 **建议节奏**:
+
 - **Week 1**: Phase 1 Task 1.1–1.4（LLM 韧性层，纯后端，独立可测）
 - **Week 2**: Phase 1 Task 1.5–1.8（resume + WS 改造，需要联调）
 - **Week 3**: Phase 1 Task 1.9–1.10（前端 + E2E）
