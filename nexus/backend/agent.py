@@ -26,6 +26,8 @@ from deepagents.middleware.subagents import SubAgent
 from langchain_openai import ChatOpenAI
 
 from .config import CONFIG
+from .llm.policies import FallbackPolicy, RetryPolicy, TimeoutPolicy
+from .llm.wrapper import ResilientRunnable, build_resilient_llm
 from .memory import MemoryService
 
 logger = logging.getLogger(__name__)
@@ -127,25 +129,66 @@ def get_llm(
     api_key: str | None = None,
     api_base: str | None = None,
     temperature: float | None = None,
-) -> ChatOpenAI:
-    """创建 ChatOpenAI 实例。"""
-    # 如果传入了 api_key，说明是自定义模型，使用传入的参数
+    retry: RetryPolicy | None = None,
+    fallback: ChatOpenAI | None = None,
+    fallback_policy: FallbackPolicy | None = None,
+    timeout: TimeoutPolicy | None = None,
+) -> ResilientRunnable:
+    """创建带韧性包装的 LLM 实例（默认即包装）。
+
+    本函数与历史版本保持向后兼容：
+      - 前 4 个参数（``model_name`` / ``api_key`` / ``api_base`` / ``temperature``）
+        与旧签名一致；不传 resilience 相关参数时行为等价于原来的 ``ChatOpenAI(...)``，
+        差别仅在于返回值是 :class:`ResilientRunnable` 包装——但通过 ``__getattr__``
+        代理可让现有 deepagents / LangChain 调用方零感知。
+      - ``retry`` / ``fallback`` / ``fallback_policy`` / ``timeout`` 都是可选的；
+        未传时各自使用 :mod:`nexus.backend.llm.policies` 中的默认值。
+
+    Args:
+        model_name: 模型名称；未提供且未提供 ``api_key`` 时抛 ``ValueError``。
+        api_key: 自定义模型的 API key；传入则使用 ``model_name``（默认 ``"gpt-4"``）。
+        api_base: 自定义模型的 API base URL。
+        temperature: 模型温度；为 ``None`` 时按渠道默认（自定义渠道 0.7，
+            主渠道使用 ``CONFIG["temperature"]``）。
+        retry: 重试策略；``None`` 表示默认 :class:`RetryPolicy`。
+        fallback: 备用 ``ChatOpenAI`` 实例；``None`` 表示不启用降级。
+        fallback_policy: 降级判定策略；``None`` 表示默认 :class:`FallbackPolicy`。
+        timeout: 超时策略；``None`` 表示默认 :class:`TimeoutPolicy`。
+
+    Returns:
+        韧性 LLM 包装实例，暴露 ``ainvoke`` / ``astream``；其它未覆盖的
+        LangChain Runnable 方法/字段通过 :meth:`ResilientRunnable.__getattr__`
+        代理到底层 ``ChatOpenAI``。
+
+    Raises:
+        ValueError: 既无 ``model_name`` 也无 ``api_key``，无法决定模型来源。
+    """
     if api_key:
-        return ChatOpenAI(
+        # 自定义模型路径：保持旧行为
+        chat = ChatOpenAI(
             model=model_name or "gpt-4",
             openai_api_key=api_key,
             openai_api_base=api_base,
             temperature=temperature if temperature is not None else 0.7,
         )
-    # 没有 api_key 且没有 model_name，返回 None（由调用方处理）
-    if not model_name:
+    elif not model_name:
+        # 同时缺 model_name 与 api_key：保持旧行为，明确报错
         raise ValueError("model_name and api_key are both required")
-    # 有 model_name 但没有 api_key，使用 CONFIG 中的
-    return ChatOpenAI(
-        model=model_name,
-        openai_api_key=CONFIG["minimax_api_key"],
-        openai_api_base=CONFIG["minimax_api_base"],
-        temperature=temperature if temperature is not None else CONFIG["temperature"],
+    else:
+        # 走 CONFIG 默认渠道
+        chat = ChatOpenAI(
+            model=model_name,
+            openai_api_key=CONFIG["minimax_api_key"],
+            openai_api_base=CONFIG["minimax_api_base"],
+            temperature=temperature if temperature is not None else CONFIG["temperature"],
+        )
+
+    return build_resilient_llm(
+        primary=chat,
+        fallback=fallback,
+        retry=retry,
+        timeout=timeout,
+        fallback_policy=fallback_policy,
     )
 
 
@@ -205,19 +248,46 @@ def _create_permissions(project_root: Path) -> list:
 def create_subagents(model: ChatOpenAI | None = None) -> list[SubAgent]:
     """创建子代理列表。
 
+    每个 subagent 的"重试 + 超时"策略以**文字提示**形式嵌入 system prompt
+    （而非 LLM 参数）——因为 subagent 内的工具调用本身有自己的超时机制，
+    LLM 层的策略覆盖不到工具调用。约定如下：
+      - ``code_writer``: 单次任务上限 300s，max_retries=0（工具失败应直接报告，
+        盲目重写代码反而会引入新错误）。
+      - ``researcher``: 单次任务上限 120s，max_retries=2（网络瞬时错误可安全
+        重试；鉴权/上下文错误不应重试）。
+
     Args:
-        model: 可选的 LLM 实例，如果不提供则使用 CONFIG 中的默认模型（可能为 None）
+        model: 可选的 LLM 实例；如果不提供则使用 CONFIG 中的默认模型
+            （CONFIG 也没 API key 时 ``model=None``，subagent 仅承载提示词
+            和描述，由调用方决定是否注入模型）。
+
+    Returns:
+        SubAgent 列表，包含 ``code_writer`` 与 ``researcher``。
     """
     from .tools import TOOLS
 
     # 如果没有提供模型且 CONFIG 中也没有 API key，跳过工具
     use_tools = model is not None or CONFIG.get("minimax_api_key")
 
+    code_writer_prompt = (
+        "你是一个专业的 Python 代码助手，负责编写高质量、生产级别的代码。\n\n"
+        "【重试策略】本 agent 内的工具调用最多 0 次重试，超时上限 300 秒。\n"
+        "工具失败应直接报告，不要盲目重试或自行改写代码；"
+        "代码错误请把上下文交回主流程让用户决策。"
+    )
+
+    researcher_prompt = (
+        "你是一个专业的研究分析助手，负责搜索和分析信息。\n\n"
+        "【重试策略】本 agent 内的工具调用最多 2 次重试，超时上限 120 秒。\n"
+        "网络瞬时错误（超时、5xx、限流）可以安全重试；"
+        "鉴权失败、参数错误、上下文超长等错误不要重试，应原样向上报告。"
+    )
+
     code_writer = SubAgent(
         name="code_writer",
         model=model or get_llm(model_name=CONFIG["model_name"]) if use_tools else None,
         tools=[t for t in TOOLS if t.name in ("write_file", "edit_file", "read_file", "execute")] if use_tools else [],
-        system_prompt="你是一个专业的 Python 代码助手，负责编写高质量、生产级别的代码。",
+        system_prompt=code_writer_prompt,
         description="代码编写专家",
     )
 
@@ -225,7 +295,7 @@ def create_subagents(model: ChatOpenAI | None = None) -> list[SubAgent]:
         name="researcher",
         model=model or get_llm(model_name=CONFIG["model_name"]) if use_tools else None,
         tools=[t for t in TOOLS if t.name in ("web_search", "browse")] if use_tools else [],
-        system_prompt="你是一个专业的研究分析助手，负责搜索和分析信息。",
+        system_prompt=researcher_prompt,
         description="研究分析专家",
     )
 

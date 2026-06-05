@@ -144,6 +144,48 @@ class ResilientRunnable:
         return self._fallback_policy
 
     # ------------------------------------------------------------------
+    # 透明代理：未在本类显式定义的属性/方法 → 落到底层 primary
+    # ------------------------------------------------------------------
+
+    def __getattr__(self, name: str) -> Any:
+        """把未覆盖的属性访问代理到底层 ``primary``。
+
+        作用：LangChain ``Runnable`` 协议方法（``bind`` / ``with_fallbacks``
+        / ``invoke`` / ``batch`` / ``stream`` 等）以及 ``ChatOpenAI`` 自身的
+        模型字段（``model_name`` / ``temperature`` 等）都不在 wrapper 里显式
+        定义，但 deepagents 编排管线和现有调用方会依赖它们；通过 ``__getattr__``
+        把这部分行为透传，保证集成时零感知。
+
+        注意事项：
+          - Python 只在正常属性查找失败时才调用 ``__getattr__``，所以
+            ``ainvoke`` / ``astream`` 已被本类显式定义，不会被代理走。
+          - ``_primary`` 等内部字段使用单下划线前缀；``__init__`` 里通过
+            ``self._primary = primary`` 写入，``__getattr__`` 只在普通查找
+            失败时被触发，因此不会出现"找 _primary 又走 __getattr__"的递归
+            （除非真的没初始化 _primary，那种情况下原样抛 ``AttributeError``）。
+          - 底层若也没有该属性，``getattr`` 自然抛 ``AttributeError``，
+            上层应该让它继续抛出，**不要**返回 ``None`` 掩盖问题。
+
+        Args:
+            name: 被访问的属性名。
+
+        Returns:
+            底层 ``primary`` 对应的属性值。
+
+        Raises:
+            AttributeError: 底层也没有该属性。
+        """
+        # 兜底：防止 _primary 还没初始化就被 __getattr__ 命中。
+        # 走 __dict__ 直接查，避免再次触发 __getattr__ 形成递归。
+        primary = self.__dict__.get("_primary")
+        if primary is None:
+            raise AttributeError(
+                f"{type(self).__name__!s} has no attribute {name!r} "
+                "(primary not initialized)"
+            )
+        return getattr(primary, name)
+
+    # ------------------------------------------------------------------
     # 公开 API
     # ------------------------------------------------------------------
 
