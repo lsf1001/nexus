@@ -41,7 +41,14 @@ dependencies = [
 dev = [
     "black",
     "ruff",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [project.scripts]
 nexus = "nexus.cli.main:app"
