@@ -48,14 +48,14 @@ _DEFAULT_RETRYABLE_KINDS: frozenset[LLMErrorKind] = frozenset(
 )
 
 # 默认允许 fallback 的错误种类集合。
-# 注意：AUTH 也包含在内——主模型鉴权失败时换备用供应商是合理的降级路径。
-# 但 BAD_REQUEST / CONTEXT_LENGTH 不会触发 fallback，重试/改 prompt 更合适。
+# 注意：AUTH 不在内——按 plan（Phase 1, Task 1.2 / 1.3）约定，
+# 鉴权失败既不重试也不走 fallback，直接抛 ClassifiedError(kind=AUTH)。
+# BAD_REQUEST / CONTEXT_LENGTH 同样不触发 fallback：换模型也救不了 prompt 本身的问题。
 _DEFAULT_FALLBACK_KINDS: frozenset[LLMErrorKind] = frozenset(
     {
         LLMErrorKind.RATE_LIMIT,
         LLMErrorKind.TIMEOUT,
         LLMErrorKind.UNKNOWN,
-        LLMErrorKind.AUTH,
     }
 )
 
@@ -147,8 +147,9 @@ class FallbackPolicy:
     def should_fallback(self, classified: ClassifiedError) -> bool:
         """判断该错误是否应该触发 fallback。
 
-        设计取舍：
-          - AUTH 默认会触发 fallback（主供应商鉴权挂掉时换备用）。
+        设计取舍（与 plan Phase 1 Task 1.2 / 1.3 对齐）：
+          - AUTH 不在默认 fallback_kinds 内：鉴权失败既不重试也不走 fallback，
+            交由上层向用户/运维报错（备用供应商的 key 也很可能同样失效）。
           - BAD_REQUEST / CONTEXT_LENGTH 不会触发 fallback（应改 prompt）。
           - CONTENT_FILTER 不在默认集合内（换模型也不一定能过审，
             重试或许能等到内容策略波动，但更多应由上层决定）。

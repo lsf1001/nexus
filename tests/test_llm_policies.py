@@ -242,10 +242,15 @@ class TestFallbackPolicyShouldFallback:
         policy = FallbackPolicy()
         assert policy.should_fallback(_classified_kind(LLMErrorKind.RATE_LIMIT)) is True
 
-    def test_auth_triggers_fallback(self) -> None:
-        """AUTH 默认在 fallback_kinds 内（主模型鉴权失败可换备用）。"""
+    def test_auth_does_not_trigger_fallback(self) -> None:
+        """AUTH 默认不在 fallback_kinds 内。
+
+        按 plan Phase 1 Task 1.2 / 1.3 的明确约定（计划文档第 124 / 135 行）：
+        鉴权失败既不重试也不走 fallback，直接抛 ClassifiedError(kind=AUTH)。
+        换备用供应商通常无法解决"key 配错/失效"，应交由上层向用户/运维报错。
+        """
         policy = FallbackPolicy()
-        assert policy.should_fallback(_classified_kind(LLMErrorKind.AUTH)) is True
+        assert policy.should_fallback(_classified_kind(LLMErrorKind.AUTH)) is False
 
     def test_timeout_triggers_fallback(self) -> None:
         """TIMEOUT 默认在 fallback_kinds 内。"""
