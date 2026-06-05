@@ -172,8 +172,8 @@ class FallbackPolicy:
         Returns:
             ``(next_index, llm)`` 二元组。
               - 若还有下一个：``next_index = current_index + 1``，``llm`` 为该实例。
-              - 若已耗尽：``next_index = len(chains)``，``llm`` 为 ``None``。
-            调用方可通过 ``llm is None`` 判断链已走完。
+              - 若已耗尽：``next_index = current_index + 1``（继续递增，便于调用方记录累计步数），
+                ``llm`` 为 ``None``，调用方可据此终止 fallback 链。
         """
         next_index = current_index + 1
         if 0 <= next_index < len(self.chains):
