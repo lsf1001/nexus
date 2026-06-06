@@ -526,7 +526,11 @@ async def _run_agent_streaming(
     full_response = ""
     had_error = False
 
-    async for event in guard.astream_events({"messages": prompt["messages"]}, version="v1"):
+    # v1 is deprecated since langchain-core 1.0; v2 keeps the same event
+    # names (on_chat_model_stream / on_tool_start / on_tool_end) and the
+    # same data shape (data.chunk / data.output), so the rest of the loop
+    # works unchanged.
+    async for event in guard.astream_events({"messages": prompt["messages"]}, version="v2"):
         event_id = int(event.get("event_id", 0))
         event_type = event.get("event")
 
