@@ -119,6 +119,33 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         )
     """)
 
+    # Phase 1 容错:质量评分表(rubric LLM 对回复打分,用于 accept/repair/reject)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS quality_scores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            message_id TEXT,
+            rubric TEXT NOT NULL,
+            score REAL NOT NULL,
+            verdict TEXT NOT NULL,
+            reasoning TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_quality_session ON quality_scores(session_id)")
+
+    # Phase 1 容错:断线续传 token 表(对应 resume.py 的 HMAC token)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS resume_tokens (
+            token TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            last_event_id INTEGER NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_resume_tokens_session ON resume_tokens(session_id)")
+
 
 def init_db() -> None:
     """显式初始化数据库表。get_db() 已自动调用,此函数主要给 CLI/启动入口使用。"""

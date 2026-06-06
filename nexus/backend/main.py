@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import re
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -9,11 +8,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .agent import create_agent
+from .api.ws import (
+    _clients_lock,
+    _ws_clients,
+    handle_websocket,
+)
 from .config import CONFIG
 from .mcp import load_all_mcp_tools
 from .models_config import get_active_model
@@ -23,8 +27,6 @@ from .sessions import router as sessions_router
 _agent = None
 _mcp_tools: list[Any] = []
 _agent_lock = threading.RLock()
-_ws_clients: list[WebSocket] = []
-_clients_lock = threading.RLock()
 
 # 微信消息处理线程池（全局复用）
 _wechat_executor: ThreadPoolExecutor | None = None
@@ -405,41 +407,9 @@ async def get_model_info():
     }
 
 
-def _estimate_tokens(text: str) -> tuple[int, int]:
-    """估算 token 数量和上下文使用率。
-
-    Args:
-        text: 文本内容
-
-    Returns:
-        (token_count, context_usage_percent)
-    """
-    chinese_chars = len(re.findall(r"[一-鿿]", text))
-    english_chars = len(re.findall(r"[a-zA-Z]", text))
-    other_chars = len(text) - chinese_chars - english_chars
-    estimated_tokens = int(chinese_chars * 2.5 + english_chars * 0.25 + other_chars * 0.5)
-    context_usage = min(int((estimated_tokens / 200000) * 100), 100)
-    return estimated_tokens, context_usage
-
-
-def _extract_request_token(request: Request) -> str:
-    """从 header / query 提取 token；REST 鉴权用。"""
-    auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer "):
-        return auth[7:].strip()
-    return request.query_params.get("token", "")
-
-
-def require_token(request: Request) -> None:
-    """FastAPI 依赖：校验 REST 请求 token。失败抛 401。"""
-    token = _extract_request_token(request)
-    expected = CONFIG.get("ws_token", "")
-    if not expected or token != expected:
-        raise HTTPException(status_code=401, detail="未授权")
-
-
 @app.websocket(f"{API_PREFIX}/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket 主端点：业务逻辑委托给 ``api.ws.handle_websocket``。"""
     token = websocket.query_params.get("token")
     if token != CONFIG.get("ws_token", ""):
         await websocket.close(code=4001, reason="未授权")
@@ -447,166 +417,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await websocket.accept()
 
-    # 注册客户端
-    with _clients_lock:
-        _ws_clients.append(websocket)
+    def _get_current_agent() -> Any:
+        # 通过 _agent_lock 读一致快照；调用方在 _run_agent_streaming 内不再加锁
+        with _agent_lock:
+            return _agent
 
-    # 设置微信消息回调
-    from .channels.wechat import get_active_wechat_channel
-
-    channel = get_active_wechat_channel()
-    if channel:
-        channel.on_message(_handle_wechat_message)
-
-    # 会话管理
-    from .sessions import get_session_manager
-
-    session_manager = get_session_manager()
-    session_id = None
-
-    try:
-        while True:
-            data = await websocket.receive_json()
-            user_content = data.get("content", "")
-
-            if not user_content:
-                continue
-
-            # 创建或获取会话
-            new_session_created = False
-            if session_id is None:
-                session_id = data.get("session_id")
-                if not session_id:
-                    from .db import create_session
-
-                    session_id = str(uuid.uuid4())
-                    title = data.get("title") or "新会话"
-                    create_session(session_id, title=title, channel="main")
-                    new_session_created = True
-
-            if new_session_created:
-                await websocket.send_json(
-                    {
-                        "type": "session_created",
-                        "session_id": session_id,
-                        "title": title,
-                    }
-                )
-
-            # 添加用户消息到历史
-            from .db import add_message
-
-            add_message(str(uuid.uuid4()), session_id, "user", user_content)
-
-            # 使用 SessionManager 构建带记忆的 prompt
-            prompt = session_manager.build_prompt(session_id, user_content)
-
-            full_response = ""
-
-            try:
-                with _agent_lock:
-                    agent = _agent
-                async for chunk in agent.astream({"messages": prompt["messages"]}, stream_mode="updates"):
-                    if not isinstance(chunk, dict):
-                        continue
-
-                    if "model" in chunk:
-                        model_data = chunk.get("model")
-                        if model_data and isinstance(model_data, dict):
-                            messages = model_data.get("messages", [])
-                            for msg in messages:
-                                msg_content = getattr(msg, "content", "") or ""
-                                if msg_content:
-                                    full_response += msg_content
-
-                    elif "tool_call" in chunk:
-                        tool_name = chunk.get("tool_call", {}).get("name", "未知工具")
-                        await websocket.send_json(
-                            {
-                                "type": "thinking",
-                                "content": f"[调用工具] {tool_name}",
-                            }
-                        )
-
-                    elif "tool_result" in chunk:
-                        result = chunk.get("tool_result", "")
-                        await websocket.send_json(
-                            {
-                                "type": "thinking",
-                                "content": f"[工具返回] {str(result)[:100]}...",
-                            }
-                        )
-
-                normalized = full_response.replace("<think>", "<thinking>").replace("</think>", "</thinking>")
-
-                estimated_tokens, context_usage = _estimate_tokens(normalized)
-
-                await websocket.send_json(
-                    {
-                        "type": "token_usage",
-                        "content": "",
-                        "token_count": estimated_tokens,
-                        "context_usage": context_usage,
-                    }
-                )
-
-                thinking_parts = re.findall(r"<thinking>(.*?)</thinking>", normalized, flags=re.DOTALL)
-                response_text = re.sub(r"<thinking>.*?</thinking>", "", normalized, flags=re.DOTALL).strip()
-
-                if thinking_parts:
-                    all_thinking = "\n".join(part.strip() for part in thinking_parts)
-                    await websocket.send_json(
-                        {
-                            "type": "thinking",
-                            "content": all_thinking,
-                        }
-                    )
-
-                if response_text:
-                    # 分块发送：每帧约 16 字符（约 4-5 个 token），UI 打字效果更顺滑
-                    chunk_size = 16
-                    for i in range(0, len(response_text), chunk_size):
-                        chunk = response_text[i : i + chunk_size]
-                        await websocket.send_json(
-                            {
-                                "type": "chunk",
-                                "content": chunk,
-                            }
-                        )
-
-                    await websocket.send_json(
-                        {
-                            "type": "final",
-                            "content": response_text,
-                        }
-                    )
-
-                await websocket.send_json(
-                    {
-                        "type": "done",
-                        "content": "",
-                    }
-                )
-
-                # 保存助手回复到数据库
-                if response_text:
-                    add_message(str(uuid.uuid4()), session_id, "assistant", full_response)
-
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Agent error: {error_msg}")
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "content": error_msg,
-                    }
-                )
-
-    except WebSocketDisconnect:
-        logger.info("客户端断开连接")
-        with _clients_lock:
-            if websocket in _ws_clients:
-                _ws_clients.remove(websocket)
+    await handle_websocket(
+        websocket,
+        get_agent=_get_current_agent,
+        wechat_callback=_handle_wechat_message,
+    )
 
 
 # ========== 微信通道 API ==========
