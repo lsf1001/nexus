@@ -18,9 +18,32 @@ const QUICK_PROMPTS: Array<{ title: string; desc: string; prompt: string }> = [
   { title: '写作助手', desc: '文章、邮件、报告...', prompt: '帮我写一篇文章' },
 ];
 
+interface LastError {
+  message: string;
+  retryable: boolean;
+  code: string;
+  at: number;
+}
+
+function formatErrorMessage(code: string, raw: string): string {
+  const map: Record<string, string> = {
+    'auth': 'API Key 无效或已过期，请检查配置',
+    'rate_limit_exhausted': '请求过于频繁，已重试多次仍失败，请稍后再试',
+    'timeout_exhausted': '响应超时，请稍后再试或检查网络',
+    'context_length': '对话过长，请开启新会话',
+    'content_filter': '内容被安全策略拦截',
+    'bad_request': '请求格式有误',
+    'agent_unavailable': 'AI 服务暂未启动',
+    'invalid_resume_token': '续传凭证已失效',
+    'unknown': raw || '未知错误',
+  };
+  return map[code] ?? raw ?? '未知错误';
+}
+
 function ChatArea({ resetTrigger, onConnectedChange, onSessionCreated, conversationId: _conversationId }: ChatAreaProps) {
   const messagesRef = useRef<Message[]>([]);
   const [input, setInput] = useState('');
+  const [lastError, setLastError] = useState<LastError | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const resetTriggerRef = useRef(resetTrigger ?? 0);
@@ -72,6 +95,7 @@ function ChatArea({ resetTrigger, onConnectedChange, onSessionCreated, conversat
         break;
       }
       case 'chunk': {
+        setLastError(null);  // 流恢复，清掉旧错误（已为 null 时 React 会跳过重渲染）
         if (messagesRef.current.length > 0) {
           const lastIdx = messagesRef.current.length - 1;
           const last = messagesRef.current[lastIdx];
@@ -100,6 +124,12 @@ function ChatArea({ resetTrigger, onConnectedChange, onSessionCreated, conversat
       }
       case 'error': {
         setIsLoading(false);
+        setLastError({
+          message: data.content || '未知错误',
+          retryable: data.retryable ?? false,
+          code: data.error_code || 'unknown',
+          at: Date.now(),
+        });
         break;
       }
       case 'wechat_message': {
@@ -176,6 +206,16 @@ function ChatArea({ resetTrigger, onConnectedChange, onSessionCreated, conversat
     }
     sendRef.current(msg);
   };
+
+  // 重试最后一条用户消息（错误 UI 中触发）
+  const handleRetry = useCallback(() => {
+    const lastUserMsg = [...messagesRef.current].reverse().find(m => m.role === 'user');
+    if (!lastUserMsg) return;
+    setIsLoading(true);
+    const msg: WSMessage = { content: lastUserMsg.content };
+    if (sessionIdRef.current) msg.session_id = sessionIdRef.current;
+    sendRef.current(msg);
+  }, [sendRef]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -256,6 +296,60 @@ function ChatArea({ resetTrigger, onConnectedChange, onSessionCreated, conversat
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* 错误提示（出现在消息区与输入框之间，不抢占输入框） */}
+      {lastError && (
+        <div className="max-w-3xl mx-auto px-4 pb-2 w-full">
+          <div
+            className={`p-3 rounded-lg border ${
+              lastError.retryable
+                ? (darkMode
+                    ? 'bg-amber-900/30 border-amber-700 text-amber-200'
+                    : 'bg-amber-50 border-amber-300 text-amber-800')
+                : (darkMode
+                    ? 'bg-red-900/30 border-red-700 text-red-200'
+                    : 'bg-red-50 border-red-300 text-red-800')
+            }`}
+            role="alert"
+          >
+            <div className="flex items-start gap-2">
+              <span className="text-lg leading-none mt-0.5">
+                {lastError.retryable ? '⚠️' : '❌'}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm">
+                  {lastError.retryable ? '暂时不可用' : '请求失败'}
+                </div>
+                <div className="text-xs mt-0.5 opacity-90 break-words">
+                  {formatErrorMessage(lastError.code, lastError.message)}
+                </div>
+              </div>
+              {lastError.retryable && (
+                <button
+                  onClick={() => {
+                    setLastError(null);
+                    handleRetry();
+                  }}
+                  className={`text-xs px-2 py-1 rounded transition-colors flex-shrink-0 ${
+                    darkMode
+                      ? 'bg-amber-800 hover:bg-amber-700 text-amber-100'
+                      : 'bg-amber-200 hover:bg-amber-300 text-amber-900'
+                  }`}
+                >
+                  重试
+                </button>
+              )}
+              <button
+                onClick={() => setLastError(null)}
+                className="text-xs opacity-60 hover:opacity-100 transition-opacity flex-shrink-0"
+                aria-label="关闭错误提示"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 输入区域 */}
       <div className={`p-4 border-t flex-shrink-0 ${darkMode ? 'border-[#1f1f1f] bg-[#0f0f0f]' : 'border-[#e0e5dc] bg-white'}`} style={{ flex: '0 0 auto' }}>

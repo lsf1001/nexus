@@ -24,12 +24,18 @@ export interface SessionResponse {
 }
 
 export interface StreamEvent {
-  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage' | 'wechat_message' | 'session_created';
+  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage' | 'wechat_message' | 'session_created' | 'resume_token' | 'resume_ack' | 'invalid_resume_token';
   content?: string;
   token_count?: number;
   context_usage?: number;
   session_id?: string;
   title?: string;
+  // Phase 1 新增字段
+  event_id?: number;       // 事件 ID（断点续传定位）
+  error_code?: string;     // 错误代码（auth / rate_limit_exhausted / ...）
+  retryable?: boolean;     // 是否可重试
+  resume_token?: string;   // resume token（用于断线重连）
+  last_event_id?: number;  // 当前流的最后 event_id
 }
 
 export interface WSMessage {
