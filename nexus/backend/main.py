@@ -15,10 +15,20 @@ from fastapi.staticfiles import StaticFiles
 
 from .agent import create_agent
 from .config import CONFIG
+from .llm.policies import RetryPolicy
 from .mcp import load_all_mcp_tools
 from .models_config import get_active_model
+from .resilience.resume import (
+    InvalidResumeToken,
+    make_token,
+    verify_token,
+)
+from .resilience.stream_guard import StreamGuard
 from .routes import model_config as model_config_routes
 from .sessions import router as sessions_router
+
+# WS 流式响应的默认重试策略（基延迟 0.1s，上限 2s，±20% 抖动）
+_WS_RETRY_POLICY = RetryPolicy(max_attempts=3, base_delay=0.1, max_delay=2.0, jitter=0.2)
 
 _agent = None
 _mcp_tools: list[Any] = []
@@ -438,6 +448,223 @@ def require_token(request: Request) -> None:
         raise HTTPException(status_code=401, detail="未授权")
 
 
+# 不可重试的错误码集合（与 StreamGuard 的 _map_error_code 输出对齐）
+_NON_RETRYABLE_ERROR_CODES = frozenset({"auth", "bad_request", "context_length", "content_filter"})
+
+
+def _is_retryable_error_code(error_code: str) -> bool:
+    """根据 wire 上的 error_code 判断是否还可重试。
+
+    - ``*_exhausted`` 后缀表示重试已用尽 → 不可重试
+    - ``auth`` / ``bad_request`` / ``context_length`` / ``content_filter`` 这类
+      结构性错误即使没加 exhausted 后缀也不应再重试
+    - 其余（``rate_limit`` / ``timeout`` / ``unknown``）视为可重试
+
+    Args:
+        error_code: 来自 StreamGuard 错误事件的 ``error_code`` 字段。
+
+    Returns:
+        是否还可重试。
+    """
+    if error_code.endswith("_exhausted"):
+        return False
+    return error_code not in _NON_RETRYABLE_ERROR_CODES
+
+
+async def _run_agent_streaming(
+    websocket: WebSocket,
+    session_id: str,
+    prompt: dict,
+    resume_from_event_id: int | None = None,
+) -> tuple[int, str]:
+    """运行 agent 流式响应，把事件转发到 WebSocket。
+
+    使用 :class:`StreamGuard` 包装 ``agent.astream_events``：
+      - 给每个事件附加进程内单调递增的 ``event_id``
+      - 可重试错误自动重试；不可重试 / 重试用尽 → yield 1 个 error 事件
+      - 永不抛异常（StreamGuard 已保证），调用方不需要再 try/except
+
+    Args:
+        websocket: 目标 WebSocket 连接。
+        session_id: 会话 ID（用于日志上下文）。
+        prompt: 已构建好的 prompt dict（含 ``messages``）。
+        resume_from_event_id: 客户端断点续传位置；Phase 1 简化模型下
+            仅作为"客户端告知 server 上次看到哪"，不做真正的去重过滤
+            （每次流都有新的 event_id 序列）。
+
+    Returns:
+        ``(last_event_id, full_response)``：
+          - ``last_event_id`` 本次流结束时的最后一个 event_id（供下次签发 resume token）。
+          - ``full_response`` 累积的助手回复文本（仅 chat model chunks）。
+    """
+    with _agent_lock:
+        agent = _agent
+
+    if agent is None:
+        # 没可用 agent（极端情况：启动时没模型 key）
+        await websocket.send_json(
+            {
+                "type": "error",
+                "content": "agent 未初始化",
+                "error_code": "agent_unavailable",
+                "retryable": False,
+                "event_id": 1,
+            }
+        )
+        return 1, ""
+
+    # StreamGuard 包 astream_events；每次重试会重新调一次 astream_events
+    # （幂等重试，由上游 LLM 自行决定是否真幂等）。
+    guard = StreamGuard(
+        astream_events=lambda input, **kw: agent.astream_events(input, **kw),
+        retry_policy=_WS_RETRY_POLICY,
+        max_total_retries=2,
+    )
+
+    last_event_id = 0
+    full_response = ""
+    had_error = False
+
+    async for event in guard.astream_events({"messages": prompt["messages"]}, version="v1"):
+        event_id = int(event.get("event_id", 0))
+        event_type = event.get("event")
+
+        # StreamGuard 错误事件
+        if event.get("type") == "error":
+            error_code = event.get("error_code", "unknown")
+            retryable = _is_retryable_error_code(error_code)
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "content": event.get("message", "未知错误"),
+                    "event_id": event_id,
+                    "error_code": error_code,
+                    "retryable": retryable,
+                }
+            )
+            last_event_id = event_id
+            had_error = True
+            # 不可重试 / 已耗尽：停止流（不再发 done）
+            if not retryable:
+                return last_event_id, full_response
+            # 可重试但 StreamGuard 仍 yield error，意味着情况特殊
+            # （理论上不会到这里，StreamGuard 内部就用尽了）。安全起见停止。
+            return last_event_id, full_response
+
+        # Phase 1 resume 过滤：跳过 event_id <= resume_from_event_id 的事件
+        if resume_from_event_id is not None and event_id > 0 and event_id <= resume_from_event_id:
+            last_event_id = max(last_event_id, event_id)
+            continue
+
+        # 业务事件转发
+        if event_type == "on_chat_model_stream":
+            chunk = event.get("data", {}).get("chunk")
+            content = getattr(chunk, "content", "") if chunk else ""
+            if content:
+                full_response += content
+                await websocket.send_json(
+                    {
+                        "type": "chunk",
+                        "content": content,
+                        "event_id": event_id,
+                    }
+                )
+        elif event_type == "on_tool_start":
+            tool_name = event.get("name", "未知工具")
+            await websocket.send_json(
+                {
+                    "type": "thinking",
+                    "content": f"[调用工具] {tool_name}",
+                    "event_id": event_id,
+                }
+            )
+        elif event_type == "on_tool_end":
+            output = event.get("data", {}).get("output")
+            await websocket.send_json(
+                {
+                    "type": "thinking",
+                    "content": f"[工具返回] {str(output)[:100]}..." if output else "",
+                    "event_id": event_id,
+                }
+            )
+        # 其它事件（chain start/end、retriever、agent 节点等）→ 忽略，仅跟踪 event_id
+
+        if event_id > last_event_id:
+            last_event_id = event_id
+
+    if had_error:
+        # 已经有 error 事件发出，StreamGuard 走完就不要再发 done
+        return last_event_id, full_response
+
+    # 正常结束：发 final + done
+    if full_response:
+        final_event_id = last_event_id + 1
+        await websocket.send_json(
+            {
+                "type": "final",
+                "content": full_response,
+                "event_id": final_event_id,
+            }
+        )
+        last_event_id = final_event_id
+
+    done_event_id = last_event_id + 1
+    await websocket.send_json(
+        {
+            "type": "done",
+            "content": "",
+            "event_id": done_event_id,
+        }
+    )
+    return done_event_id, full_response
+
+
+async def _handle_resume_frame(websocket: WebSocket, data: dict) -> int | None:
+    """处理客户端的 resume 帧：校验 token，回 resume_ack 或 error。
+
+    Args:
+        websocket: 目标 WebSocket 连接。
+        data: 客户端发来的 JSON dict（应含 ``session_id`` 和 ``resume_token``）。
+
+    Returns:
+        校验通过时返回 ``last_event_id``（可用于下次 resume 起点）；
+        校验失败返回 ``None``（错误事件已发到 ws）。
+    """
+    session_id = data.get("session_id", "")
+    token = data.get("resume_token", "")
+
+    if not session_id or not token:
+        await websocket.send_json(
+            {
+                "type": "error",
+                "error_code": "invalid_resume_token",
+                "content": "缺少 session_id 或 resume_token",
+            }
+        )
+        return None
+
+    try:
+        last_event_id = verify_token(token, session_id)
+    except InvalidResumeToken as err:
+        await websocket.send_json(
+            {
+                "type": "error",
+                "error_code": "invalid_resume_token",
+                "content": str(err),
+            }
+        )
+        return None
+
+    await websocket.send_json(
+        {
+            "type": "resume_ack",
+            "session_id": session_id,
+            "resume_from_event_id": last_event_id,
+        }
+    )
+    return last_event_id
+
+
 @app.websocket(f"{API_PREFIX}/ws")
 async def websocket_endpoint(websocket: WebSocket):
     token = websocket.query_params.get("token")
@@ -467,6 +694,13 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
+
+            # 1) resume 帧：单独处理，不进入主消息流
+            if data.get("type") == "resume":
+                await _handle_resume_frame(websocket, data)
+                continue
+
+            # 2) 普通用户消息帧
             user_content = data.get("content", "")
 
             if not user_content:
@@ -501,106 +735,45 @@ async def websocket_endpoint(websocket: WebSocket):
             # 使用 SessionManager 构建带记忆的 prompt
             prompt = session_manager.build_prompt(session_id, user_content)
 
-            full_response = ""
-
-            try:
-                with _agent_lock:
-                    agent = _agent
-                async for chunk in agent.astream({"messages": prompt["messages"]}, stream_mode="updates"):
-                    if not isinstance(chunk, dict):
-                        continue
-
-                    if "model" in chunk:
-                        model_data = chunk.get("model")
-                        if model_data and isinstance(model_data, dict):
-                            messages = model_data.get("messages", [])
-                            for msg in messages:
-                                msg_content = getattr(msg, "content", "") or ""
-                                if msg_content:
-                                    full_response += msg_content
-
-                    elif "tool_call" in chunk:
-                        tool_name = chunk.get("tool_call", {}).get("name", "未知工具")
-                        await websocket.send_json(
-                            {
-                                "type": "thinking",
-                                "content": f"[调用工具] {tool_name}",
-                            }
-                        )
-
-                    elif "tool_result" in chunk:
-                        result = chunk.get("tool_result", "")
-                        await websocket.send_json(
-                            {
-                                "type": "thinking",
-                                "content": f"[工具返回] {str(result)[:100]}...",
-                            }
-                        )
-
-                normalized = full_response.replace("<think>", "<thinking>").replace("</think>", "</thinking>")
-
-                estimated_tokens, context_usage = _estimate_tokens(normalized)
-
-                await websocket.send_json(
-                    {
-                        "type": "token_usage",
-                        "content": "",
-                        "token_count": estimated_tokens,
-                        "context_usage": context_usage,
-                    }
-                )
-
-                thinking_parts = re.findall(r"<thinking>(.*?)</thinking>", normalized, flags=re.DOTALL)
-                response_text = re.sub(r"<thinking>.*?</thinking>", "", normalized, flags=re.DOTALL).strip()
-
-                if thinking_parts:
-                    all_thinking = "\n".join(part.strip() for part in thinking_parts)
+            # 可选：客户端在消息帧中携带 resume_token（兼容旧客户端）
+            resume_from_event_id: int | None = None
+            if data.get("resume_token"):
+                try:
+                    resume_from_event_id = verify_token(data["resume_token"], session_id)
+                except InvalidResumeToken:
                     await websocket.send_json(
                         {
-                            "type": "thinking",
-                            "content": all_thinking,
+                            "type": "error",
+                            "error_code": "invalid_resume_token",
+                            "content": "消息中的 resume_token 无效",
+                        }
+                    )
+                    continue
+
+            # 运行 agent 流（已自带 StreamGuard + error_code/retryable）
+            last_event_id, full_response = await _run_agent_streaming(
+                websocket, session_id, prompt, resume_from_event_id
+            )
+
+            # 签发新 resume token 给客户端（仅在配置了 secret 且会话建立后）
+            if session_id and last_event_id > 0:
+                try:
+                    new_token = make_token(session_id, last_event_id)
+                except RuntimeError:
+                    # CONFIG 中 resume_secret 和 ws_token 都为空 → 静默不签发
+                    new_token = None
+                if new_token:
+                    await websocket.send_json(
+                        {
+                            "type": "resume_token",
+                            "resume_token": new_token,
+                            "last_event_id": last_event_id,
                         }
                     )
 
-                if response_text:
-                    # 分块发送：每帧约 16 字符（约 4-5 个 token），UI 打字效果更顺滑
-                    chunk_size = 16
-                    for i in range(0, len(response_text), chunk_size):
-                        chunk = response_text[i : i + chunk_size]
-                        await websocket.send_json(
-                            {
-                                "type": "chunk",
-                                "content": chunk,
-                            }
-                        )
-
-                    await websocket.send_json(
-                        {
-                            "type": "final",
-                            "content": response_text,
-                        }
-                    )
-
-                await websocket.send_json(
-                    {
-                        "type": "done",
-                        "content": "",
-                    }
-                )
-
-                # 保存助手回复到数据库
-                if response_text:
-                    add_message(str(uuid.uuid4()), session_id, "assistant", full_response)
-
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Agent error: {error_msg}")
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "content": error_msg,
-                    }
-                )
+            # 保存助手回复到数据库
+            if full_response:
+                add_message(str(uuid.uuid4()), session_id, "assistant", full_response)
 
     except WebSocketDisconnect:
         logger.info("客户端断开连接")
