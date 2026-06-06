@@ -53,21 +53,36 @@ _clients_lock = threading.RLock()
 _NON_RETRYABLE_ERROR_CODES = frozenset({"auth", "bad_request", "context_length", "content_filter"})
 
 
-def _estimate_tokens(text: str) -> tuple[int, int]:
+def _estimate_tokens(text: str, context_window: int = 32000) -> tuple[int, int]:
     """估算 token 数量和上下文使用率。
 
+    字符 → token 换算（与 OpenAI 经验值对齐）：
+      - 中文字符 × 2.5（中文 token 化比英文密）
+      - 英文字符 × 0.25（GPT-style BPE 约 4 字符 1 token）
+      - 其他字符 × 0.5（标点/数字/混合）
+
     Args:
-        text: 文本内容。
+        text: 文本内容（通常是被估算的"已用上下文"——累积 prompt 或本轮回复）。
+        context_window: 模型的上下文窗口（token 数）。
+            主流模型：GPT-3.5-turbo 16K, GPT-4 8K/32K, Claude 200K,
+            MiniMax-M3 32K。默认 32000，可通过 CONFIG['context_window'] 覆盖。
 
     Returns:
-        ``(token_count, context_usage_percent)``。
+        ``(token_count, context_usage_percent)``：
+          - ``token_count``：估算的 token 数
+          - ``context_usage_percent``：相对 ``context_window`` 的占用百分比
+            （0.0-100.0，保留 1 位小数）
     """
     chinese_chars = len(re.findall(r"[一-鿿]", text))
     english_chars = len(re.findall(r"[a-zA-Z]", text))
     other_chars = len(text) - chinese_chars - english_chars
     estimated_tokens = int(chinese_chars * 2.5 + english_chars * 0.25 + other_chars * 0.5)
-    context_usage = min(int((estimated_tokens / 200000) * 100), 100)
-    return estimated_tokens, context_usage
+    # 防 0 除
+    if context_window <= 0:
+        context_window = 32000
+    # 保留 1 位小数，让"用了 0.5%"也能显示
+    context_usage = round(estimated_tokens / context_window * 100, 1)
+    return estimated_tokens, min(context_usage, 100.0)
 
 
 def _extract_request_token(request: Request) -> str:
@@ -237,7 +252,9 @@ async def _run_agent_streaming(
         normalized = full_response.replace("<think>", "<thinking>").replace("</think>", "</thinking>")
 
         # 2) token_usage：估算 token + context 占用率
-        estimated_tokens, context_usage = _estimate_tokens(normalized)
+        estimated_tokens, context_usage = _estimate_tokens(
+        normalized, context_window=CONFIG.get("context_window", 32000)
+    )
         token_usage_event_id = last_event_id + 1
         await websocket.send_json(
             {
