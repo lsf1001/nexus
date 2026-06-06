@@ -653,6 +653,25 @@ async def _run_agent_streaming(
             )
             last_event_id = final_event_id
 
+    # 可观测：发送 ``type=stats`` 元事件，把本次流的 StreamGuard 统计
+    # 暴露给前端。顺序在 done 之前，确保 done 始终是流的最后一帧。
+    # 错误路径不会发 stats（前面已 return），符合"错误即终止"语义。
+    stats_event_id = last_event_id + 1
+    fallbacks_count = 0
+    if hasattr(agent, "stats") and isinstance(agent.stats, dict):
+        fallbacks_count = int(agent.stats.get("fallbacks", 0))
+    await websocket.send_json(
+        {
+            "type": "stats",
+            "content": "",
+            "event_id": stats_event_id,
+            "retries": int(guard.stats.get("retries", 0)),
+            "events_emitted": int(guard.stats.get("events_emitted", 0)),
+            "fallbacks": fallbacks_count,
+        }
+    )
+    last_event_id = stats_event_id
+
     done_event_id = last_event_id + 1
     await websocket.send_json(
         {

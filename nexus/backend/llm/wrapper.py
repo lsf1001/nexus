@@ -89,6 +89,8 @@ class ResilientRunnable(BaseChatModel):
         retry_policy: 重试策略。
         timeout_policy: 超时策略。
         fallback_policy: 降级判定策略。
+        stats: 进程内观测计数器 ``{"fallbacks": int, "retries": int}``，
+            仅用于可观测性，不参与控制流。
     """
 
     def __init__(
@@ -117,6 +119,13 @@ class ResilientRunnable(BaseChatModel):
         self._retry_policy = retry_policy or RetryPolicy()
         self._timeout_policy = timeout_policy or TimeoutPolicy()
         self._fallback_policy = fallback_policy or FallbackPolicy()
+        # 进程内可观测计数器：仅记录降级 / 重试次数，不参与控制流。
+        # ``retries`` 由 tenacity 调度层管理（每次重试时手动 += 1），
+        # ``fallbacks`` 由 :meth:`_invoke_fallback` 在降级入口处累加。
+        self._stats: dict[str, int] = {
+            "fallbacks": 0,
+            "retries": 0,
+        }
 
     # ------------------------------------------------------------------
     # BaseChatModel 抽象方法 / 推荐实现
@@ -182,6 +191,17 @@ class ResilientRunnable(BaseChatModel):
     def fallback_policy(self) -> FallbackPolicy:
         """降级判定策略。"""
         return self._fallback_policy
+
+    @property
+    def stats(self) -> dict[str, int]:
+        """返回 stats 字典的**拷贝**，外部修改不影响内部状态。
+
+        字段：
+          - ``fallbacks``：本实例被触发 fallback 的累计次数，由
+            :meth:`_invoke_fallback` 在降级入口处累加。
+          - ``retries``：本实例 ``ainvoke`` 路径下 tenacity 重试的累计次数。
+        """
+        return dict(self._stats)
 
     # ------------------------------------------------------------------
     # bind 类方法：必须返回 ResilientRunnable，否则韧性会旁路
@@ -328,7 +348,14 @@ class ResilientRunnable(BaseChatModel):
             reraise=True,
         )
         try:
+            attempt_index = 0
             async for attempt in retrying:
+                # 首次进入 attempt_index=0，后续每次重试 +1。
+                # 必须在 ``with attempt:`` 之前累加，tenacity 把
+                # ``attempt_number`` 视作"准备发起的尝试序号"。
+                if attempt_index > 0:
+                    self._stats["retries"] += 1
+                attempt_index += 1
                 with attempt:
                     try:
                         coro = runnable.ainvoke(input, **kwargs)
@@ -369,8 +396,13 @@ class ResilientRunnable(BaseChatModel):
 
         不用 tenacity：备用模型一旦失败立即抛，避免反复请求把备用供应商
         也压垮。docstring 明确这一取舍。
+
+        进入本方法时**先**累加 ``fallbacks`` 计数：即使后续 fallback
+        调用本身失败（抛 :class:`ClassifiedError`），也记一次降级触发，
+        反映"已尝试切到备用模型"这一事实，便于上层可观测。
         """
         assert self._fallback is not None
+        self._stats["fallbacks"] += 1
         try:
             coro = self._fallback.ainvoke(input, **kwargs)
             return await asyncio.wait_for(coro, self._timeout_policy.per_call)
