@@ -388,6 +388,7 @@ async def handle_websocket(
     *,
     get_agent: Callable[[], Any],
     wechat_callback: Callable | None = None,
+    get_quality_pipeline: Callable[[], Any] | None = None,
 ) -> None:
     """WebSocket 主端点的业务逻辑（不含路由装饰器）。
 
@@ -401,6 +402,8 @@ async def handle_websocket(
             保证一致性。
         wechat_callback: 微信消息回调（``_handle_wechat_message``），用于在
             客户端连接时给微信通道挂上广播。``None`` 表示不挂（仅 WS 自用）。
+        get_quality_pipeline: Phase 2 Task 2.5：返回 ``QualityPipeline`` 实例
+            的无参可调用。``None`` 或返回 ``None`` 时跳过质量门（向后兼容）。
     """
     # 注册客户端
     with _clients_lock:
@@ -485,6 +488,33 @@ async def handle_websocket(
             last_event_id, response_text = await _run_agent_streaming(
                 websocket, session_id, prompt, agent, resume_from_event_id
             )
+
+            # Phase 2 Task 2.5：质量门。对 raw_response 跑 RubricJudge + Repair；
+            # verdict 决定入库文本（ACCEPT→raw / REPAIR→重生 / REJECT→fallback）。
+            # pipeline 失败/未配置时降级用原 response_text。
+            pipeline = get_quality_pipeline() if get_quality_pipeline else None
+            if pipeline is not None and response_text:
+                try:
+                    pipeline.set_session_id(session_id)
+                    final = await pipeline.run_with_quality(
+                        question=user_content,
+                        raw_response=response_text,
+                    )
+                    # 若 verdict 改变最终文本（如 REJECT 用了 fallback），
+                    # 补发一个 final 帧给客户端（不重发 chunk，避免重复）
+                    if final.response_text != response_text:
+                        replacement_event_id = last_event_id + 1
+                        await websocket.send_json(
+                            {
+                                "type": "final",
+                                "content": final.response_text,
+                                "event_id": replacement_event_id,
+                            }
+                        )
+                        last_event_id = replacement_event_id
+                    response_text = final.response_text
+                except Exception as exc:  # noqa: BLE001 — 质量门异常不污染主流程
+                    logger.warning("QualityPipeline 失败，使用原回复: %s", exc)
 
             # 签发新 resume token 给客户端（仅在配置了 secret 且会话建立后）
             if session_id and last_event_id > 0:

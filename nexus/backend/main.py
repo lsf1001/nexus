@@ -277,6 +277,19 @@ async def lifespan(app: FastAPI):
     from .channels import ChannelRegistry
 
     app.state.channel_registry = ChannelRegistry()
+    # 初始化 QualityPipeline（Phase 2 Task 2.5）：把 prompt 注入 DEFAULT_RUBRICS
+    # 后再构造 pipeline；ws.py 会在每个新消息进入时调 pipeline.run_with_quality。
+    from .quality.pipeline import QualityPipeline
+    from .rubrics.judge import RubricJudge
+    from .rubrics.prompts import apply_prompts_to_default_rubrics
+    from .rubrics.repair import RepairStrategy
+
+    apply_prompts_to_default_rubrics()
+    app.state.quality_pipeline = QualityPipeline(
+        judge=RubricJudge(llm=_agent),
+        repair_strategy=RepairStrategy(),
+        main_llm=_agent,
+    )
     logger.info(f"Nexus Backend 已初始化 (MCP 工具: {len(_mcp_tools)} 个)")
     yield
     logger.info("Nexus Backend 关闭中")
@@ -422,10 +435,15 @@ async def websocket_endpoint(websocket: WebSocket):
         with _agent_lock:
             return _agent
 
+    def _get_quality_pipeline() -> Any:
+        # Phase 2 Task 2.5：从 app.state 取 quality_pipeline（lifespan 构造）
+        return getattr(websocket.app.state, "quality_pipeline", None)
+
     await handle_websocket(
         websocket,
         get_agent=_get_current_agent,
         wechat_callback=_handle_wechat_message,
+        get_quality_pipeline=_get_quality_pipeline,
     )
 
 

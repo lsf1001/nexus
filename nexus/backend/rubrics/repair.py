@@ -110,17 +110,7 @@ class RepairStrategy:
                 logger.info("RubricRepair REJECT: %s", reason)
                 return RubricVerdict.REJECT, reason
 
-        # 2) repair 次数耗尽
-        if attempt_count >= self.max_repair_attempts:
-            failed = self._collect_failed_dimensions(score_by_name, rubric_by_name)
-            reason = (
-                f"已 repair {attempt_count} 次，达到上限 {self.max_repair_attempts}；"
-                f"仍未通过：{', '.join(failed) or '无'}"
-            )
-            logger.info("RubricRepair REJECT (max attempts): %s", reason)
-            return RubricVerdict.REJECT, reason
-
-        # 3) 逐维度判定：找出所有不达 accept_threshold 的维度
+        # 2) 逐维度判定：找出所有不达 accept_threshold 的维度
         failed_accept: list[str] = []
         failed_repair: list[str] = []
         for rubric in rubrics:
@@ -130,13 +120,24 @@ class RepairStrategy:
                 if score_obj.score < rubric.repair_threshold:
                     failed_repair.append(rubric.name)
 
+        # 3) 全部维度 ≥ accept_threshold → ACCEPT（不论次数；plan "重试 1 次后
+        #    仍 REJECT" 语义是指"仍不通过"，已通过就直接放行）
         if not failed_accept:
             aggregate = self._aggregate_weighted(score_by_name, rubric_by_name)
             reason = f"所有维度均达 accept_threshold；加权综合分 {aggregate:.2f}"
             logger.info("RubricRepair ACCEPT: %s", reason)
             return RubricVerdict.ACCEPT, reason
 
-        # 4) 触发 REPAIR
+        # 4) 有维度不达 accept：检查 repair 次数上限
+        if attempt_count >= self.max_repair_attempts:
+            reason = (
+                f"已 repair {attempt_count} 次，达到上限 {self.max_repair_attempts}；"
+                f"仍未通过：{', '.join(failed_accept)}"
+            )
+            logger.info("RubricRepair REJECT (max attempts): %s", reason)
+            return RubricVerdict.REJECT, reason
+
+        # 5) 触发 REPAIR
         repair_prompt = self._build_repair_prompt(
             failed_accept=failed_accept,
             failed_repair=failed_repair,

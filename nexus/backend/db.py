@@ -156,6 +156,39 @@ def init_db() -> None:
     _migrate_deleted_at()
 
 
+def save_quality_score(
+    session_id: str,
+    rubric: str,
+    score: float,
+    verdict: str,
+    reasoning: str = "",
+    message_id: str | None = None,
+) -> int:
+    """写入一条质量评分记录到 ``quality_scores`` 表（Phase 2 Task 2.5）。
+
+    Args:
+        session_id: 所属会话 ID。
+        rubric: Rubric 名（如 ``"faithfulness"``），单维度写入。
+        score: 该维度的 0.0-1.0 评分。
+        verdict: 综合判定（``"accept"`` / ``"repair"`` / ``"reject"``）。
+        reasoning: 评分员解释（中文），可空。
+        message_id: 关联的 assistant 消息 ID，可空。
+
+    Returns:
+        新插入行的 ``id``。
+    """
+    with get_db() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO quality_scores
+                (session_id, message_id, rubric, score, verdict, reasoning)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (session_id, message_id, rubric, score, verdict, reasoning),
+        )
+        return int(cur.lastrowid or 0)
+
+
 def _migrate_deleted_at() -> None:
     """迁移 deleted_at 索引。"""
     try:
