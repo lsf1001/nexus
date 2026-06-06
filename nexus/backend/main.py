@@ -493,9 +493,10 @@ async def _run_agent_streaming(
             （每次流都有新的 event_id 序列）。
 
     Returns:
-        ``(last_event_id, full_response)``：
+        ``(last_event_id, response_text)``：
           - ``last_event_id`` 本次流结束时的最后一个 event_id（供下次签发 resume token）。
-          - ``full_response`` 累积的助手回复文本（仅 chat model chunks）。
+          - ``response_text`` 剥离 ``<thinking>`` 标签后的纯回复文本（用于 DB 存储）。
+            错误路径返回空字符串。
     """
     with _agent_lock:
         agent = _agent
@@ -544,12 +545,13 @@ async def _run_agent_streaming(
             )
             last_event_id = event_id
             had_error = True
-            # 不可重试 / 已耗尽：停止流（不再发 done）
+            # 不可重试 / 已耗尽：停止流（不再发 done）。
+            # 返回空字符串，避免在错误路径下把 raw 文本（含 thinking 标签）写入 DB。
             if not retryable:
-                return last_event_id, full_response
+                return last_event_id, ""
             # 可重试但 StreamGuard 仍 yield error，意味着情况特殊
             # （理论上不会到这里，StreamGuard 内部就用尽了）。安全起见停止。
-            return last_event_id, full_response
+            return last_event_id, ""
 
         # Phase 1 resume 过滤：跳过 event_id <= resume_from_event_id 的事件
         if resume_from_event_id is not None and event_id > 0 and event_id <= resume_from_event_id:
@@ -561,14 +563,8 @@ async def _run_agent_streaming(
             chunk = event.get("data", {}).get("chunk")
             content = getattr(chunk, "content", "") if chunk else ""
             if content:
+                # 仅累积，不在流中转发 chunk；后处理阶段会按 16 字符分块发出去
                 full_response += content
-                await websocket.send_json(
-                    {
-                        "type": "chunk",
-                        "content": content,
-                        "event_id": event_id,
-                    }
-                )
         elif event_type == "on_tool_start":
             tool_name = event.get("name", "未知工具")
             await websocket.send_json(
@@ -594,19 +590,68 @@ async def _run_agent_streaming(
 
     if had_error:
         # 已经有 error 事件发出，StreamGuard 走完就不要再发 done
-        return last_event_id, full_response
+        return last_event_id, ""
 
-    # 正常结束：发 final + done
+    # 正常结束：先做归一化 / token 估算 / 思考抽取 / 16 字符分块，
+    # 然后按 token_usage → thinking → chunks → final → done 顺序发出去。
+    response_text = ""
     if full_response:
-        final_event_id = last_event_id + 1
+        # 1) 归一化：把 <think> 替换为 <thinking>，前端用 <thinking> 标识思考段
+        normalized = full_response.replace("<think>", "<thinking>").replace("</think>", "</thinking>")
+
+        # 2) token_usage：估算 token + context 占用率
+        estimated_tokens, context_usage = _estimate_tokens(normalized)
+        token_usage_event_id = last_event_id + 1
         await websocket.send_json(
             {
-                "type": "final",
-                "content": full_response,
-                "event_id": final_event_id,
+                "type": "token_usage",
+                "content": "",
+                "token_count": estimated_tokens,
+                "context_usage": context_usage,
+                "event_id": token_usage_event_id,
             }
         )
-        last_event_id = final_event_id
+        last_event_id = token_usage_event_id
+
+        # 3) 抽取 <thinking>...</thinking> 内容（DOTALL 跨行），并从正文里剥掉
+        thinking_parts = re.findall(r"<thinking>(.*?)</thinking>", normalized, flags=re.DOTALL)
+        response_text = re.sub(r"<thinking>.*?</thinking>", "", normalized, flags=re.DOTALL).strip()
+
+        if thinking_parts:
+            all_thinking = "\n".join(part.strip() for part in thinking_parts)
+            thinking_event_id = last_event_id + 1
+            await websocket.send_json(
+                {
+                    "type": "thinking",
+                    "content": all_thinking,
+                    "event_id": thinking_event_id,
+                }
+            )
+            last_event_id = thinking_event_id
+
+        # 4) 16 字符分块发 chunk，再发 final
+        if response_text:
+            chunk_size = 16
+            for i in range(0, len(response_text), chunk_size):
+                chunk_event_id = last_event_id + 1
+                await websocket.send_json(
+                    {
+                        "type": "chunk",
+                        "content": response_text[i : i + chunk_size],
+                        "event_id": chunk_event_id,
+                    }
+                )
+                last_event_id = chunk_event_id
+
+            final_event_id = last_event_id + 1
+            await websocket.send_json(
+                {
+                    "type": "final",
+                    "content": response_text,
+                    "event_id": final_event_id,
+                }
+            )
+            last_event_id = final_event_id
 
     done_event_id = last_event_id + 1
     await websocket.send_json(
@@ -616,7 +661,7 @@ async def _run_agent_streaming(
             "event_id": done_event_id,
         }
     )
-    return done_event_id, full_response
+    return done_event_id, response_text
 
 
 async def _handle_resume_frame(websocket: WebSocket, data: dict) -> int | None:
@@ -751,7 +796,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
             # 运行 agent 流（已自带 StreamGuard + error_code/retryable）
-            last_event_id, full_response = await _run_agent_streaming(
+            last_event_id, response_text = await _run_agent_streaming(
                 websocket, session_id, prompt, resume_from_event_id
             )
 
@@ -771,9 +816,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         }
                     )
 
-            # 保存助手回复到数据库
-            if full_response:
-                add_message(str(uuid.uuid4()), session_id, "assistant", full_response)
+            # 保存助手回复到数据库（用剥离 <thinking> 后的纯文本，避免 DB 存原始含标签内容）
+            if response_text:
+                add_message(str(uuid.uuid4()), session_id, "assistant", response_text)
 
     except WebSocketDisconnect:
         logger.info("客户端断开连接")

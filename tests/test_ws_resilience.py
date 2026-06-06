@@ -9,6 +9,12 @@ Task 1.8：把 StreamGuard 和 resume token 接入 `nexus.backend.main.websocket
   4. 客户端发 `resume` 帧 + 非法 token → 服务端回 error 事件，error_code="invalid_resume_token"。
   5. 错误鉴权（ws_token 不匹配）→ 客户端连接被 close（HTTP 4001）。
   6. 客户端带 message 帧中的 resume_token → 流结束后服务端签发新 resume_token 帧。
+
+Task 1.8 修复：恢复流结束后处理（thinking 标签归一化、token 估算、16 字符分块）。
+  7. token_usage 事件携带 token_count + context_usage。
+  8. <thinking> 标签被剥离，正文 chunk 和 final.content 不含思考标签。
+  9. 30 字符响应被分成 16+14 字符两块 chunk。
+ 10. final.content 不含 <thinking> 标签。
 """
 
 from __future__ import annotations
@@ -276,3 +282,178 @@ def test_ws_unknown_exception_does_not_break_socket(monkeypatch) -> None:
                 # 也可能 max_total_retries=0；只断言 至少 1 条且 error_code 包含 unknown
                 assert len(error_events) >= 1
                 assert any("unknown" in e.get("error_code", "") for e in error_events)
+
+
+# ---------------- Task 1.8 修复：流结束后处理 ----------------
+
+
+def test_ws_emits_token_usage_event(monkeypatch) -> None:
+    """流成功后，WS 收到 type=token_usage 事件，含 token_count + context_usage。"""
+    _authed_token(monkeypatch)
+
+    async def astream_factory(input, **kwargs):  # noqa: ARG001
+        # 26 英文字符 → _estimate_tokens: 26 * 0.25 = 6.5 → 6 tokens
+        yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="abcdefghijklmnopqrstuvwxyz")}}
+
+    with TestClient(app) as client:
+        with patch("nexus.backend.main._agent") as mock_agent:
+            mock_agent.astream_events = astream_factory
+
+            with client.websocket_connect("/api/ws?token=test-token") as ws:
+                ws.send_json({"content": "hello", "title": "token-usage-test"})
+
+                events = _collect_until_done(ws, max_events=200)
+                # 把 resume_token 帧也消化掉（如果有）
+                for _ in range(5):
+                    try:
+                        msg = ws.receive_json()
+                        events.append(msg)
+                    except Exception:
+                        break
+                    if msg.get("type") == "resume_token":
+                        break
+
+                token_usage_events = [e for e in events if e.get("type") == "token_usage"]
+                assert len(token_usage_events) == 1
+                tu = token_usage_events[0]
+                assert "token_count" in tu
+                assert "context_usage" in tu
+                assert tu["token_count"] >= 0
+                assert 0 <= tu["context_usage"] <= 100
+                # token_usage 应在 chunks 之前发出（顺序: token_usage → chunks → final → done）
+                tu_idx = events.index(tu)
+                first_chunk_idx = next(
+                    (i for i, e in enumerate(events) if e.get("type") == "chunk"),
+                    len(events),
+                )
+                assert tu_idx < first_chunk_idx
+
+
+def test_ws_strips_thinking_tags(monkeypatch) -> None:
+    """上游流含 <think>...</think> → WS 收到 1 个 thinking 事件（纯思考内容），
+    所有 chunk 和 final.content 都不含思考标签。
+    """
+    _authed_token(monkeypatch)
+
+    async def astream_factory(input, **kwargs):  # noqa: ARG001
+        # 模拟上游分块：先 <think> 标签（归一化前用 <think>），后正文
+        yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="<think>")}}
+        yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="step 1: analyze\nstep 2: solve</think>")}}
+        yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="The answer is 42.")}}
+
+    with TestClient(app) as client:
+        with patch("nexus.backend.main._agent") as mock_agent:
+            mock_agent.astream_events = astream_factory
+
+            with client.websocket_connect("/api/ws?token=test-token") as ws:
+                ws.send_json({"content": "hello", "title": "thinking-strip-test"})
+
+                events = _collect_until_done(ws, max_events=200)
+                for _ in range(5):
+                    try:
+                        msg = ws.receive_json()
+                        events.append(msg)
+                    except Exception:
+                        break
+                    if msg.get("type") == "resume_token":
+                        break
+
+                # 至少 1 条 thinking 事件，且 content 是纯思考内容
+                thinking_events = [
+                    e for e in events
+                    if e.get("type") == "thinking" and "调用工具" not in (e.get("content") or "")
+                ]
+                assert len(thinking_events) >= 1
+                thinking_content = thinking_events[-1]["content"]
+                assert "step 1: analyze" in thinking_content
+                assert "step 2: solve" in thinking_content
+                # thinking 事件内容不应包含 thinking 标签
+                assert "<thinking>" not in thinking_content
+                assert "</thinking>" not in thinking_content
+
+                # 所有 chunk 不含 thinking 标签
+                chunks = [e for e in events if e.get("type") == "chunk"]
+                assert chunks, "应至少 1 个 chunk"
+                joined_chunks = "".join(c["content"] for c in chunks)
+                assert "<think>" not in joined_chunks
+                assert "</think>" not in joined_chunks
+                assert "<thinking>" not in joined_chunks
+                assert "</thinking>" not in joined_chunks
+                # 拼接后等于剥离后的正文
+                assert joined_chunks == "The answer is 42."
+
+
+def test_ws_chunks_response_in_16_char_groups(monkeypatch) -> None:
+    """30 字符响应 → 收到 2 个 chunk 事件（16 + 14）。"""
+    _authed_token(monkeypatch)
+
+    # 30 字符 = 16 + 14
+    text_30 = "abcdefghijklmnop" + "qrstuvwxyz1234"  # 16 + 14
+    assert len(text_30) == 30
+
+    async def astream_factory(input, **kwargs):  # noqa: ARG001
+        yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content=text_30)}}
+
+    with TestClient(app) as client:
+        with patch("nexus.backend.main._agent") as mock_agent:
+            mock_agent.astream_events = astream_factory
+
+            with client.websocket_connect("/api/ws?token=test-token") as ws:
+                ws.send_json({"content": "hello", "title": "chunk-test"})
+
+                events = _collect_until_done(ws, max_events=200)
+                for _ in range(5):
+                    try:
+                        msg = ws.receive_json()
+                        events.append(msg)
+                    except Exception:
+                        break
+                    if msg.get("type") == "resume_token":
+                        break
+
+                chunks = [e for e in events if e.get("type") == "chunk"]
+                assert len(chunks) == 2
+                assert len(chunks[0]["content"]) == 16
+                assert len(chunks[1]["content"]) == 14
+                assert chunks[0]["content"] == "abcdefghijklmnop"
+                assert chunks[1]["content"] == "qrstuvwxyz1234"
+                # 拼接后等于原文
+                assert "".join(c["content"] for c in chunks) == text_30
+                # chunk event_id 单调递增
+                chunk_ids = [c.get("event_id") for c in chunks]
+                assert chunk_ids == sorted(chunk_ids)
+
+
+def test_ws_final_content_excludes_thinking(monkeypatch) -> None:
+    """final 事件的 content 是剥离 <thinking> 后的纯回复文本。"""
+    _authed_token(monkeypatch)
+
+    async def astream_factory(input, **kwargs):  # noqa: ARG001
+        yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="<think>internal</think>Final answer")}}
+
+    with TestClient(app) as client:
+        with patch("nexus.backend.main._agent") as mock_agent:
+            mock_agent.astream_events = astream_factory
+
+            with client.websocket_connect("/api/ws?token=test-token") as ws:
+                ws.send_json({"content": "hello", "title": "final-test"})
+
+                events = _collect_until_done(ws, max_events=200)
+                for _ in range(5):
+                    try:
+                        msg = ws.receive_json()
+                        events.append(msg)
+                    except Exception:
+                        break
+                    if msg.get("type") == "resume_token":
+                        break
+
+                final_events = [e for e in events if e.get("type") == "final"]
+                assert len(final_events) == 1
+                final = final_events[0]
+                assert "<think>" not in final["content"]
+                assert "</think>" not in final["content"]
+                assert "<thinking>" not in final["content"]
+                assert "</thinking>" not in final["content"]
+                assert "internal" not in final["content"]
+                assert final["content"] == "Final answer"
