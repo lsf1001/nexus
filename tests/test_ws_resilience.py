@@ -434,6 +434,9 @@ def test_ws_final_content_excludes_thinking(monkeypatch) -> None:
     with TestClient(app) as client:
         with patch("nexus.backend.main._agent") as mock_agent:
             mock_agent.astream_events = astream_factory
+            # Phase 2 Task 2.5：跳过 QualityPipeline（mock LLM 无 ainvoke 配置，
+            # judge 评分会全失败导致 REJECT → fallback 文本污染 final）
+            client.app.state.quality_pipeline = None
 
             with client.websocket_connect("/api/ws?token=test-token") as ws:
                 ws.send_json({"content": "hello", "title": "final-test"})

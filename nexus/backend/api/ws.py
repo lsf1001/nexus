@@ -53,21 +53,36 @@ _clients_lock = threading.RLock()
 _NON_RETRYABLE_ERROR_CODES = frozenset({"auth", "bad_request", "context_length", "content_filter"})
 
 
-def _estimate_tokens(text: str) -> tuple[int, int]:
+def _estimate_tokens(text: str, context_window: int = 32000) -> tuple[int, int]:
     """估算 token 数量和上下文使用率。
 
+    字符 → token 换算（与 OpenAI 经验值对齐）：
+      - 中文字符 × 2.5（中文 token 化比英文密）
+      - 英文字符 × 0.25（GPT-style BPE 约 4 字符 1 token）
+      - 其他字符 × 0.5（标点/数字/混合）
+
     Args:
-        text: 文本内容。
+        text: 文本内容（通常是被估算的"已用上下文"——累积 prompt 或本轮回复）。
+        context_window: 模型的上下文窗口（token 数）。
+            主流模型：GPT-3.5-turbo 16K, GPT-4 8K/32K, Claude 200K,
+            MiniMax-M3 32K。默认 32000，可通过 CONFIG['context_window'] 覆盖。
 
     Returns:
-        ``(token_count, context_usage_percent)``。
+        ``(token_count, context_usage_percent)``：
+          - ``token_count``：估算的 token 数
+          - ``context_usage_percent``：相对 ``context_window`` 的占用百分比
+            （0.0-100.0，保留 1 位小数）
     """
     chinese_chars = len(re.findall(r"[一-鿿]", text))
     english_chars = len(re.findall(r"[a-zA-Z]", text))
     other_chars = len(text) - chinese_chars - english_chars
     estimated_tokens = int(chinese_chars * 2.5 + english_chars * 0.25 + other_chars * 0.5)
-    context_usage = min(int((estimated_tokens / 200000) * 100), 100)
-    return estimated_tokens, context_usage
+    # 防 0 除
+    if context_window <= 0:
+        context_window = 32000
+    # 保留 1 位小数，让"用了 0.5%"也能显示
+    context_usage = round(estimated_tokens / context_window * 100, 1)
+    return estimated_tokens, min(context_usage, 100.0)
 
 
 def _extract_request_token(request: Request) -> str:
@@ -237,7 +252,9 @@ async def _run_agent_streaming(
         normalized = full_response.replace("<think>", "<thinking>").replace("</think>", "</thinking>")
 
         # 2) token_usage：估算 token + context 占用率
-        estimated_tokens, context_usage = _estimate_tokens(normalized)
+        estimated_tokens, context_usage = _estimate_tokens(
+        normalized, context_window=CONFIG.get("context_window", 32000)
+    )
         token_usage_event_id = last_event_id + 1
         await websocket.send_json(
             {
@@ -371,6 +388,7 @@ async def handle_websocket(
     *,
     get_agent: Callable[[], Any],
     wechat_callback: Callable | None = None,
+    get_quality_pipeline: Callable[[], Any] | None = None,
 ) -> None:
     """WebSocket 主端点的业务逻辑（不含路由装饰器）。
 
@@ -384,6 +402,8 @@ async def handle_websocket(
             保证一致性。
         wechat_callback: 微信消息回调（``_handle_wechat_message``），用于在
             客户端连接时给微信通道挂上广播。``None`` 表示不挂（仅 WS 自用）。
+        get_quality_pipeline: Phase 2 Task 2.5：返回 ``QualityPipeline`` 实例
+            的无参可调用。``None`` 或返回 ``None`` 时跳过质量门（向后兼容）。
     """
     # 注册客户端
     with _clients_lock:
@@ -469,6 +489,36 @@ async def handle_websocket(
                 websocket, session_id, prompt, agent, resume_from_event_id
             )
 
+            # Phase 2 Task 2.5：质量门。对 raw_response 跑 RubricJudge + Repair；
+            # verdict 决定入库文本（ACCEPT→raw / REPAIR→重生 / REJECT→fallback）。
+            # pipeline 失败/未配置时降级用原 response_text。
+            # 提前生成 message_id，让 pipeline 写 quality_scores 时能关联到本条消息
+            message_id = str(uuid.uuid4())
+            pipeline = get_quality_pipeline() if get_quality_pipeline else None
+            if pipeline is not None and response_text:
+                try:
+                    pipeline.set_session_id(session_id)
+                    final = await pipeline.run_with_quality(
+                        question=user_content,
+                        raw_response=response_text,
+                        message_id=message_id,
+                    )
+                    # 若 verdict 改变最终文本（如 REJECT 用了 fallback），
+                    # 补发一个 final 帧给客户端（不重发 chunk，避免重复）
+                    if final.response_text != response_text:
+                        replacement_event_id = last_event_id + 1
+                        await websocket.send_json(
+                            {
+                                "type": "final",
+                                "content": final.response_text,
+                                "event_id": replacement_event_id,
+                            }
+                        )
+                        last_event_id = replacement_event_id
+                    response_text = final.response_text
+                except Exception as exc:  # noqa: BLE001 — 质量门异常不污染主流程
+                    logger.warning("QualityPipeline 失败，使用原回复: %s", exc)
+
             # 签发新 resume token 给客户端（仅在配置了 secret 且会话建立后）
             if session_id and last_event_id > 0:
                 try:
@@ -487,7 +537,7 @@ async def handle_websocket(
 
             # 保存助手回复到数据库（用剥离 <thinking> 后的纯文本，避免 DB 存原始含标签内容）
             if response_text:
-                add_message(str(uuid.uuid4()), session_id, "assistant", response_text)
+                add_message(message_id, session_id, "assistant", response_text)
 
     except WebSocketDisconnect:
         logger.info("客户端断开连接")
