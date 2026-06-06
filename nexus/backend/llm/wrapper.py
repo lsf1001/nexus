@@ -1,6 +1,6 @@
 """韧性 LLM 调用包装。
 
-该模块为单个 LLM（支持 LangChain ``Runnable`` 协议）提供
+该模块为单个 LangChain ``BaseChatModel``（如 ``ChatOpenAI``）提供
 "超时 + 重试 + 降级" 三件套韧性能力，是 Phase 1 容错链的核心。
 
 设计目标：
@@ -12,8 +12,10 @@
     串起来；这与 plan 阶段要求一致。
   - 流式调用 ``astream`` 不在 wrapper 内重试（mid-stream 错误语义复杂），
     由后续 StreamGuard（Task 1.7）负责；wrapper 只给整次流加超时。
-  - 不强制实现 LangChain :class:`Runnable` 全部协议：仅暴露 ``ainvoke``
-    和 ``astream`` 两个最常用的入口，保持接口紧凑。
+  - **集成契约**：本类继承 :class:`langchain_core.language_models.BaseChatModel`，
+    以满足 deepagents 在 ``resolve_model`` 阶段的 ``isinstance(..., BaseChatModel)`` 检查；
+    所有 bind 类方法（``bind`` / ``bind_tools`` / ``with_retry`` / ``with_fallbacks`` /
+    ``with_structured_output``）都返回 :class:`ResilientRunnable`，保留韧性。
 """
 
 from __future__ import annotations
@@ -22,8 +24,9 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from tenacity import (
     AsyncRetrying,
     retry_base,
@@ -41,19 +44,6 @@ __all__ = ["ResilientRunnable", "build_resilient_llm"]
 
 
 logger = logging.getLogger(__name__)
-
-
-@runtime_checkable
-class _SupportsAinvoke(Protocol):
-    """最小可调用协议：只需要 ``ainvoke`` / ``astream``。"""
-
-    async def ainvoke(self, input: Any, **kwargs: Any) -> Any: ...
-
-    def astream(self, input: Any, **kwargs: Any) -> AsyncIterator[Any]: ...
-
-
-# ``Runnable`` 别名：避免强依赖 langchain.core 的具体类型，便于单元测试用 MagicMock 替代。
-Runnable = _SupportsAinvoke
 
 
 class _ClassifiedRetry(retry_base):
@@ -84,11 +74,17 @@ class _PolicyBasedWait:
         return self._policy.compute_delay(attempt)
 
 
-class ResilientRunnable:
-    """具备"超时 + 重试 + 降级"能力的 Runnable 包装。
+class ResilientRunnable(BaseChatModel):
+    """具备"超时 + 重试 + 降级"能力的 ChatModel 包装。
+
+    继承 :class:`langchain_core.language_models.BaseChatModel` 以满足
+    deepagents / LangChain 生态对 ``isinstance(model, BaseChatModel)`` 的契约。
+    任何 bind 类方法（``bind`` / ``bind_tools`` / ``with_retry`` /
+    ``with_fallbacks`` / ``with_structured_output``）都会返回新的
+    :class:`ResilientRunnable`，不会绕开本包装的韧性层。
 
     Attributes:
-        primary: 主 LLM 实例（具备 ``ainvoke`` / ``astream``）。
+        primary: 主 LLM 实例。
         fallback: 备 LLM 实例；为 ``None`` 时不启用降级。
         retry_policy: 重试策略。
         timeout_policy: 超时策略。
@@ -97,34 +93,78 @@ class ResilientRunnable:
 
     def __init__(
         self,
-        primary: Runnable,
-        fallback: Runnable | None,
-        retry_policy: RetryPolicy,
-        timeout_policy: TimeoutPolicy,
-        fallback_policy: FallbackPolicy,
+        primary: BaseChatModel,
+        fallback: BaseChatModel | None = None,
+        retry_policy: RetryPolicy | None = None,
+        timeout_policy: TimeoutPolicy | None = None,
+        fallback_policy: FallbackPolicy | None = None,
     ) -> None:
         """初始化韧性 Runnable。
 
         Args:
-            primary: 主 LLM。
+            primary: 主 LLM（任何 ``BaseChatModel`` 子类）。
             fallback: 备 LLM，可为 ``None``。
             retry_policy: 重试策略。
             timeout_policy: 超时策略。
             fallback_policy: 降级判定策略。
         """
+        # 调用 Pydantic ``BaseModel.__init__`` 以初始化 Pydantic 内部状态
+        # （``__pydantic_fields_set__`` 等）。本类没有声明 Pydantic 字段，
+        # 所有状态都通过 ``self.<attr> = ...`` 写到 ``__dict__``。
+        super().__init__()
         self._primary = primary
         self._fallback = fallback
-        self._retry_policy = retry_policy
-        self._timeout_policy = timeout_policy
-        self._fallback_policy = fallback_policy
+        self._retry_policy = retry_policy or RetryPolicy()
+        self._timeout_policy = timeout_policy or TimeoutPolicy()
+        self._fallback_policy = fallback_policy or FallbackPolicy()
+
+    # ------------------------------------------------------------------
+    # BaseChatModel 抽象方法 / 推荐实现
+    # ------------------------------------------------------------------
 
     @property
-    def primary(self) -> Runnable:
+    def _llm_type(self) -> str:
+        """返回 chat model 类型。组合 ``resilient_`` + 底层类型，便于 langsmith 识别。"""
+        return "resilient_" + self._primary._llm_type
+
+    def _get_ls_params(self, **kwargs: Any) -> dict[str, Any]:
+        """透传到底层 primary：让 langsmith tracing 看到真实的 provider/model。"""
+        return self._primary._get_ls_params(**kwargs)
+
+    def _generate(self, messages: list, stop=None, run_manager=None, **kwargs: Any):
+        """同步 generate 路径：委托给底层 primary。公开入口走 ``ainvoke``。"""
+        return self._primary._generate(messages, stop, run_manager, **kwargs)
+
+    async def _agenerate(
+        self, messages: list, stop=None, run_manager=None, **kwargs: Any
+    ) -> Any:
+        """异步 generate 路径：委托给底层 primary。公开入口走 ``ainvoke``。"""
+        return await self._primary._agenerate(messages, stop, run_manager, **kwargs)
+
+    def _stream(self, messages: list, stop=None, run_manager=None, **kwargs: Any):
+        """同步流路径：委托给底层 primary。公开入口走 ``astream``。"""
+        yield from self._primary._stream(messages, stop, run_manager, **kwargs)
+
+    async def _astream(
+        self, messages: list, stop=None, run_manager=None, **kwargs: Any
+    ):
+        """异步流路径：委托给底层 primary。公开入口走 ``astream``。"""
+        async for chunk in self._primary._astream(
+            messages, stop, run_manager, **kwargs
+        ):
+            yield chunk
+
+    # ------------------------------------------------------------------
+    # 公开属性
+    # ------------------------------------------------------------------
+
+    @property
+    def primary(self) -> BaseChatModel:
         """主 LLM。"""
         return self._primary
 
     @property
-    def fallback(self) -> Runnable | None:
+    def fallback(self) -> BaseChatModel | None:
         """备 LLM，可能为 ``None``。"""
         return self._fallback
 
@@ -144,49 +184,60 @@ class ResilientRunnable:
         return self._fallback_policy
 
     # ------------------------------------------------------------------
-    # 透明代理：未在本类显式定义的属性/方法 → 落到底层 primary
+    # bind 类方法：必须返回 ResilientRunnable，否则韧性会旁路
     # ------------------------------------------------------------------
 
-    def __getattr__(self, name: str) -> Any:
-        """把未覆盖的属性访问代理到底层 ``primary``。
+    def bind(self, **kwargs: Any) -> ResilientRunnable:
+        """包装底层 primary.bind，确保返回值仍是 :class:`ResilientRunnable`。"""
+        new_primary = self._primary.bind(**kwargs)
+        return self._wrap_with(new_primary)
 
-        作用：LangChain ``Runnable`` 协议方法（``bind`` / ``with_fallbacks``
-        / ``invoke`` / ``batch`` / ``stream`` 等）以及 ``ChatOpenAI`` 自身的
-        模型字段（``model_name`` / ``temperature`` 等）都不在 wrapper 里显式
-        定义，但 deepagents 编排管线和现有调用方会依赖它们；通过 ``__getattr__``
-        把这部分行为透传，保证集成时零感知。
+    def bind_tools(self, tools: Any, **kwargs: Any) -> ResilientRunnable:
+        """包装底层 primary.bind_tools，常被 deepagents 用于 tool calling。"""
+        new_primary = self._primary.bind_tools(tools, **kwargs)
+        return self._wrap_with(new_primary)
 
-        注意事项：
-          - Python 只在正常属性查找失败时才调用 ``__getattr__``，所以
-            ``ainvoke`` / ``astream`` 已被本类显式定义，不会被代理走。
-          - ``_primary`` 等内部字段使用单下划线前缀；``__init__`` 里通过
-            ``self._primary = primary`` 写入，``__getattr__`` 只在普通查找
-            失败时被触发，因此不会出现"找 _primary 又走 __getattr__"的递归
-            （除非真的没初始化 _primary，那种情况下原样抛 ``AttributeError``）。
-          - 底层若也没有该属性，``getattr`` 自然抛 ``AttributeError``，
-            上层应该让它继续抛出，**不要**返回 ``None`` 掩盖问题。
+    def with_retry(self, **kwargs: Any) -> ResilientRunnable:
+        """包装底层 primary.with_retry。
 
-        Args:
-            name: 被访问的属性名。
-
-        Returns:
-            底层 ``primary`` 对应的属性值。
-
-        Raises:
-            AttributeError: 底层也没有该属性。
+        注意：LangChain 的 ``with_retry`` 跟我们的 :class:`RetryPolicy` 是不同语义；
+        这里只把 langchain 的 binding 透传给底层 primary，外层仍由本类自带的
+        重试/降级/超时策略统一控制。
         """
-        # 兜底：防止 _primary 还没初始化就被 __getattr__ 命中。
-        # 走 __dict__ 直接查，避免再次触发 __getattr__ 形成递归。
-        primary = self.__dict__.get("_primary")
-        if primary is None:
-            raise AttributeError(
-                f"{type(self).__name__!s} has no attribute {name!r} "
-                "(primary not initialized)"
-            )
-        return getattr(primary, name)
+        new_primary = self._primary.with_retry(**kwargs)
+        return self._wrap_with(new_primary)
+
+    def with_fallbacks(self, fallbacks: Any, **kwargs: Any) -> ResilientRunnable:
+        """包装底层 primary.with_fallbacks。
+
+        取 ``fallbacks[0]`` 作为本类的 ``_fallback``（如果原 fallback 为 None），
+        保留单级降级语义。
+        """
+        new_primary = self._primary.with_fallbacks(fallbacks, **kwargs)
+        new_fallback = fallbacks[0] if fallbacks else None
+        return self._wrap_with(new_primary, new_fallback)
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> ResilientRunnable:
+        """包装底层 primary.with_structured_output，确保结构化输出也走韧性层。"""
+        new_primary = self._primary.with_structured_output(schema, **kwargs)
+        return self._wrap_with(new_primary)
+
+    def _wrap_with(
+        self,
+        new_primary: BaseChatModel,
+        new_fallback: BaseChatModel | None = None,
+    ) -> ResilientRunnable:
+        """用新的 primary / fallback 构造新的 :class:`ResilientRunnable`，保留 policy。"""
+        return ResilientRunnable(
+            primary=new_primary,
+            fallback=new_fallback if new_fallback is not None else self._fallback,
+            retry_policy=self._retry_policy,
+            timeout_policy=self._timeout_policy,
+            fallback_policy=self._fallback_policy,
+        )
 
     # ------------------------------------------------------------------
-    # 公开 API
+    # 公开 API：ainvoke / astream 带韧性
     # ------------------------------------------------------------------
 
     async def ainvoke(self, input: Any, **kwargs: Any) -> Any:
@@ -221,7 +272,7 @@ class ResilientRunnable:
         """带超时的 ``astream``。
 
         重试由 StreamGuard（Task 1.7）负责；本方法只做：
-          - 用 :func:`asyncio.wait_for` 给整个流式生成器套一个上限。
+          - 用累计超时给整个流式生成器套一个上限。
           - 把流过程中抛出的异常分类成 :class:`ClassifiedError` 再抛出。
           - 不在 wrapper 内重试 mid-stream 错误。
 
@@ -256,7 +307,7 @@ class ResilientRunnable:
 
     async def _invoke_with_retry(
         self,
-        runnable: Runnable,
+        runnable: BaseChatModel,
         input: Any,
         kwargs: dict[str, Any],
     ) -> Any:
@@ -365,8 +416,8 @@ async def _iter_with_timeout(
 
 
 def build_resilient_llm(
-    primary: Runnable,
-    fallback: Runnable | None = None,
+    primary: BaseChatModel,
+    fallback: BaseChatModel | None = None,
     retry: RetryPolicy | None = None,
     timeout: TimeoutPolicy | None = None,
     fallback_policy: FallbackPolicy | None = None,
@@ -374,7 +425,7 @@ def build_resilient_llm(
     """构造一个可重试 + 可降级 + 可超时的 LLM 包装。
 
     Args:
-        primary: 主 LLM（具备 ``ainvoke`` / ``astream`` 接口即可）。
+        primary: 主 LLM（任何 ``BaseChatModel`` 子类）。
         fallback: 备 LLM，可为 ``None``。
         retry: 重试策略，默认 :class:`RetryPolicy` 的默认值。
         timeout: 超时策略，默认 :class:`TimeoutPolicy` 的默认值。
@@ -386,7 +437,7 @@ def build_resilient_llm(
     return ResilientRunnable(
         primary=primary,
         fallback=fallback,
-        retry_policy=retry if retry is not None else RetryPolicy(),
-        timeout_policy=timeout if timeout is not None else TimeoutPolicy(),
-        fallback_policy=fallback_policy if fallback_policy is not None else FallbackPolicy(),
+        retry_policy=retry or RetryPolicy(),
+        timeout_policy=timeout or TimeoutPolicy(),
+        fallback_policy=fallback_policy or FallbackPolicy(),
     )

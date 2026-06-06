@@ -1,19 +1,25 @@
 """``nexus.backend.agent`` 接入韧性层后的契约测试。
 
 覆盖：
-  - ``get_llm`` 默认返回 ``ResilientRunnable`` 包装（含 ``ainvoke`` / ``astream``）。
-  - ``ResilientRunnable`` 通过 ``__getattr__`` 把未覆盖方法代理到底层 ChatOpenAI，
-    以便 deepagents 内部调用 ``.bind`` / ``.with_fallbacks`` / ``.invoke`` 等不会断。
+  - ``get_llm`` 默认返回 ``ResilientRunnable`` 包装（含 ``ainvoke`` / ``astream``），
+    同时是 ``langchain_core.language_models.BaseChatModel`` 子类。
+  - ``ResilientRunnable`` 不再靠 ``__getattr__`` 代理未知属性；底层字段通过
+    ``.primary`` / ``.fallback`` 访问。bind 类方法返回 :class:`ResilientRunnable`。
   - 显式传入 ``retry`` / ``timeout`` / ``fallback`` / ``fallback_policy`` 时使用传入值。
   - 原签名向后兼容：不传任何 resilience 参数时，依然能正常构造。
   - ``get_llm()`` 既无 ``model_name`` 也无 ``api_key`` 时仍抛 ``ValueError``。
   - ``create_subagents`` 输出的 ``code_writer`` / ``researcher`` 在 system prompt
     内携带 per-node 策略（重试次数 + 超时）。
+  - 端到端：``create_agent`` 内部把 :class:`ResilientRunnable` 喂给
+    ``create_deep_agent``，deepagents 看到的就是 ``BaseChatModel``。
 """
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
+from langchain_core.language_models import BaseChatModel
 
 from nexus.backend.agent import create_subagents, get_llm
 from nexus.backend.llm.policies import FallbackPolicy, RetryPolicy, TimeoutPolicy
@@ -45,45 +51,56 @@ class TestGetLlmDefault:
 
 
 # ----------------------------------------------------------------------
-# __getattr__ 代理
+# BaseChatModel 集成契约
 # ----------------------------------------------------------------------
 
 
-class TestResilientRunnableProxy:
-    """deepagents 兼容性：未在 wrapper 显式定义的方法/属性 → 代理到 primary。"""
+class TestResilientRunnableIsBaseChatModel:
+    """deepagents 集成：``isinstance(llm, BaseChatModel)`` 必须为 True。"""
 
-    def test_unknown_attribute_proxies_to_chatopenai(self) -> None:
-        """``llm.model_name`` 通过 ``__getattr__`` 代理到底层 ``ChatOpenAI.model_name``。"""
+    def test_isinstance_basechatmodel(self) -> None:
+        """``ResilientRunnable`` 继承 ``BaseChatModel``，满足 deepagents 的契约。"""
         llm = get_llm(model_name="m", api_key="k", api_base="https://x")
-        # ChatOpenAI 暴露 model 和 model_name；ResilientRunnable 自身没有
-        assert llm.model_name == "m"
+        assert isinstance(llm, BaseChatModel)
+        assert isinstance(llm, ResilientRunnable)
 
-    def test_bind_method_is_proxied(self) -> None:
-        """``llm.bind(stop=...)`` 应代理到 ChatOpenAI.bind，返回 LangChain 的绑定对象
-        而非 ResilientRunnable（验证 ``__getattr__`` 没有把方法吞掉）。"""
+    def test_primary_attribute_accessible(self) -> None:
+        """底层 ChatOpenAI 字段不再走 ``__getattr__`` 代理，必须通过 ``.primary`` 访问。"""
         llm = get_llm(model_name="m", api_key="k", api_base="https://x")
-        bound = llm.bind(stop=["STOP"])
-        # bind 返回的不应是 ResilientRunnable —— 它来自底层 LangChain
-        assert not isinstance(bound, ResilientRunnable)
-        # 应该是某种带 ``invoke`` / ``ainvoke`` 的可运行对象
-        assert hasattr(bound, "ainvoke") or hasattr(bound, "invoke")
+        # 自身不再有 model_name（无 __getattr__ 代理）
+        with pytest.raises(AttributeError):
+            _ = llm.model_name
+        # 通过 .primary 访问到底层 ChatOpenAI
+        assert llm.primary.model_name == "m"
 
-    def test_proxy_raises_attribute_error_for_truly_missing(self) -> None:
-        """``__getattr__`` 在底层也没有该属性时必须抛 ``AttributeError``，
-        不要无脑返回 ``None`` 让调用方误以为存在该方法。"""
+    def test_temperature_accessible_via_primary(self) -> None:
+        """temperature 等 ChatOpenAI 字段通过 ``.primary`` 访问。"""
+        llm = get_llm(
+            model_name="m",
+            api_key="k",
+            api_base="https://x",
+            temperature=0.42,
+        )
+        with pytest.raises(AttributeError):
+            _ = llm.temperature
+        assert llm.primary.temperature == pytest.approx(0.42)
+
+    def test_unknown_attribute_still_raises(self) -> None:
+        """未知属性仍抛 ``AttributeError``（Pydantic BaseModel 的默认行为）。"""
         llm = get_llm(model_name="m", api_key="k", api_base="https://x")
         with pytest.raises(AttributeError):
             _ = llm.this_attribute_truly_does_not_exist_xyz
 
-    def test_ainvoke_is_not_proxied(self) -> None:
-        """``ResilientRunnable`` 自己定义了 ``ainvoke``，``__getattr__`` 不应抢走。
-
-        通过比对：``llm.ainvoke`` 应该是 wrapper 自己的 bound method，
-        和 ``llm._primary.ainvoke`` 不是同一个对象。
-        """
+    def test_ainvoke_is_own_method(self) -> None:
+        """``ResilientRunnable`` 自己定义 ``ainvoke``，不是从 primary 借的。"""
         llm = get_llm(model_name="m", api_key="k", api_base="https://x")
-        # llm.ainvoke 来自 ResilientRunnable，与底层 ChatOpenAI.ainvoke 不同
         assert llm.ainvoke.__func__ is ResilientRunnable.ainvoke
+
+    def test_llm_type_is_derived_from_primary(self) -> None:
+        """``_llm_type`` 组合 ``resilient_`` + 底层类型，便于 langsmith 识别。"""
+        llm = get_llm(model_name="m", api_key="k", api_base="https://x")
+        assert llm._llm_type.startswith("resilient_")
+        assert llm._llm_type.endswith(llm.primary._llm_type)
 
 
 # ----------------------------------------------------------------------
@@ -150,17 +167,6 @@ class TestGetLlmBackwardCompat:
         with pytest.raises(ValueError, match="model_name and api_key"):
             get_llm()
 
-    def test_temperature_param_is_threaded_through(self) -> None:
-        """传入 temperature 时正确透传给底层 ChatOpenAI。"""
-        llm = get_llm(
-            model_name="m",
-            api_key="k",
-            api_base="https://x",
-            temperature=0.42,
-        )
-        # 通过代理读取底层 ChatOpenAI 的 temperature 字段
-        assert llm.temperature == pytest.approx(0.42)
-
 
 # ----------------------------------------------------------------------
 # create_subagents：per-node 策略写入 system prompt
@@ -197,3 +203,85 @@ class TestCreateSubagentsPolicies:
         assert "2 次重试" in prompt or "2次重试" in prompt, (
             f"expect explicit two-retries hint in prompt: {prompt!r}"
         )
+
+
+# ----------------------------------------------------------------------
+# 端到端：create_agent -> create_deep_agent(model=ResilientRunnable)
+# ----------------------------------------------------------------------
+
+
+class TestCreateAgentIntegration:
+    """``create_agent`` 把 ``ResilientRunnable`` 喂给 deepagents，不应再崩溃。"""
+
+    def test_create_agent_uses_resilient_llm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """端到端：``get_llm`` 包装后的 ``ResilientRunnable`` 作为 ``create_deep_agent`` 的 model 传入。
+
+        修复前 ``ResilientRunnable`` 不是 ``BaseChatModel`` 子类，``resolve_model`` 走
+        fallback 路径时调 ``.count(":")`` 触发 ``AttributeError``。
+        """
+        # 不需要真实 API key：create_deep_agent 已被 patch，不实际跑。
+        monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
+        from nexus.backend.agent import create_agent
+
+        with patch("nexus.backend.agent.create_deep_agent") as mock_create:
+            mock_create.return_value = MagicMock()
+            create_agent(
+                model_name="m", api_key="k", api_base="https://x"
+            )
+            called_kwargs = mock_create.call_args.kwargs
+            model = called_kwargs["model"]
+            # 必须是 ResilientRunnable（保留韧性）
+            assert isinstance(model, ResilientRunnable)
+            # 同时也是 BaseChatModel（满足 deepagents isinstance 契约）
+            assert isinstance(model, BaseChatModel)
+
+
+class TestBindMethodsPreserveResilience:
+    """bind 类方法必须返回 :class:`ResilientRunnable`，否则韧性会旁路。"""
+
+    def test_bind_returns_resilient(self) -> None:
+        """``llm.bind(stop=...)`` 返回 :class:`ResilientRunnable`。"""
+        llm = get_llm(model_name="m", api_key="k", api_base="https://x")
+        bound = llm.bind(stop=["STOP"])
+        assert isinstance(bound, ResilientRunnable)
+        # 仍具备韧性入口
+        assert callable(bound.ainvoke)
+        assert callable(bound.astream)
+
+    def test_bind_tools_returns_resilient(self) -> None:
+        """``llm.bind_tools([])`` 返回 :class:`ResilientRunnable`。"""
+        llm = get_llm(model_name="m", api_key="k", api_base="https://x")
+        bound = llm.bind_tools([])
+        assert isinstance(bound, ResilientRunnable)
+        assert isinstance(bound, BaseChatModel)
+
+    def test_with_retry_returns_resilient(self) -> None:
+        """``llm.with_retry()`` 返回 :class:`ResilientRunnable`。"""
+        llm = get_llm(model_name="m", api_key="k", api_base="https://x")
+        wrapped = llm.with_retry()
+        assert isinstance(wrapped, ResilientRunnable)
+
+    def test_with_fallbacks_returns_resilient(self) -> None:
+        """``llm.with_fallbacks([fb])`` 返回 :class:`ResilientRunnable`。"""
+        from langchain_core.language_models.fake_chat_models import (
+            FakeListChatModel,
+        )
+
+        llm = get_llm(model_name="m", api_key="k", api_base="https://x")
+        fb = FakeListChatModel(responses=["fallback"])
+        wrapped = llm.with_fallbacks([fb])
+        assert isinstance(wrapped, ResilientRunnable)
+        # 第一个 fallback 升格为 wrapper 自己的 _fallback
+        assert wrapped.fallback is fb
+
+    def test_with_structured_output_returns_resilient(self) -> None:
+        """``llm.with_structured_output(Schema)`` 返回 :class:`ResilientRunnable`。"""
+        from pydantic import BaseModel
+
+        class Schema(BaseModel):
+            x: int
+
+        llm = get_llm(model_name="m", api_key="k", api_base="https://x")
+        structured = llm.with_structured_output(Schema)
+        assert isinstance(structured, ResilientRunnable)
+        assert isinstance(structured, BaseChatModel)
