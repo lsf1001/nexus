@@ -492,6 +492,8 @@ async def handle_websocket(
             # Phase 2 Task 2.5：质量门。对 raw_response 跑 RubricJudge + Repair；
             # verdict 决定入库文本（ACCEPT→raw / REPAIR→重生 / REJECT→fallback）。
             # pipeline 失败/未配置时降级用原 response_text。
+            # 提前生成 message_id，让 pipeline 写 quality_scores 时能关联到本条消息
+            message_id = str(uuid.uuid4())
             pipeline = get_quality_pipeline() if get_quality_pipeline else None
             if pipeline is not None and response_text:
                 try:
@@ -499,6 +501,7 @@ async def handle_websocket(
                     final = await pipeline.run_with_quality(
                         question=user_content,
                         raw_response=response_text,
+                        message_id=message_id,
                     )
                     # 若 verdict 改变最终文本（如 REJECT 用了 fallback），
                     # 补发一个 final 帧给客户端（不重发 chunk，避免重复）
@@ -534,7 +537,7 @@ async def handle_websocket(
 
             # 保存助手回复到数据库（用剥离 <thinking> 后的纯文本，避免 DB 存原始含标签内容）
             if response_text:
-                add_message(str(uuid.uuid4()), session_id, "assistant", response_text)
+                add_message(message_id, session_id, "assistant", response_text)
 
     except WebSocketDisconnect:
         logger.info("客户端断开连接")

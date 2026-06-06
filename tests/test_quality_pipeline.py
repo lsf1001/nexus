@@ -350,3 +350,43 @@ def test_final_response_helpers():
     repair = FinalResponse("text", RubricVerdict.REPAIR, "fix")
     assert repair.accepted is False
     assert repair.rejected is False
+
+
+@pytest.mark.asyncio
+async def test_message_id_propagated_to_save_quality_score():
+    """run_with_quality 传入的 message_id 会透传给 save_quality_score（关联 assistant 消息）。"""
+    judge = _make_judge_with_responses([_default_rubric_responses(0.9)])
+    main_llm = _QueueLLM(responses=["unused"])
+    pipeline = _make_pipeline(judge, main_llm, session_id="s1")
+
+    with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
+        await pipeline.run_with_quality(
+            question="q", raw_response="r", message_id="msg-abc"
+        )
+
+    assert mock_save.call_count == 4
+    for call in mock_save.call_args_list:
+        assert call.kwargs["message_id"] == "msg-abc"
+        assert call.kwargs["session_id"] == "s1"
+
+
+@pytest.mark.asyncio
+async def test_message_id_propagated_through_repair_round():
+    """REPAIR 路径下 message_id 同样透传到第二轮 save_quality_score。"""
+    # 第一次评分低（触发 REPAIR），第二次高（通过）
+    judge = _make_judge_with_responses([
+        _default_rubric_responses(0.5),  # REPAIR
+        _default_rubric_responses(0.9),  # 重生后 ACCEPT
+    ])
+    main_llm = _QueueLLM(responses=["improved answer"])
+    pipeline = _make_pipeline(judge, main_llm, session_id="s2")
+
+    with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
+        await pipeline.run_with_quality(
+            question="q", raw_response="r", message_id="msg-xyz"
+        )
+
+    # 4 (first round) + 4 (second round) = 8 saves
+    assert mock_save.call_count == 8
+    for call in mock_save.call_args_list:
+        assert call.kwargs["message_id"] == "msg-xyz"

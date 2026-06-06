@@ -4,7 +4,6 @@
 context_usage = tokens / context_window * 100 是核心契约。
 """
 
-import pytest
 from nexus.backend.api.ws import _estimate_tokens
 
 

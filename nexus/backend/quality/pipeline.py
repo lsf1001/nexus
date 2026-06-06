@@ -140,6 +140,7 @@ class QualityPipeline:
         question: str,
         raw_response: str,
         tool_calls: Sequence[dict] | None = None,
+        message_id: str | None = None,
     ) -> FinalResponse:
         """对一次助手回复做质量门：评分 → 决策 → 可选 repair → 返回 FinalResponse。
 
@@ -177,7 +178,7 @@ class QualityPipeline:
             )
 
         verdict, reasoning = self._repair.decide(initial_scores, rubrics, attempt_count=0)
-        self._persist_scores(initial_scores, verdict.value, reasoning)
+        self._persist_scores(initial_scores, verdict.value, reasoning, message_id=message_id)
 
         if verdict == RubricVerdict.ACCEPT:
             return FinalResponse(
@@ -230,6 +231,7 @@ class QualityPipeline:
             second_verdict.value,
             second_reasoning,
             prefix="[repair] ",
+            message_id=message_id,
         )
 
         if second_verdict == RubricVerdict.ACCEPT:
@@ -294,6 +296,7 @@ class QualityPipeline:
         verdict: str,
         reasoning: str,
         prefix: str = "",
+        message_id: str | None = None,
     ) -> None:
         """把每个 Score 写一条 quality_scores 记录。
 
@@ -305,6 +308,7 @@ class QualityPipeline:
             try:
                 save_quality_score(
                     session_id=self._session_id,
+                    message_id=message_id,
                     rubric=score.rubric_name,
                     score=score.score,
                     verdict=verdict,

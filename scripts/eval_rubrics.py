@@ -63,26 +63,28 @@ def _load_samples(path: Path) -> list[MetaEvalSample]:
 
 
 def _build_judge() -> RubricJudge:
-    """构造默认 RubricJudge（用 nexus 配置的 LLM）。"""
+    """构造默认 RubricJudge（用 nexus 配置的 LLM）。
+
+    用 :func:`nexus.backend.agent.get_llm` 而非手动构造 ChatOpenAI，
+    避免与主 Agent 的 model_config 不一致（model_name / api_base 不同会 404）。
+    """
+    from nexus.backend.agent import get_llm
+    from nexus.backend.config import CONFIG
+    from nexus.backend.models_config import get_active_model
     from nexus.backend.rubrics.prompts import apply_prompts_to_default_rubrics
 
     apply_prompts_to_default_rubrics()
-    from nexus.backend.config import CONFIG
-    from nexus.backend.llm.wrapper import build_resilient_llm
-
     if not CONFIG.get("minimax_api_key"):
         print("ERROR: minimax_api_key 未配置，无法跑 judge", file=sys.stderr)
         sys.exit(2)
 
-    from langchain_openai import ChatOpenAI
-
-    primary = ChatOpenAI(
-        model=CONFIG.get("model_name", "MiniMax-M2.7"),
-        api_key=CONFIG["minimax_api_key"],
-        base_url=CONFIG.get("minimax_api_base"),
-        temperature=CONFIG.get("temperature", 0.0),
+    model_config = get_active_model() or {}
+    llm = get_llm(
+        api_key=model_config.get("api_key") or CONFIG.get("minimax_api_key", ""),
+        api_base=model_config.get("api_base") or CONFIG.get("minimax_api_base"),
+        model_name=model_config.get("name", CONFIG.get("model_name", "MiniMax-M2.7")),
+        temperature=model_config.get("temperature", CONFIG.get("temperature", 0.0)),
     )
-    llm = build_resilient_llm(primary=primary)
     return RubricJudge(llm=llm)
 
 

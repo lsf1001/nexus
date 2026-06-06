@@ -279,16 +279,33 @@ async def lifespan(app: FastAPI):
     app.state.channel_registry = ChannelRegistry()
     # 初始化 QualityPipeline（Phase 2 Task 2.5）：把 prompt 注入 DEFAULT_RUBRICS
     # 后再构造 pipeline；ws.py 会在每个新消息进入时调 pipeline.run_with_quality。
+    # 关键：judge.llm 和 main_llm 都必须是 BaseChatModel，不能传 deepagent
+    # 编译图（_agent 是 create_deep_agent 的返回值，是 LangGraph CompiledGraph，
+    # ainvoke 期望 state dict 而不是 messages 列表，会导致评分全部失败）。
+    from .agent import get_llm
     from .quality.pipeline import QualityPipeline
     from .rubrics.judge import RubricJudge
     from .rubrics.prompts import apply_prompts_to_default_rubrics
     from .rubrics.repair import RepairStrategy
 
     apply_prompts_to_default_rubrics()
+    # 评分用 LLM：与主 Agent 共用同一份 model_config（api_key / api_base /
+    # model_name / temperature），避免 404。直接用 CONFIG 默认渠道时模型
+    # 路径可能与主 Agent 的 model_config 不一致（前者是 ENV，后者是
+    # get_active_model()），主 Agent 能跑通而 Judge 报 404。
+    from .models_config import get_active_model as _get_active_model
+
+    _model_config = _get_active_model() or {}
+    judge_llm = get_llm(
+        api_key=_model_config.get("api_key") or CONFIG.get("minimax_api_key", ""),
+        api_base=_model_config.get("api_base") or CONFIG.get("minimax_api_base"),
+        model_name=_model_config.get("name", CONFIG.get("model_name", "MiniMax-M2.7")),
+        temperature=_model_config.get("temperature", CONFIG.get("temperature", 0.7)),
+    )
     app.state.quality_pipeline = QualityPipeline(
-        judge=RubricJudge(llm=_agent),
+        judge=RubricJudge(llm=judge_llm),
         repair_strategy=RepairStrategy(),
-        main_llm=_agent,
+        main_llm=judge_llm,
     )
     logger.info(f"Nexus Backend 已初始化 (MCP 工具: {len(_mcp_tools)} 个)")
     yield

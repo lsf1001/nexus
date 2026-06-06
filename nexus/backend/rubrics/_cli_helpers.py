@@ -59,22 +59,39 @@ def load_preference_records(
         by_key.setdefault(key, []).append(dict(row))
 
     for (session_id, rubric), entries in by_key.items():
-        if len(entries) < 2:
+        # 按 message_id 分桶：每个 message_id 可能有 4 个 rubric 的分数（一次响应的所有评分）
+        # 选 top/bottom 时按"该 message 在这个 rubric 上的最高分"和"最低分"
+        by_message: dict[str, list[dict]] = {}
+        for entry in entries:
+            mid = entry["message_id"]
+            if not mid:
+                continue
+            by_message.setdefault(mid, []).append(entry)
+        if len(by_message) < 2:
             continue
-        # 选最高分 + 最低分
-        entries.sort(key=lambda e: e["score"], reverse=True)
-        top = entries[0]
-        bottom = entries[-1]
-        if top["message_id"] == bottom["message_id"]:
+        # 计算每个 message 的平均分作为 ranking key
+        message_scores: list[tuple[str, float]] = [
+            (mid, sum(e["score"] for e in ents) / len(ents))
+            for mid, ents in by_message.items()
+        ]
+        message_scores.sort(key=lambda x: x[1], reverse=True)
+        top_mid = message_scores[0][0]
+        bot_mid = message_scores[-1][0]
+        if top_mid == bot_mid:
             continue
+        # 用任一 entry 拿 session_id / verdict / reasoning（top / bottom 各拿自己的）
+        top_entries = by_message[top_mid]
+        bot_entries = by_message[bot_mid]
+        top = max(top_entries, key=lambda e: e["score"])
+        bottom = min(bot_entries, key=lambda e: e["score"])
         # 拿 message 内容
         try:
             with get_db() as conn:
                 top_msg = conn.execute(
-                    "SELECT content FROM messages WHERE id = ?", (top["message_id"],)
+                    "SELECT content FROM messages WHERE id = ?", (top_mid,)
                 ).fetchone()
                 bot_msg = conn.execute(
-                    "SELECT content FROM messages WHERE id = ?", (bottom["message_id"],)
+                    "SELECT content FROM messages WHERE id = ?", (bot_mid,)
                 ).fetchone()
         except Exception:  # noqa: BLE001 — 容错
             top_msg = bot_msg = None
