@@ -1,0 +1,1604 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nexus macOS App UI Prototype</title>
+  <style>
+    :root {
+      --ink: #17191f;
+      --ink-2: #252832;
+      --muted: #6f7480;
+      --quiet: #9aa0a9;
+      --paper: #f6f1e7;
+      --paper-2: #fbf8f2;
+      --surface: #fffdf8;
+      --line: #e2d8ca;
+      --line-2: #d4c8b8;
+      --jade: #0c8f59;
+      --jade-2: #07c160;
+      --jade-soft: #e8f8ef;
+      --cobalt: #3157a5;
+      --cobalt-soft: #e9eefc;
+      --amber: #bd7b21;
+      --amber-soft: #fff3d7;
+      --rose: #b54d4d;
+      --shadow: 0 30px 90px rgba(24, 26, 32, 0.15);
+      --small-shadow: 0 14px 36px rgba(24, 26, 32, 0.09);
+      --radius: 20px;
+      font-family:
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "SF Pro Display",
+        "Segoe UI",
+        sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(90deg, rgba(23, 25, 31, 0.035) 1px, transparent 1px),
+        linear-gradient(rgba(23, 25, 31, 0.028) 1px, transparent 1px),
+        var(--paper);
+      background-size: 42px 42px;
+      color: var(--ink);
+      overflow: hidden;
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .prototype {
+      width: min(1380px, calc(100vw - 36px));
+      height: calc(100vh - 36px);
+      margin: 18px auto;
+      display: grid;
+      grid-template-rows: 58px minmax(0, 1fr);
+      gap: 14px;
+    }
+
+    .prototype-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark,
+    .app-mark {
+      width: 38px;
+      height: 38px;
+      border-radius: 13px;
+      background: var(--ink);
+      color: var(--surface);
+      display: grid;
+      place-items: center;
+      font-weight: 860;
+      letter-spacing: 0;
+      box-shadow: 0 12px 26px rgba(23, 25, 31, 0.22);
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .brand p {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .view-tabs {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 253, 248, 0.76);
+      backdrop-filter: blur(18px);
+    }
+
+    .view-tab {
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      padding: 9px 15px;
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .view-tab.active {
+      background: var(--ink);
+      color: var(--surface);
+      box-shadow: 0 9px 22px rgba(23, 25, 31, 0.18);
+    }
+
+    .window {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: 44px minmax(0, 1fr);
+    }
+
+    .macbar {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(251, 248, 242, 0.9);
+    }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .red { background: #ff5f57; }
+    .yellow { background: #ffbd2e; }
+    .green { background: #28c840; }
+
+    .mac-title {
+      flex: 1;
+      margin-right: 58px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .screen {
+      display: none;
+      min-height: 0;
+    }
+
+    .screen.active {
+      display: block;
+      height: 100%;
+    }
+
+    .setup-screen {
+      height: 100%;
+      display: grid;
+      grid-template-columns: 0.92fr 1.08fr;
+      background:
+        linear-gradient(135deg, rgba(49, 87, 165, 0.08), transparent 38%),
+        linear-gradient(315deg, rgba(12, 143, 89, 0.09), transparent 36%),
+        var(--paper-2);
+    }
+
+    .welcome-panel {
+      padding: 58px;
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 32px;
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+      border: 1px solid rgba(49, 87, 165, 0.2);
+      border-radius: 999px;
+      background: var(--cobalt-soft);
+      color: var(--cobalt);
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 5px currentColor;
+      opacity: 0.8;
+    }
+
+    .welcome-panel h2 {
+      max-width: 540px;
+      margin: 26px 0 16px;
+      font-size: 54px;
+      line-height: 0.98;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 500px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.78;
+    }
+
+    .brief-stack {
+      display: grid;
+      gap: 10px;
+      max-width: 520px;
+    }
+
+    .brief-item {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 11px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 253, 248, 0.72);
+      padding: 12px;
+    }
+
+    .brief-icon,
+    .status-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      background: var(--ink);
+      color: var(--surface);
+      font-size: 13px;
+      font-weight: 840;
+    }
+
+    .brief-item strong,
+    .status-card strong,
+    .session-card strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 3px;
+    }
+
+    .brief-item span,
+    .status-card span,
+    .session-card span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .setup-form-wrap {
+      display: grid;
+      place-items: center;
+      padding: 48px;
+    }
+
+    .setup-form {
+      width: min(470px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: rgba(255, 253, 248, 0.94);
+      box-shadow: var(--small-shadow);
+      padding: 26px;
+    }
+
+    .form-heading {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+
+    .form-heading h3 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .form-heading p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .step-badge {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: var(--ink);
+      color: var(--surface);
+      padding: 8px 11px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .field {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    label {
+      color: var(--ink-2);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fbf8f2;
+      color: var(--ink);
+      outline: none;
+      padding: 13px 14px;
+    }
+
+    input:focus,
+    textarea:focus {
+      border-color: var(--jade);
+      background: var(--surface);
+      box-shadow: 0 0 0 4px rgba(12, 143, 89, 0.1);
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .hint-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 5px 0 18px;
+      border-radius: 15px;
+      background: var(--jade-soft);
+      color: #126641;
+      padding: 12px 13px;
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      border: 0;
+      border-radius: 14px;
+      padding: 13px 16px;
+      font-size: 14px;
+      font-weight: 820;
+    }
+
+    .btn.primary {
+      flex: 1;
+      background: var(--ink);
+      color: var(--surface);
+      box-shadow: 0 14px 28px rgba(23, 25, 31, 0.18);
+    }
+
+    .btn.secondary {
+      border: 1px solid var(--line);
+      background: #fbf8f2;
+      color: var(--ink);
+    }
+
+    .app-screen {
+      height: 100%;
+      display: grid;
+      grid-template-columns: 270px minmax(0, 1fr) 292px;
+      background: var(--paper-2);
+    }
+
+    .sidebar {
+      min-height: 0;
+      border-right: 1px solid var(--line);
+      background: #f4eee3;
+      padding: 16px;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      gap: 14px;
+    }
+
+    .app-identity {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 4px 2px 2px;
+    }
+
+    .app-mark {
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+    }
+
+    .app-identity strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .app-identity span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 2px;
+    }
+
+    .new-chat {
+      width: 100%;
+      border: 0;
+      border-radius: 16px;
+      background: var(--ink);
+      color: var(--surface);
+      padding: 13px;
+      font-size: 14px;
+      font-weight: 840;
+      box-shadow: 0 14px 30px rgba(23, 25, 31, 0.17);
+    }
+
+    .search-box {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255, 253, 248, 0.72);
+      color: var(--quiet);
+      padding: 11px 12px;
+      font-size: 13px;
+    }
+
+    .section-label {
+      color: var(--quiet);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin: 6px 2px 8px;
+    }
+
+    .sessions {
+      min-height: 0;
+      overflow: auto;
+      padding-right: 2px;
+    }
+
+    .session-card {
+      border: 1px solid transparent;
+      border-radius: 16px;
+      padding: 12px;
+      margin-bottom: 7px;
+    }
+
+    .session-card.active {
+      border-color: var(--line);
+      background: var(--surface);
+      box-shadow: 0 9px 22px rgba(24, 26, 32, 0.07);
+    }
+
+    .session-card.wechat {
+      border-color: rgba(7, 193, 96, 0.22);
+      background: var(--jade-soft);
+    }
+
+    .sidebar-footer {
+      display: grid;
+      gap: 8px;
+    }
+
+    .side-action {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: rgba(255, 253, 248, 0.66);
+      color: var(--ink-2);
+      padding: 11px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 790;
+    }
+
+    .side-action.connected {
+      color: #126641;
+      background: var(--jade-soft);
+      border-color: rgba(7, 193, 96, 0.22);
+    }
+
+    .main-pane {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 64px minmax(0, 1fr) auto;
+      background: #fbf8f2;
+    }
+
+    .topbar {
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 24px;
+      background: rgba(255, 253, 248, 0.76);
+      backdrop-filter: blur(16px);
+    }
+
+    .topic strong {
+      display: block;
+      font-size: 16px;
+      margin-bottom: 2px;
+    }
+
+    .topic span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .chips {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      padding: 8px 11px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .chip.good {
+      border-color: rgba(12, 143, 89, 0.2);
+      background: var(--jade-soft);
+      color: #126641;
+    }
+
+    .dot-status {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      margin-right: 6px;
+    }
+
+    .chat-scroll {
+      min-height: 0;
+      overflow: auto;
+      padding: 30px 34px;
+    }
+
+    .morning-card {
+      max-width: 760px;
+      margin: 0 auto 24px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background:
+        linear-gradient(135deg, rgba(49, 87, 165, 0.08), transparent 45%),
+        var(--surface);
+      padding: 20px;
+      box-shadow: 0 16px 36px rgba(24, 26, 32, 0.07);
+    }
+
+    .morning-card h3 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    .morning-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 14px;
+    }
+
+    .suggestions {
+      max-width: 760px;
+      margin: 0 auto 28px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .suggestion {
+      min-height: 104px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      padding: 14px;
+      text-align: left;
+      box-shadow: 0 10px 26px rgba(24, 26, 32, 0.05);
+    }
+
+    .suggestion strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 6px;
+    }
+
+    .suggestion span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .message-list {
+      max-width: 800px;
+      margin: 0 auto;
+      display: grid;
+      gap: 18px;
+    }
+
+    .message {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .message.user {
+      justify-content: flex-end;
+    }
+
+    .avatar {
+      flex: 0 0 auto;
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      background: var(--ink);
+      color: var(--surface);
+      font-size: 12px;
+      font-weight: 860;
+    }
+
+    .avatar.user {
+      background: var(--cobalt);
+    }
+
+    .bubble {
+      max-width: 640px;
+      border: 1px solid var(--line);
+      border-radius: 19px;
+      background: var(--surface);
+      padding: 15px 16px;
+      color: var(--ink-2);
+      line-height: 1.75;
+      font-size: 14px;
+    }
+
+    .message.user .bubble {
+      border-color: var(--ink);
+      background: var(--ink);
+      color: var(--surface);
+    }
+
+    .composer-area {
+      padding: 18px 30px 24px;
+      background: linear-gradient(transparent, #fbf8f2 24%);
+    }
+
+    .composer {
+      max-width: 880px;
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 23px;
+      background: var(--surface);
+      box-shadow: 0 18px 42px rgba(24, 26, 32, 0.1);
+      overflow: hidden;
+    }
+
+    .composer textarea {
+      min-height: 86px;
+      resize: none;
+      border: 0;
+      background: var(--surface);
+      font-size: 15px;
+      line-height: 1.55;
+    }
+
+    .composer textarea:focus {
+      box-shadow: none;
+    }
+
+    .composer-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-top: 1px solid var(--line);
+      padding: 10px 12px;
+    }
+
+    .tool-row {
+      display: flex;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .tool-pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fbf8f2;
+      color: var(--muted);
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .send-button {
+      border: 0;
+      border-radius: 999px;
+      background: var(--ink);
+      color: var(--surface);
+      padding: 9px 15px;
+      font-size: 13px;
+      font-weight: 860;
+    }
+
+    .right-panel {
+      min-height: 0;
+      border-left: 1px solid var(--line);
+      background: #f4eee3;
+      padding: 18px;
+      overflow: auto;
+    }
+
+    .panel-title {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .status-stack {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .status-card {
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      background: rgba(255, 253, 248, 0.78);
+      padding: 13px;
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .status-card.wechat {
+      background: var(--jade-soft);
+      border-color: rgba(7, 193, 96, 0.22);
+    }
+
+    .status-card.warn {
+      background: var(--amber-soft);
+      border-color: rgba(189, 123, 33, 0.22);
+    }
+
+    .status-icon.jade {
+      background: var(--jade);
+    }
+
+    .status-icon.cobalt {
+      background: var(--cobalt);
+    }
+
+    .timeline {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 253, 248, 0.68);
+      padding: 14px;
+    }
+
+    .timeline h4 {
+      margin: 0 0 12px;
+      font-size: 14px;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      gap: 10px;
+      padding: 9px 0;
+      border-top: 1px solid rgba(226, 216, 202, 0.74);
+    }
+
+    .timeline-item:first-of-type {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .timeline-time {
+      color: var(--quiet);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .timeline-text {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .wechat-screen {
+      height: 100%;
+      display: grid;
+      grid-template-columns: 0.94fr 1.06fr;
+      background:
+        linear-gradient(135deg, rgba(7, 193, 96, 0.11), transparent 34%),
+        var(--paper-2);
+    }
+
+    .wechat-copy {
+      padding: 58px;
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 26px;
+    }
+
+    .channel-mark {
+      width: 72px;
+      height: 72px;
+      border-radius: 24px;
+      background: var(--jade-2);
+      color: white;
+      display: grid;
+      place-items: center;
+      font-size: 28px;
+      font-weight: 900;
+      box-shadow: 0 20px 48px rgba(7, 193, 96, 0.24);
+    }
+
+    .wechat-copy h2,
+    .settings-copy h2 {
+      margin: 0;
+      max-width: 560px;
+      font-size: 48px;
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+
+    .wechat-copy p,
+    .settings-copy p {
+      max-width: 500px;
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.78;
+      font-size: 15px;
+    }
+
+    .benefits {
+      display: grid;
+      gap: 10px;
+      max-width: 500px;
+    }
+
+    .benefit {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 253, 248, 0.75);
+      padding: 12px;
+      color: var(--ink-2);
+      font-size: 14px;
+      font-weight: 760;
+    }
+
+    .benefit-dot {
+      width: 28px;
+      height: 28px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: var(--jade-soft);
+      color: var(--jade);
+      font-weight: 900;
+    }
+
+    .bind-zone {
+      display: grid;
+      place-items: center;
+      padding: 52px;
+    }
+
+    .bind-card {
+      width: min(480px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: var(--surface);
+      box-shadow: var(--small-shadow);
+      padding: 28px;
+    }
+
+    .bind-card h3 {
+      margin: 0 0 7px;
+      font-size: 24px;
+    }
+
+    .bind-card p {
+      margin: 0 0 22px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .qr-frame {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: #fbf8f2;
+      padding: 25px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 16px;
+    }
+
+    .qr {
+      width: 218px;
+      height: 218px;
+      border-radius: 18px;
+      background: white;
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      gap: 7px;
+      padding: 18px;
+      box-shadow: inset 0 0 0 1px var(--line);
+    }
+
+    .qr i {
+      display: block;
+      border-radius: 4px;
+      background: var(--ink);
+    }
+
+    .qr i:nth-child(3n),
+    .qr i:nth-child(8n) {
+      background: transparent;
+    }
+
+    .qr i:nth-child(7n),
+    .qr i:nth-child(11n) {
+      background: var(--jade-2);
+    }
+
+    .bind-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-radius: 16px;
+      background: var(--amber-soft);
+      color: var(--amber);
+      padding: 12px 13px;
+      font-size: 13px;
+      font-weight: 820;
+      margin-bottom: 18px;
+    }
+
+    .bind-steps {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .bind-step {
+      display: grid;
+      grid-template-columns: 24px 1fr;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .bind-num {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--jade-soft);
+      color: var(--jade);
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .settings-screen {
+      height: 100%;
+      display: grid;
+      grid-template-columns: 0.82fr 1.18fr;
+      background: var(--paper-2);
+    }
+
+    .settings-copy {
+      padding: 58px;
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .settings-grid {
+      min-height: 0;
+      overflow: auto;
+      padding: 44px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .setting-row {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--surface);
+      padding: 18px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 18px;
+      align-items: center;
+      box-shadow: 0 10px 26px rgba(24, 26, 32, 0.05);
+    }
+
+    .setting-row strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 15px;
+    }
+
+    .setting-row span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .toggle {
+      width: 46px;
+      height: 26px;
+      border-radius: 999px;
+      background: var(--jade);
+      position: relative;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+    }
+
+    .toggle::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: white;
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.18);
+    }
+
+    .toggle.off {
+      background: #b7b1a7;
+    }
+
+    .toggle.off::after {
+      right: auto;
+      left: 3px;
+    }
+
+    .select-pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fbf8f2;
+      color: var(--ink-2);
+      padding: 9px 13px;
+      min-width: 132px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    @media (max-width: 1120px) {
+      body {
+        overflow: auto;
+      }
+
+      .prototype {
+        height: auto;
+        min-height: calc(100vh - 36px);
+      }
+
+      .window {
+        min-height: 820px;
+      }
+
+      .app-screen {
+        grid-template-columns: 230px minmax(0, 1fr);
+      }
+
+      .right-panel {
+        display: none;
+      }
+
+      .setup-screen,
+      .wechat-screen,
+      .settings-screen {
+        grid-template-columns: 1fr;
+      }
+
+      .welcome-panel,
+      .wechat-copy,
+      .settings-copy {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 36px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype">
+    <header class="prototype-header">
+      <div class="brand">
+        <div class="brand-mark">N</div>
+        <div>
+          <h1>Nexus macOS App 原型</h1>
+          <p>个人 AI 助手 · 微信作为 IM 通道 · DMG 安装版视觉方向</p>
+        </div>
+      </div>
+      <nav class="view-tabs" aria-label="Prototype views">
+        <button class="view-tab active" data-view="setup">首启配置</button>
+        <button class="view-tab" data-view="chat">主对话</button>
+        <button class="view-tab" data-view="wechat">微信助手</button>
+        <button class="view-tab" data-view="settings">设置</button>
+      </nav>
+    </header>
+
+    <main class="window">
+      <div class="macbar">
+        <span class="dot red"></span>
+        <span class="dot yellow"></span>
+        <span class="dot green"></span>
+        <div class="mac-title">Nexus</div>
+      </div>
+
+      <section id="setup" class="screen active">
+        <div class="setup-screen">
+          <div class="welcome-panel">
+            <div>
+              <div class="kicker"><span class="pulse"></span> 本地运行已就绪</div>
+              <h2>把日常想法交给一个更安静的助手。</h2>
+              <p class="lead">
+                Nexus 会在本机管理后端、数据库和会话。你只需要配置模型，然后开始对话；
+                需要移动入口时，再把微信绑定成 IM 通道。
+              </p>
+            </div>
+
+            <div class="brief-stack">
+              <div class="brief-item">
+                <div class="brief-icon">01</div>
+                <div>
+                  <strong>一次配置，持续使用</strong>
+                  <span>模型、会话和本地数据目录由 App 统一管理。</span>
+                </div>
+              </div>
+              <div class="brief-item">
+                <div class="brief-icon">02</div>
+                <div>
+                  <strong>默认藏起技术细节</strong>
+                  <span>不展示端口、虚拟环境、服务命令，只展示可理解的状态。</span>
+                </div>
+              </div>
+              <div class="brief-item">
+                <div class="brief-icon">03</div>
+                <div>
+                  <strong>微信是随身入口</strong>
+                  <span>绑定后可直接在微信里向 Nexus 委托任务。</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="setup-form-wrap">
+            <div class="setup-form">
+              <div class="form-heading">
+                <div>
+                  <h3>连接你的模型</h3>
+                  <p>首版只保留必要配置。高级选项放入设置页，避免第一次打开就变成后台。</p>
+                </div>
+                <span class="step-badge">1 / 1</span>
+              </div>
+
+              <div class="field">
+                <label for="model">模型</label>
+                <input id="model" value="MiniMax-M3" />
+              </div>
+              <div class="field">
+                <label for="api-base">API Base</label>
+                <input id="api-base" value="https://api.minimaxi.com/v1" />
+              </div>
+              <div class="field">
+                <label for="api-key">API Key</label>
+                <input id="api-key" type="password" value="sk-xxxxxxxxxxxxxxxxxxxxxxxx" />
+              </div>
+              <div class="two-col">
+                <div class="field">
+                  <label for="temperature">Temperature</label>
+                  <input id="temperature" value="0.7" />
+                </div>
+                <div class="field">
+                  <label for="storage">数据位置</label>
+                  <input id="storage" value="本机" disabled />
+                </div>
+              </div>
+
+              <div class="hint-row">
+                <span>连接测试通过</span>
+                <span>MiniMax-M3</span>
+              </div>
+              <div class="actions">
+                <button class="btn secondary">测试连接</button>
+                <button class="btn primary">开始使用</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="chat" class="screen">
+        <div class="app-screen">
+          <aside class="sidebar">
+            <div class="app-identity">
+              <div class="app-mark">N</div>
+              <div>
+                <strong>Nexus</strong>
+                <span>个人 AI 助手</span>
+              </div>
+            </div>
+
+            <div>
+              <button class="new-chat">新建对话</button>
+              <div style="height: 10px"></div>
+              <div class="search-box">搜索会话</div>
+            </div>
+
+            <div class="sessions">
+              <div class="section-label">Today</div>
+              <div class="session-card active">
+                <strong>今天要处理的三件事</strong>
+                <span>整理计划、邮件回复、项目节奏。</span>
+              </div>
+              <div class="session-card">
+                <strong>DMG 发布清单</strong>
+                <span>打包、签名、Release 流程。</span>
+              </div>
+              <div class="session-card wechat">
+                <strong>微信里的待办</strong>
+                <span>来自微信助手的移动会话。</span>
+              </div>
+              <div class="section-label">Yesterday</div>
+              <div class="session-card">
+                <strong>UI 设计方向</strong>
+                <span>书房式个人助手风格。</span>
+              </div>
+              <div class="session-card">
+                <strong>模型配置测试</strong>
+                <span>MiniMax-M3 连接已通过。</span>
+              </div>
+            </div>
+
+            <div class="sidebar-footer">
+              <button class="side-action connected">
+                <span>微信助手</span>
+                <span>已连接</span>
+              </button>
+              <button class="side-action">
+                <span>设置</span>
+                <span>模型 · 数据</span>
+              </button>
+            </div>
+          </aside>
+
+          <section class="main-pane">
+            <header class="topbar">
+              <div class="topic">
+                <strong>今天要处理的三件事</strong>
+                <span>当前模型 MiniMax-M3 · 本机运行</span>
+              </div>
+              <div class="chips">
+                <span class="chip good"><span class="dot-status"></span>后端在线</span>
+                <span class="chip good"><span class="dot-status"></span>微信在线</span>
+                <span class="chip">显示思考</span>
+              </div>
+            </header>
+
+            <div class="chat-scroll">
+              <div class="morning-card">
+                <h3>早上好，Nexus 已准备好。</h3>
+                <p>
+                  你可以直接输入任务，也可以从下面的建议开始。这里不会像后台一样堆功能，
+                  重点是让对话、记忆和微信入口保持清楚。
+                </p>
+              </div>
+
+              <div class="suggestions">
+                <button class="suggestion">
+                  <strong>整理今天计划</strong>
+                  <span>把任务拆成上午、下午和可推迟事项。</span>
+                </button>
+                <button class="suggestion">
+                  <strong>处理微信待办</strong>
+                  <span>汇总微信助手收到的消息和下一步动作。</span>
+                </button>
+                <button class="suggestion">
+                  <strong>检查项目风险</strong>
+                  <span>从发布、打包、配置和体验角度做检查。</span>
+                </button>
+              </div>
+
+              <div class="message-list">
+                <div class="message user">
+                  <div class="bubble">帮我把 Nexus 做成普通用户能安装使用的 Mac App。</div>
+                  <div class="avatar user">我</div>
+                </div>
+                <div class="message">
+                  <div class="avatar">N</div>
+                  <div class="bubble">
+                    可以。第一版我会把技术概念收起来，让用户只看到三个核心动作：
+                    配置模型、开始对话、绑定微信助手。DMG 内会包含运行时，打开 App 后自动启动本地服务。
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer-area">
+              <div class="composer">
+                <textarea placeholder="把任务交给 Nexus，例如：帮我整理今天的想法"></textarea>
+                <div class="composer-bottom">
+                  <div class="tool-row">
+                    <button class="tool-pill">记忆</button>
+                    <button class="tool-pill">微信上下文</button>
+                    <button class="tool-pill">本地资料</button>
+                  </div>
+                  <button class="send-button">发送</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="right-panel">
+            <h3 class="panel-title">Assistant Status</h3>
+            <div class="status-stack">
+              <div class="status-card">
+                <div class="status-icon">AI</div>
+                <div>
+                  <strong>MiniMax-M3</strong>
+                  <span>模型配置正常，连接测试通过。</span>
+                </div>
+              </div>
+              <div class="status-card wechat">
+                <div class="status-icon jade">WX</div>
+                <div>
+                  <strong>微信助手在线</strong>
+                  <span>可接收并回复微信消息。</span>
+                </div>
+              </div>
+              <div class="status-card warn">
+                <div class="status-icon cobalt">DB</div>
+                <div>
+                  <strong>本地数据</strong>
+                  <span>会话、记忆和配置保存在本机。</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="timeline">
+              <h4>最近活动</h4>
+              <div class="timeline-item">
+                <div class="timeline-time">09:42</div>
+                <div class="timeline-text">微信助手收到一条新消息，已创建会话。</div>
+              </div>
+              <div class="timeline-item">
+                <div class="timeline-time">09:36</div>
+                <div class="timeline-text">模型连接测试通过。</div>
+              </div>
+              <div class="timeline-item">
+                <div class="timeline-time">09:30</div>
+                <div class="timeline-text">Nexus 本地后端启动完成。</div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="wechat" class="screen">
+        <div class="wechat-screen">
+          <div class="wechat-copy">
+            <div class="channel-mark">微</div>
+            <div>
+              <h2>微信不是插件，是你的随身入口。</h2>
+              <p>
+                绑定后，你可以在微信里给 Nexus 发消息。桌面端负责整理上下文、保留会话和展示完整记录，
+                微信端负责随时唤起。
+              </p>
+            </div>
+            <div class="benefits">
+              <div class="benefit">
+                <div class="benefit-dot">1</div>
+                <div>外出时直接在微信里向 Nexus 委托任务</div>
+              </div>
+              <div class="benefit">
+                <div class="benefit-dot">2</div>
+                <div>微信会话自动回流到桌面端，可继续整理</div>
+              </div>
+              <div class="benefit">
+                <div class="benefit-dot">3</div>
+                <div>绑定状态、重连和重新扫码都放在一个清楚页面</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bind-zone">
+            <div class="bind-card">
+              <h3>绑定微信助手</h3>
+              <p>使用微信扫码。绑定成功后，Nexus 会显示通道运行状态，并把微信消息保存为独立会话。</p>
+
+              <div class="qr-frame">
+                <div class="qr" aria-label="二维码示意">
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                </div>
+              </div>
+
+              <div class="bind-status">
+                <span>等待扫码</span>
+                <span>二维码 4 分钟内有效</span>
+              </div>
+
+              <div class="bind-steps">
+                <div class="bind-step">
+                  <div class="bind-num">1</div>
+                  <div>打开微信，扫描上方二维码。</div>
+                </div>
+                <div class="bind-step">
+                  <div class="bind-num">2</div>
+                  <div>确认授权后，Nexus 会自动切换为已连接。</div>
+                </div>
+                <div class="bind-step">
+                  <div class="bind-num">3</div>
+                  <div>之后可直接在微信中向 Nexus 发送消息。</div>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button class="btn secondary">刷新二维码</button>
+                <button class="btn primary">查看微信会话</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="settings" class="screen">
+        <div class="settings-screen">
+          <div class="settings-copy">
+            <div class="kicker"><span class="pulse"></span> 普通设置，不是控制台</div>
+            <h2>只暴露用户真正需要理解的开关。</h2>
+            <p>
+              端口、进程、虚拟环境这些运行细节由 App 管理。设置页只保留模型、数据、微信、
+              启动行为和诊断入口。
+            </p>
+          </div>
+
+          <div class="settings-grid">
+            <div class="setting-row">
+              <div>
+                <strong>当前模型</strong>
+                <span>用于桌面对话和微信助手回复。</span>
+              </div>
+              <div class="select-pill">MiniMax-M3</div>
+            </div>
+            <div class="setting-row">
+              <div>
+                <strong>微信助手</strong>
+                <span>允许 Nexus 通过微信收发消息。</span>
+              </div>
+              <div class="toggle"></div>
+            </div>
+            <div class="setting-row">
+              <div>
+                <strong>显示思考过程</strong>
+                <span>在回答中展示模型的中间推理摘要。</span>
+              </div>
+              <div class="toggle"></div>
+            </div>
+            <div class="setting-row">
+              <div>
+                <strong>开机后自动准备 Nexus</strong>
+                <span>登录 macOS 后自动启动本地后端，打开窗口即可使用。</span>
+              </div>
+              <div class="toggle off"></div>
+            </div>
+            <div class="setting-row">
+              <div>
+                <strong>本地数据目录</strong>
+                <span>会话、记忆、模型配置和日志保存在本机。</span>
+              </div>
+              <div class="select-pill">打开目录</div>
+            </div>
+            <div class="setting-row">
+              <div>
+                <strong>运行诊断</strong>
+                <span>检查后端、模型连接、微信通道和数据库状态。</span>
+              </div>
+              <div class="select-pill">开始诊断</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const tabs = Array.from(document.querySelectorAll(".view-tab"));
+    const screens = Array.from(document.querySelectorAll(".screen"));
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const view = tab.dataset.view;
+        tabs.forEach((item) => item.classList.toggle("active", item === tab));
+        screens.forEach((screen) => screen.classList.toggle("active", screen.id === view));
+      });
+    });
+  </script>
+</body>
+</html>
