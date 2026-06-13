@@ -26,22 +26,28 @@
 | `.env.example`   | 环境变量样例（**禁止**含真实密钥）                          |
 | `CLAUDE.md`      | AI 协作入口，**第一行必须** `@python_project.md` 引用本文件 |
 
-### 0.3 必配 CI
+### 0.3 必装 pre-commit hook
 
-CI 必跑，缺一项视为不合规：
+所有项目必装，**不依赖平台**。commit 时硬性阻断：
+
+1. `ruff check --fix`
+2. `ruff format`
+3. CI 第 1-3 项的快速版本
+
+### 0.4 必配 CI（按项目类型选）
+
+CI 配置**按平台**选，缺一不可：
+
+- **GitHub 仓库**：`.github/workflows/ci.yml`
+- **GitLab 仓库**：`.gitlab-ci.yml`
+- **本地项目**：可不配（仅 pre-commit 兜底）
+
+CI 必跑项：
 
 1. `ruff check .`
 2. `ruff format --check .`
 3. `pytest tests/ -q`
 4. `mypy src/`（项目声明 strict 时必跑）
-
-### 0.4 必装 pre-commit hook
-
-commit 时硬性阻断：
-
-1. `ruff check --fix`
-2. `ruff format`
-3. CI 1-3 项快速版
 
 ---
 
