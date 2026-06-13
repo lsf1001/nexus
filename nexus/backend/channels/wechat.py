@@ -64,6 +64,12 @@ from .wechat_account import (
     _resolve_context_token_file_path,  # noqa: F401  保留 re-export
     _save_account,  # noqa: F401  保留 re-export
 )
+from .wechat_tokens import (
+    _get_context_token,  # noqa: F401  保留 re-export
+    _restore_context_tokens,  # noqa: F401  保留 re-export
+    _save_context_tokens,  # noqa: F401  保留 re-export
+    _set_context_token,  # noqa: F401  保留 re-export
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,43 +110,7 @@ def _clear_active_channel() -> None:
 # ========== 账号管理业务函数（增删改查 / 路径 / 归一化）已移至 wechat_account.py ==========
 
 
-def _save_context_tokens(account_id: str) -> None:
-    """保存 context tokens 到磁盘"""
-    file_path = _resolve_context_token_file_path(account_id)
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    tokens = {}
-    prefix = f"{account_id}:"
-    for k, v in _context_tokens.items():
-        if k.startswith(prefix):
-            tokens[k[len(prefix) :]] = v
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(tokens, f, ensure_ascii=False)
-
-
-def _restore_context_tokens(account_id: str) -> None:
-    """从磁盘恢复 context tokens"""
-    file_path = _resolve_context_token_file_path(account_id)
-    if not file_path.exists():
-        return
-    try:
-        with open(file_path, encoding="utf-8") as f:
-            tokens = json.load(f)
-        for user_id, token in tokens.items():
-            _context_tokens[f"{account_id}:{user_id}"] = token
-        logger.info(f"Restored {len(tokens)} context tokens for account={account_id}")
-    except Exception as e:
-        logger.warn(f"Failed to restore context tokens: {e}")
-
-
-def _set_context_token(account_id: str, user_id: str, token: str) -> None:
-    """设置 context token"""
-    key = f"{account_id}:{user_id}"
-    _context_tokens[key] = token
-
-
-def _get_context_token(account_id: str, user_id: str) -> str | None:
-    """获取 context token"""
-    return _context_tokens.get(f"{account_id}:{user_id}")
+# ========== context token 管理已移至 wechat_tokens.py ==========
 
 
 # ========== 协议层（ID / 头 / base_info）已移至 wechat_protocol.py ==========
