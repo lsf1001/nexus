@@ -70,6 +70,19 @@ from .wechat_tokens import (
     _save_context_tokens,  # noqa: F401  保留 re-export
     _set_context_token,  # noqa: F401  保留 re-export
 )
+from .wechat_api import (
+    _api_get_fetch,  # noqa: F401  保留 re-export
+    _api_post_fetch,  # noqa: F401  保留 re-export
+)
+from .wechat_login import (
+    _fetch_qrcode,  # noqa: F401  保留 re-export
+    _get_local_bot_token_list,  # noqa: F401  保留 re-export
+    _is_login_fresh,  # noqa: F401  保留 re-export
+    _poll_qr_status,  # noqa: F401  保留 re-export
+    _purge_expired_logins,  # noqa: F401  保留 re-export
+    wait_qr_scan,  # noqa: F401  保留 re-export
+    wechat_qr_login,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,84 +132,8 @@ def _clear_active_channel() -> None:
 # ========== API 调用 ==========
 
 
-async def _api_get_fetch(base_url: str, endpoint: str, timeout_ms: int = 15000) -> str:
-    """GET 请求"""
-    url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
-    headers = {
-        "AuthorizationType": "ilink_bot_token",
-        "X-WECHAT-UIN": _random_wechat_uin(),
-    }
-    async with httpx.AsyncClient(timeout=timeout_ms / 1000) as client:
-        response = await client.get(url, headers=headers)
-        if not response.is_success:
-            raise Exception(f"GET {url} failed: {response.status_code}")
-        return response.text
-
-
-async def _api_post_fetch(
-    base_url: str, endpoint: str, body: dict, token: str | None = None, timeout_ms: int = 15000
-) -> str:
-    """POST JSON 请求"""
-    url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
-    headers = _build_headers(token)
-    async with httpx.AsyncClient(timeout=timeout_ms / 1000) as client:
-        response = await client.post(url, json=body, headers=headers)
-        if not response.is_success:
-            raise Exception(f"POST {url} failed: {response.status_code}")
-        return response.text
-
-
-async def _fetch_qrcode(api_base_url: str, bot_type: str = DEFAULT_ILINK_BOT_TYPE) -> dict:
-    """获取二维码"""
-    local_token_list = _get_local_bot_token_list()
-    raw = await _api_post_fetch(
-        api_base_url,
-        f"/ilink/bot/get_bot_qrcode?bot_type={bot_type}",
-        body={"local_token_list": local_token_list},
-        timeout_ms=30000,
-    )
-    return json.loads(raw)
-
-
-async def _poll_qr_status(api_base_url: str, qrcode: str, verify_code: str = "") -> dict:
-    """轮询二维码状态"""
-    endpoint = f"/ilink/bot/get_qrcode_status?qrcode={qrcode}"
-    if verify_code:
-        endpoint += f"&verify_code={verify_code}"
-    try:
-        raw = await _api_get_fetch(api_base_url, endpoint, timeout_ms=QR_LONG_POLL_TIMEOUT_MS)
-        return json.loads(raw)
-    except Exception as e:
-        if "AbortError" in str(e) or "timeout" in str(e).lower():
-            return {"status": "wait"}
-        raise
-
-
-def _get_local_bot_token_list() -> list[str]:
-    """获取本地已登录账号的 token 列表"""
-    tokens = []
-    for account_id in _list_indexed_weixin_account_ids():
-        data = _load_account(account_id)
-        if data and data.token:
-            tokens.append(data.token)
-    return tokens[:10]
-
-
-def _is_login_fresh(login: QRSession) -> bool:
-    """检查会话是否新鲜"""
-    return time.time() - login.started_at < ACTIVE_LOGIN_TTL_MS
-
-
-def _purge_expired_logins() -> None:
-    """清理过期的登录会话"""
-    with _global_lock:
-        for sid in list(_active_logins.keys()):
-            if not _is_login_fresh(_active_logins[sid]):
-                del _active_logins[sid]
-
-
-# ========== 消息类型定义 ==========
-# （MessageItemType / MessageTypeEnum / MessageState 已移至 wechat_types.py）
+# ========== HTTP API（_api_get_fetch / _api_post_fetch）已移至 wechat_api.py ==========
+# ========== QR 登录流程（wechat_qr_login / wait_qr_scan 等）已移至 wechat_login.py ==========
 
 
 # ========== 消息发送 ==========
@@ -255,138 +192,7 @@ async def _send_message(base_url: str, token: str, to_user: str, text: str, cont
     return client_id
 
 
-# ========== 独立 QR 登录流程 ==========
-
-
-async def wechat_qr_login() -> dict:
-    """启动 QR 登录流程"""
-    session_key = str(uuid.uuid4())
-    _purge_expired_logins()
-
-    try:
-        data = await _fetch_qrcode(FIXED_BASE_URL, DEFAULT_ILINK_BOT_TYPE)
-        qrcode = data.get("qrcode", "")
-        qrcode_url = data.get("qrcode_img_content", "")
-
-        session = QRSession(
-            session_key=session_key,
-            qrcode=qrcode,
-            qrcode_url=qrcode_url,
-        )
-        with _global_lock:
-            _active_logins[session_key] = session
-
-        return {
-            "qrcode_url": qrcode_url,
-            "qrcode": qrcode,
-            "session_key": session_key,
-        }
-    except Exception as e:
-        logger.error(f"QR login failed: {e}")
-        return {"error": str(e)}
-
-
-async def wait_qr_scan(session_key: str, timeout_ms: int = 480000) -> dict:
-    """等待二维码扫描"""
-    with _global_lock:
-        session = _active_logins.get(session_key)
-    if not session:
-        return {"connected": False, "message": "No active login session"}
-
-    with _global_lock:
-        if not _is_login_fresh(session):
-            del _active_logins[session_key]
-            return {"connected": False, "message": "QR code expired, please get a new one"}
-
-    deadline = time.time() + timeout_ms / 1000
-    refresh_count = 0
-    max_refresh = 3
-
-    while time.time() < deadline:
-        try:
-            data = await _poll_qr_status(
-                session.current_api_base_url, session.qrcode, session.pending_verify_code or ""
-            )
-            status = data.get("status", "wait")
-            with _global_lock:
-                session.status = status
-
-            if status == "wait":
-                await asyncio.sleep(1)
-            elif status == "confirmed":
-                bot_token = data.get("bot_token", "")
-                ilink_bot_id = data.get("ilink_bot_id", "")
-                ilink_user_id = data.get("ilink_user_id", "")
-                base_url = data.get("baseurl", "") or FIXED_BASE_URL
-
-                if not ilink_bot_id:
-                    return {"connected": False, "message": "Login confirmed but ilink_bot_id missing"}
-
-                normalized_id = _normalize_account_id(ilink_bot_id)
-                account = WeixinAccount(
-                    account_id=normalized_id,
-                    user_id=ilink_user_id or "",
-                    token=bot_token,
-                    base_url=base_url,
-                )
-                with _global_lock:
-                    _accounts[normalized_id] = account
-                _save_account(account)
-                _register_weixin_account_id(normalized_id)
-
-                # 创建微信通道并启动
-                global _active_channel
-                config = ChannelConfig(
-                    channel_id=f"wechat:{normalized_id}",
-                    channel_type=ChannelType.WECHAT,
-                    name=f"WeChat ({normalized_id[:8]}...)",
-                    settings={"account_id": normalized_id},
-                )
-                from .wechat import WeChatChannel as WCH  # noqa: N814
-
-                _active_channel = WCH(config, token=normalized_id)
-                await _active_channel.start()
-
-                # 立即设置消息回调
-                from nexus.backend.main import _handle_wechat_message
-
-                _active_channel.on_message(_handle_wechat_message)
-                logger.info(f"Callback set for channel {_active_channel.config.channel_id}")
-
-                with _global_lock:
-                    del _active_logins[session_key]
-
-                return {
-                    "connected": True,
-                    "bot_token": bot_token,
-                    "account_id": normalized_id,
-                    "user_id": ilink_user_id,
-                    "base_url": base_url,
-                    "message": "Login successful",
-                }
-            elif status == "expired":
-                refresh_count += 1
-                if refresh_count > max_refresh:
-                    with _global_lock:
-                        del _active_logins[session_key]
-                    return {"connected": False, "message": "QR code expired multiple times"}
-                await asyncio.sleep(1)
-            elif status == "need_verifycode":
-                # 需要输入验证码（暂时不支持交互式输入）
-                await asyncio.sleep(1)
-            elif status == "scaned_but_redirect":
-                redirect_host = data.get("redirect_host")
-                if redirect_host:
-                    session.current_api_base_url = f"https://{redirect_host}"
-                await asyncio.sleep(1)
-            else:
-                await asyncio.sleep(1)
-        except Exception as e:
-            logger.error(f"Poll error: {e}")
-            await asyncio.sleep(1)
-
-    del _active_logins[session_key]
-    return {"connected": False, "message": "Login timeout"}
+# ========== 独立 QR 登录流程（wechat_qr_login / wait_qr_scan）已移至 wechat_login.py ==========
 
 
 # ========== Session Guard (OpenClaw 兼容) ==========

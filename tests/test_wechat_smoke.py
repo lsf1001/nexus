@@ -146,6 +146,8 @@ async def test_wechat_qr_login_success(monkeypatch: pytest.MonkeyPatch):
         }
     )
     monkeypatch.setattr(wechat, "_fetch_qrcode", mock_fetch)
+    # refactored: 函数体调的是 wechat_login._fetch_qrcode（不是 re-export 引用）
+    monkeypatch.setattr("nexus.backend.channels.wechat_login._fetch_qrcode", mock_fetch)
 
     result = await wechat_qr_login()
     assert "qrcode_url" in result
@@ -158,7 +160,7 @@ async def test_wechat_qr_login_success(monkeypatch: pytest.MonkeyPatch):
 async def test_wechat_qr_login_network_error(monkeypatch: pytest.MonkeyPatch):
     """wechat_qr_login 网络错误：mock _fetch_qrcode 抛异常，应返回 error 字段而非崩。"""
     mock_fetch = AsyncMock(side_effect=ConnectionError("network unreachable"))
-    monkeypatch.setattr(wechat, "_fetch_qrcode", mock_fetch)
+    monkeypatch.setattr("nexus.backend.channels.wechat_login._fetch_qrcode", mock_fetch)
 
     result = await wechat_qr_login()
     assert "error" in result
@@ -169,7 +171,7 @@ async def test_wechat_qr_login_network_error(monkeypatch: pytest.MonkeyPatch):
 async def test_wechat_qr_login_empty_response(monkeypatch: pytest.MonkeyPatch):
     """wechat_qr_login 响应缺字段：应能 fallback 到空字符串。"""
     mock_fetch = AsyncMock(return_value={})  # 没有 qrcode 字段
-    monkeypatch.setattr(wechat, "_fetch_qrcode", mock_fetch)
+    monkeypatch.setattr("nexus.backend.channels.wechat_login._fetch_qrcode", mock_fetch)
 
     result = await wechat_qr_login()
     assert result["qrcode"] == ""
