@@ -51,6 +51,19 @@ from .wechat_protocol import (
     _generate_client_id,  # noqa: F401  保留 re-export
     _random_wechat_uin,  # noqa: F401  保留 re-export
 )
+from .wechat_account import (
+    _check_token_valid,  # noqa: F401  保留 re-export
+    _delete_account,  # noqa: F401  保留 re-export
+    _get_state_dir,  # noqa: F401  保留 re-export
+    _list_indexed_weixin_account_ids,  # noqa: F401  保留 re-export
+    _load_account,  # noqa: F401  保留 re-export
+    _normalize_account_id,  # noqa: F401  保留 re-export
+    _register_weixin_account_id,  # noqa: F401  保留 re-export
+    _resolve_account_file_path,  # noqa: F401  保留 re-export
+    _resolve_account_index_path,  # noqa: F401  保留 re-export
+    _resolve_context_token_file_path,  # noqa: F401  保留 re-export
+    _save_account,  # noqa: F401  保留 re-export
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,137 +101,7 @@ def _clear_active_channel() -> None:
     _active_channel = None
 
 
-def _check_token_valid(account_id: str) -> bool:
-    """检查 token 是否有效（通过 notifyStart 检测）"""
-    try:
-        account = _load_account(account_id)
-        if not account:
-            return False
-        body = {"base_info": _build_base_info()}
-        resp = httpx.post(
-            f"{account.base_url or FIXED_BASE_URL}/ilink/bot/msg/notifystart",
-            json=body,
-            headers=_build_headers(account.token),
-            timeout=10.0,
-        )
-        data = resp.json()
-        errcode = data.get("errcode", 0)
-        return errcode == 0
-    except httpx.RequestError:
-        return False
-
-
-def _delete_account(account_id: str) -> None:
-    """删除账号数据"""
-    account_file = _resolve_account_file_path(account_id)
-    if account_file.exists():
-        account_file.unlink()
-    # 更新索引
-    existing = _list_indexed_weixin_account_ids()
-    if account_id in existing:
-        existing.remove(account_id)
-        path = _resolve_account_index_path()
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(existing, f, ensure_ascii=False, indent=2)
-    logger.info(f"Deleted account: {account_id}")
-
-
-def _get_state_dir() -> Path:
-    """获取状态存储目录"""
-    state_dir = Path.home() / ".nexus" / "weixin"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    return state_dir
-
-
-def _resolve_account_index_path() -> Path:
-    return _get_state_dir() / "accounts.json"
-
-
-def _resolve_account_file_path(account_id: str) -> Path:
-    return _get_state_dir() / "accounts" / f"{account_id}.json"
-
-
-def _resolve_context_token_file_path(account_id: str) -> Path:
-    return _get_state_dir() / "accounts" / f"{account_id}.context-tokens.json"
-
-
-def _normalize_account_id(raw_id: str) -> str:
-    """将原始 account ID 转换为文件系统安全的格式"""
-    return raw_id.replace("@im.bot", "-im-bot").replace("@im.wechat", "-im-wechat")
-
-
-def _list_indexed_weixin_account_ids() -> list[str]:
-    """返回所有注册的账号 ID"""
-    try:
-        path = _resolve_account_index_path()
-        if not path.exists():
-            return []
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return [x for x in data if isinstance(x, str) and x.strip()]
-    except (OSError, json.JSONDecodeError):
-        pass
-    return []
-
-
-def _register_weixin_account_id(account_id: str) -> None:
-    """注册账号 ID 到索引"""
-    existing = _list_indexed_weixin_account_ids()
-    if account_id in existing:
-        return
-    updated = existing + [account_id]
-    path = _resolve_account_index_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(updated, f, ensure_ascii=False, indent=2)
-
-
-def _save_account(account: WeixinAccount) -> None:
-    """保存账号到磁盘（token 仅做简单编码，非真正加密）。"""
-    account_dir = _get_state_dir() / "accounts"
-    account_dir.mkdir(parents=True, exist_ok=True)
-    file_path = _resolve_account_file_path(account.account_id)
-
-    encoded_token = base64.b64encode(account.token.encode()).decode()
-
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "token": encoded_token,
-                "savedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "baseUrl": account.base_url,
-                "userId": account.user_id,
-            },
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    os.chmod(file_path, 0o600)
-
-
-def _load_account(account_id: str) -> WeixinAccount | None:
-    """从磁盘加载账号"""
-    file_path = _resolve_account_file_path(account_id)
-    if not file_path.exists():
-        return None
-    try:
-        with open(file_path, encoding="utf-8") as f:
-            data = json.load(f)
-
-        encoded_token = data.get("token", "")
-        decoded_token = base64.b64decode(encoded_token.encode()).decode()
-
-        return WeixinAccount(
-            account_id=account_id,
-            user_id=data.get("userId", ""),
-            token=decoded_token,
-            base_url=data.get("baseUrl", ""),
-        )
-    except Exception as e:
-        logger.error(f"Failed to load account {account_id}: {e}")
-        return None
+# ========== 账号管理业务函数（增删改查 / 路径 / 归一化）已移至 wechat_account.py ==========
 
 
 def _save_context_tokens(account_id: str) -> None:
