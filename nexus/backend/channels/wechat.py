@@ -1,6 +1,9 @@
 """微信通道 - 原生实现直接接入微信服务器。
 
 参考 @tencent-weixin/openclaw-weixin 插件的完整实现，不依赖 OpenClaw。
+
+P0 重构（2026-06-13）：数据类型定义（WeixinAccount / QRSession / MessageItemType 等）已移至
+wechat_types.py，本文件保留业务逻辑、账号管理、API 通信、登录流程、Channel 实现。
 """
 
 import asyncio
@@ -13,7 +16,6 @@ import random
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +29,14 @@ from .base import (
     ChannelType,
     MessageType,
 )
+from .wechat_types import (
+    FIXED_BASE_URL,  # noqa: F401  保留 re-export 兼容旧导入
+    MessageItemType,
+    MessageState,
+    MessageTypeEnum,
+    QRSession,
+    WeixinAccount,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +44,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000
 DEFAULT_API_TIMEOUT_MS = 15_000
 DEFAULT_CONFIG_TIMEOUT_MS = 10_000
-FIXED_BASE_URL = "https://ilinkai.weixin.qq.com"
 CHANNEL_VERSION = "2.4.4"
 DEFAULT_ILINK_BOT_TYPE = "3"
 QR_LONG_POLL_TIMEOUT_MS = 35_000
@@ -42,34 +51,7 @@ ACTIVE_LOGIN_TTL_MS = 5 * 60 * 1000
 
 
 # ========== 账号管理 ==========
-
-
-@dataclass
-class WeixinAccount:
-    """微信账号数据"""
-
-    account_id: str
-    user_id: str
-    token: str
-    base_url: str = ""
-    cdn_base_url: str = "https://novac2c.cdn.weixin.qq.com/c2c"
-
-
-@dataclass
-class QRSession:
-    """二维码登录会话"""
-
-    session_key: str
-    qrcode: str
-    qrcode_url: str
-    started_at: float = field(default_factory=time.time)
-    status: str = "wait"
-    bot_token: str | None = None
-    ilink_bot_id: str | None = None
-    ilink_user_id: str | None = None
-    base_url: str = ""
-    current_api_base_url: str = FIXED_BASE_URL
-    pending_verify_code: str | None = None
+# （WeixinAccount / QRSession 数据类已移至 wechat_types.py）
 
 
 # 全局状态（带线程锁保护）
@@ -396,27 +378,7 @@ def _purge_expired_logins() -> None:
 
 
 # ========== 消息类型定义 ==========
-
-
-class MessageItemType:
-    NONE = 0
-    TEXT = 1
-    IMAGE = 2
-    VOICE = 3
-    FILE = 4
-    VIDEO = 5
-
-
-class MessageTypeEnum:
-    NONE = 0
-    USER = 1
-    BOT = 2
-
-
-class MessageState:
-    NEW = 0
-    GENERATING = 1
-    FINISH = 2
+# （MessageItemType / MessageTypeEnum / MessageState 已移至 wechat_types.py）
 
 
 # ========== 消息发送 ==========
