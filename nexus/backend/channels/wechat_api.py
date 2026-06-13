@@ -4,6 +4,7 @@
 - 通用 HTTP 封装：_api_get_fetch / _api_post_fetch
 - 业务级 API：_get_config / _send_typing / _send_message
 """
+
 from __future__ import annotations
 
 import json

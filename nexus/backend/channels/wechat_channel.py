@@ -9,6 +9,7 @@
 
 依赖：wechat_api / wechat_account / wechat_tokens / wechat_protocol / wechat_state / wechat_types / base
 """
+
 from __future__ import annotations
 
 import asyncio

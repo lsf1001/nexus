@@ -2,6 +2,7 @@
 
 从 wechat.py 拆分（2026-06-13 P0 重构）。包含账号 / 会话 / 消息类型等 dataclass 与 enum。
 """
+
 from __future__ import annotations
 
 import time

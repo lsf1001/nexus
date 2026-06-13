@@ -3,6 +3,7 @@
 从 wechat.py 拆分（2026-06-13 P0 重构）。context token 用于维持与
 微信服务器的多轮上下文，存于 _context_tokens 字典并按账号持久化。
 """
+
 from __future__ import annotations
 
 import json

@@ -2,6 +2,7 @@
 
 从 wechat.py 拆分（2026-06-13 P0 重构）。本层无 IO、无状态，纯粹构建/计算。
 """
+
 from __future__ import annotations
 
 import base64

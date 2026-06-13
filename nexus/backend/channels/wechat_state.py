@@ -5,6 +5,7 @@
 
 注意：模块级 dict/锁在 import 时创建，跨进程不共享。生产部署走单进程。
 """
+
 from __future__ import annotations
 
 import threading

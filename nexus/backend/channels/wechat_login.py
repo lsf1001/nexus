@@ -5,6 +5,7 @@
 - 登录会话生命周期（_is_login_fresh / _purge_expired_logins / _get_local_bot_token_list）
 - 公开 API：wechat_qr_login / wait_qr_scan
 """
+
 from __future__ import annotations
 
 import asyncio
