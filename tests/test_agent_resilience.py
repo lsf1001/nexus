@@ -223,7 +223,9 @@ class TestCreateAgentIntegration:
         monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
         from nexus.backend.agent import create_agent
 
-        with patch("nexus.backend.agent.create_deep_agent") as mock_create:
+        # agent.py 内部用 `from deepagents import create_deep_agent`，函数执行时
+        # 才解析符号；patch 源模块 deepagents.create_deep_agent 即可拦截。
+        with patch("deepagents.create_deep_agent") as mock_create:
             mock_create.return_value = MagicMock()
             create_agent(
                 model_name="m", api_key="k", api_base="https://x"

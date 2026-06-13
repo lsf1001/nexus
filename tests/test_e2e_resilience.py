@@ -79,17 +79,14 @@ def _collect_until_done(ws, max_events: int = 200) -> list[dict]:
 
 
 def _drain_after_done(ws, max_events: int = 10) -> list[dict]:
-    """收完 done 之后继续收几个事件（用于拿 stats / resume_token）。"""
-    extras: list[dict] = []
-    for _ in range(max_events):
-        try:
-            msg = ws.receive_json()
-        except Exception:
-            break
-        extras.append(msg)
-        if msg.get("type") in {"resume_token", "stats"}:
-            break
-    return extras
+    """收完 done 之后继续收几个事件（用于拿 stats / resume_token）。
+
+    实际语义：服务端在 ``done`` 之前已把 stats / resume_token 发完，``done`` 之后
+    handler 回到顶部 ``while True`` 等待客户端下一条消息，**不会**再发任何帧。
+    若继续 ``receive_json`` 会永远阻塞（服务端不主动关 WS）。因此直接返回空
+    列表即可——调用方 ``events.extend(extras)`` 不会改变 ``events``。
+    """
+    return []
 
 
 def _make_streaming_mock(agent_factory) -> MagicMock:
