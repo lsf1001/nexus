@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
-from .wechat_state import _context_tokens
 from .wechat_account import _resolve_context_token_file_path
+from .wechat_state import _context_tokens
 
 logger = logging.getLogger(__name__)
 

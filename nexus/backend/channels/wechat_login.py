@@ -15,7 +15,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .wechat_channel import WeChatChannel
+    pass
 
 from ..main import _handle_wechat_message  # noqa: F401  保持语义
 from .base import ChannelConfig, ChannelType
@@ -27,7 +27,6 @@ from .wechat_account import (
     _save_account,
 )
 from .wechat_api import _api_get_fetch, _api_post_fetch
-from .wechat_protocol import _build_base_info
 from .wechat_state import _accounts, _active_logins, _global_lock
 from .wechat_types import FIXED_BASE_URL, QRSession, WeixinAccount
 

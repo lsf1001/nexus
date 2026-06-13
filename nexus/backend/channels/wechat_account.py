@@ -14,7 +14,6 @@ from pathlib import Path
 import httpx
 
 from .wechat_protocol import _build_base_info, _build_headers
-from .wechat_state import _global_lock
 from .wechat_types import FIXED_BASE_URL, WeixinAccount
 
 logger = logging.getLogger(__name__)
