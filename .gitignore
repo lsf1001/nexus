@@ -39,6 +39,8 @@ test_message.txt
 
 # Frontend
 # 注意：package-lock.json 应入库以保证依赖复现
+node_modules/
+frontend/node_modules/
 
 # Local config
 .claude/settings.local.json
@@ -50,3 +52,19 @@ test_message.txt
 
 # 测试 artifacts（兜底）
 frontend/tests/
+
+# 本地 codegraph 索引 + 临时实验（不入库）
+.codegraph/
+experiments/
+
+# PyInstaller 构建产物 + spec（不入库；发布走 GitHub Releases）
+build/
+dist/nexus-backend
+min-spec.spec
+nexus-backend.spec
+*.spec
+
+# macOS DMG 发布产物（本地保留，发布走 GitHub Releases）
+release/*.dmg
+release/*.dmg.blockmap
+release/builder-debug.yml

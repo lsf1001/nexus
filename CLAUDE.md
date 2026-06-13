@@ -1,117 +1,99 @@
-# Python 项目编码规约
+# Nexus
 
-## 你正在一个 Python 项目中工作。除非用户明确要求例外，否则必须严格遵守以下工程规则。
+夜小白科技有限公司开发的 AI Gateway（智能对话 / 会话管理 / 记忆系统 / MCP 插件 / 微信通道）。
 
-【0. 项目信息】
+> **回复语言**：简体中文。
+>
+> **硬性约束**：见 `@python_project.md`（违规 CI 阻断）。
 
-- 项目名称: Nexus
-- 开发公司: 夜小白科技有限公司
-- 技术栈: React + FastAPI + DeepAgents + WebSocket + SQLite
-- 文档语言: 所有文档使用中文
-- 虚拟环境: `.venv` 目录
+@python_project.md
 
-【1. 运行环境】
+## 项目信息
 
-- 本项目必须使用虚拟环境进行开发、运行和测试。
-- 不要使用系统 Python 或全局 site-packages。
-- 涉及安装、运行、测试时，优先使用项目虚拟环境中的解释器和工具。
+- 名称：Nexus
+- 用途：AI Gateway，三进程/三目录独立构建
+- 技术栈：React 19 + FastAPI + DeepAgents + WebSocket + SQLite + Electron
+- 三进程：Python 后端（端口 30000）、React 前端（端口 30077）、Electron 桌面端（macOS DMG）
+- Python 强制使用 `.venv`，不允许系统 Python
 
-【2. 代码规模】
+## 架构
 
-- 单文件尽量不超过 800 行，原则上不得超过 1000 行。
-- 单函数尽量不超过 80 行，原则上不得超过 150 行。
-- 单行代码不得超过 150 个字符。
-- 如果修改会导致文件或函数明显失控，优先拆分职责，而不是继续堆叠。
+- `nexus/backend/`：FastAPI 后端（端口 30000）— `main.py` 入口、`agent.py` DeepAgents 封装、`db.py` SQLite + 自动迁移
+- `nexus/cli/`：Typer CLI（install/start/stop/doctor/daemon）
+- `frontend/`：Vite + React（端口 30077）— `src/components/` `src/hooks/` `e2e/`
+- `desktop/`：Electron + electron-builder — `src/{main,backend,preload}.ts`
+- `tests/`：pytest 后端测试
+- `docs/superpowers/`：设计稿 / 计划 / 进度
+- `docs/operations/`：运维文档（含 quality.md 质量门）
 
-【3. 命名规范】
+## 命令
 
-- 模块、函数、变量使用 snake_case。
-- 类名使用 PascalCase。
-- 常量使用 SCREAMING_CASE。
-- 私有函数和私有成员使用单下划线前缀。
-- 命名必须具体明确，避免使用 data、temp、process、handle 等模糊命名，除非语义非常明确且范围极小。
+仓库根 `/Users/yxb/projects/nexus/`。
 
-【4. 类型注解】
+```bash
+# 后端（首次）
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
 
-- 所有生产代码函数都必须标注参数类型和返回类型。
-- 无返回值函数必须显式标注 -> None。
-- 跨模块接口、核心数据结构、公共函数必须保证类型清晰稳定。
-- 简单 lambda 可不标注类型，但不得承载复杂逻辑。
-- 测试代码中的极短辅助函数可以适度放宽，但复杂测试辅助逻辑仍应标注类型。
+# CLI 服务管理
+nexus install|start|stop|restart|status|logs|doctor|uninstall
 
-【5. 函数设计】
+# 后端开发与测试
+source .venv/bin/activate
+pytest tests/                          # 全量
+pytest tests/test_xxx.py::TestMethod   # 单方法
+ruff check nexus/                      # lint
+ruff format nexus/                     # 格式化
 
-- 一个函数只做一件事。
-- 函数应保持输入输出明确，避免依赖隐式全局状态。
-- 复杂逻辑应拆成小函数，不要持续堆叠 if/else。
-- 顶层入口函数和流程编排函数只负责组织流程，不负责承载底层实现细节。
+# 前端
+cd frontend && npm install
+npm run dev|build|lint|test:e2e
 
-【6. 模块与类职责】
+# 桌面端
+cd desktop && npm install
+npm run dev|test|pack
 
-- 一个模块只承载一个主要职责。
-- 不要把入口逻辑、核心业务、数据模型、通用工具混在同一个模块里。
-- 只有在状态封装、领域建模、抽象边界明确需要时才使用类。
-- 不要为了形式上的面向对象强行造类。
+# 顶层 npm 脚本
+npm run desktop:install|build|dev|test|pack
+```
 
-【7. 异常处理】
+## 关键约束
 
-- 严禁使用 bare except。
-- 只捕获能够明确处理的异常。
-- 严禁静默吞掉异常。
-- 当前层无法处理时，补充必要上下文后继续抛出。
-- 文件 IO、网络请求、数据库、子进程、第三方服务等边界操作必须做异常处理。
-- 不要用异常机制控制正常业务流程。
+<立项时从 SPEC 摘录 3-5 条最硬约束>
 
-【8. 日志规范】
+- **WebSocket 协议** `/api/ws`，流式响应：`thinking` → `chunk` → `final` → `done`，支持多客户端
+- **WS 跨线程桥接**：流式回调在子线程中用 `asyncio.run_coroutine_threadsafe` 投递回事件循环，**禁止**在子线程直接 `await`
+- **DB PRAGMA**：`db.py` 在连接建立时启用 `foreign_keys=ON / journal_mode=WAL / synchronous=NORMAL`；缺列自动 `ALTER TABLE ADD COLUMN`（无需手工迁移脚本）
+- **`models.json` 写入必须走 `models_config.save_models()`**，**不要**绕过原子写流程
+- 测试覆盖三类：正常路径 / 边界条件 / 异常路径
 
-- 正式代码中使用项目日志，不要用 print 代替日志。
-- 错误日志必须包含足够上下文，至少包括异常信息和关键业务上下文。
-- 禁止输出密钥、令牌、密码、手机号、证件号等敏感信息。
-- 临时调试输出在提交前必须删除。
+## 环境变量
 
-【9. 文档与注释】
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `MINIMAX_API_KEY` / `MINIMAX_API_BASE` | — | 首选（兼容 `MINIMAX_API_KEY` / `MiniMax_API_KEY`） |
+| `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` | — | Anthropic 风格兼容 |
+| `NEXUS_WS_TOKEN` | `nexus-default-token` | WebSocket 认证 |
+| `NEXUS_PORT` | `30000` | 后端端口 |
+| `NEXUS_ENABLE_MCP` | `true` | 启用 MCP |
+| `NEXUS_ALLOWED_ORIGINS` | `*` (dev) | CORS 白名单，逗号分隔 |
 
-- 公共模块、公共类、公共函数必须写 docstring。
-- 非直观逻辑、业务规则、兼容处理、边界条件必须补充必要注释。
-- 注释解释"为什么"，不要重复代码表面行为。
-- 删除过期、误导、无意义的注释。
-- 不要保留大段注释掉的旧代码。
+API Key 解析顺序：`MINIMAX_API_KEY` → `MiniMax_API_KEY` → `ANTHROPIC_AUTH_TOKEN` → `ANTHROPIC_API_KEY`，**首次匹配胜出**。
 
-【10. 导入规范】
+运行时配置目录：`~/.nexus/`（`models.json` / `nexus.db` / `logs/`）。
 
-- 导入顺序固定为：标准库 -> 第三方库 -> 本地模块。
-- 不同分组之间保留一个空行。
-- 删除未使用导入。
-- 除非项目已有明确约定，否则禁止 from xxx import *。
+## 数据库（SQLite 单文件）
 
-【11. 数据与状态】
+`sessions` / `messages` / `memory` / `tool_stats` / `session_stats`。
 
-- 优先采用不可变设计。
-- 严禁使用列表、字典等可变对象作为默认参数。
-- 尽量减少全局状态。
-- 跨模块传递的数据结构必须明确、稳定、可预测。
-- 如需定义核心结构，优先使用 dataclass、TypedDict、Pydantic model 或其他明确结构，而不是随意拼字典。
+- `memory` 表单数（不是 `memories`），包含 `category` / `memory_type` / `is_active` 字段，由 `EvolutionService` 维护
+- **任何 schema 改动优先走 `db.py` 的 `_ensure_column()` 自动迁移**，**禁止**直接写 `ALTER TABLE`
 
-【12. 测试要求】
+## 文档导航
 
-- 测试文件放在 tests/ 目录下，命名为 test_*.py。
-- 新功能必须补测试。
-- Bug 修复必须补回归测试。
-- 测试至少覆盖正常路径、边界条件、异常路径。
-- 不要提交无法运行或只用于临时调试的测试代码。
-
-【13. 质量底线】
-
-- 代码必须可读、可测、可维护。
-- 不要引入调试残留、死代码、废弃脚本、临时实现。
-- 重构默认不得改变既有行为；若行为改变，必须同步更新测试和文档。
-- 优先做小而清晰的修改，避免无必要的大重构。
-
-【14. 执行要求】
-
-- 在修改前，先阅读相关文件，理解现有结构后再动手。
-- 优先遵循现有项目架构和风格；除非确有必要，不主动推翻既有组织方式。
-- 新增代码时，默认同时补充或更新测试。
-- 修复问题时，优先选择最小正确修改，而不是顺手做大改。
-- 如果某项用户要求与本规范冲突，优先满足用户目标，但要选择影响最小、最干净的实现方式。
-- 如果必须违反某条规范，在最终说明中简要指出原因。
+- [`README.md`](./README.md) — 安装、CLI、API 速查、服务端口
+- [`SPEC.md`](./SPEC.md) — 完整技术规格（架构图、模块职责、DB schema、稳定性修复清单）
+- [`python_project.md`](./python_project.md) — Python 工程规约（硬性约束）
+- [`CHANGELOG.md`](./CHANGELOG.md) — 版本变更
+- [`docs/superpowers/`](./docs/superpowers/) — 设计稿 / 计划 / 进度
+- [`docs/operations/quality.md`](./docs/operations/quality.md) — 质量门
