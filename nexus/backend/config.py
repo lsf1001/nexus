@@ -3,6 +3,11 @@ import os
 from pathlib import Path
 
 
+def _get_nexus_home() -> Path:
+    """获取 Nexus 运行时目录。"""
+    return Path(os.environ.get("NEXUS_HOME", str(Path.home() / ".nexus"))).expanduser()
+
+
 def _pick_default_model(file_config: dict) -> dict:
     """从 file_config 的 models 列表中挑选默认模型。
 
@@ -17,17 +22,22 @@ def _pick_default_model(file_config: dict) -> dict:
 
 def load_config() -> dict:
     """从环境变量和配置文件加载配置。"""
-    # 从配置文件读取安全配置
-    config_path = Path.home() / ".nexus" / "workspace" / "config" / "config.json"
+    nexus_home = _get_nexus_home()
+
+    # 从配置文件读取安全配置。优先使用 CLI/安装脚本写入的主配置，兼容旧 workspace 路径。
+    config_path = Path(os.environ.get("NEXUS_CONFIG_PATH", str(nexus_home / "config.json"))).expanduser()
+    legacy_config_path = nexus_home / "workspace" / "config" / "config.json"
     file_config = {}
-    if config_path.exists():
+    readable_config_path = config_path if config_path.exists() else legacy_config_path
+    if readable_config_path.exists():
         try:
-            with open(config_path, encoding="utf-8") as f:
+            with open(readable_config_path, encoding="utf-8") as f:
                 file_config = json.load(f)
         except (OSError, json.JSONDecodeError):
             pass
 
     default_model = _pick_default_model(file_config)
+    database_path = os.environ.get("NEXUS_DB_PATH") or os.environ.get("DATABASE_URL") or str(nexus_home / "nexus.db")
 
     config = {
         "minimax_api_key": (
@@ -43,12 +53,20 @@ def load_config() -> dict:
             or os.environ.get("ANTHROPIC_BASE_URL")
             or default_model.get("api_base", "https://api.minimaxi.com/v1")
         ),
-        "model_name": os.environ.get("MODEL_NAME", default_model.get("name", "MiniMax-M2.7")),
+        "model_name": os.environ.get("MODEL_NAME", default_model.get("name", "MiniMax-M3")),
         "temperature": float(os.environ.get("MODEL_TEMPERATURE", default_model.get("temperature", 0.7))),
-        "database_url": os.environ.get("DATABASE_URL", str(Path.home() / ".nexus" / "nexus.db")),
-        "server_host": os.environ.get("SERVER_HOST", file_config.get("server", {}).get("host", "0.0.0.0")),
-        "server_port": int(os.environ.get("SERVER_PORT", file_config.get("server", {}).get("port", "8000"))),
-        "default_save_path": os.environ.get("DEFAULT_SAVE_PATH", str(Path.home() / ".nexus" / "workspace" / "outputs")),
+        "database_url": database_path,
+        "db_path": database_path,
+        "server_host": os.environ.get(
+            "NEXUS_HOST",
+            os.environ.get("SERVER_HOST", file_config.get("server", {}).get("host", "0.0.0.0")),
+        ),
+        "server_port": int(
+            os.environ.get(
+                "NEXUS_PORT", os.environ.get("SERVER_PORT", file_config.get("server", {}).get("port", "30000"))
+            )
+        ),
+        "default_save_path": os.environ.get("DEFAULT_SAVE_PATH", str(nexus_home / "workspace" / "outputs")),
         "tavily_api_key": os.environ.get("TAVILY_API_KEY", ""),
         "openweathermap_api_key": os.environ.get("OPENWEATHERMAP_API_KEY", ""),
         "ws_token": os.environ.get(
@@ -57,11 +75,11 @@ def load_config() -> dict:
         "resume_secret": os.environ.get("NEXUS_RESUME_SECRET", ""),
         "context_window": int(os.environ.get("NEXUS_CONTEXT_WINDOW", "32000")),
         # 工作区目录
-        "workspace_root": str(Path.home() / ".nexus" / "workspace"),
-        "memory_dir": str(Path.home() / ".nexus" / "workspace" / "memory"),
-        "session_corpus_dir": str(Path.home() / ".nexus" / "workspace" / "session-corpus"),
-        "uploads_dir": str(Path.home() / ".nexus" / "workspace" / "uploads"),
-        "cache_dir": str(Path.home() / ".nexus" / "workspace" / "cache"),
+        "workspace_root": str(nexus_home / "workspace"),
+        "memory_dir": str(nexus_home / "workspace" / "memory"),
+        "session_corpus_dir": str(nexus_home / "workspace" / "session-corpus"),
+        "uploads_dir": str(nexus_home / "workspace" / "uploads"),
+        "cache_dir": str(nexus_home / "workspace" / "cache"),
     }
 
     return config

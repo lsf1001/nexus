@@ -96,13 +96,9 @@ class RubricJudge:
             ValueError: 参数非法（rubrics 为空 / 重试次数为负 / 超时非正）。
         """
         if max_parse_retries < 0:
-            raise ValueError(
-                f"max_parse_retries 必须 >= 0，当前 {max_parse_retries}"
-            )
+            raise ValueError(f"max_parse_retries 必须 >= 0，当前 {max_parse_retries}")
         if per_rubric_timeout <= 0:
-            raise ValueError(
-                f"per_rubric_timeout 必须 > 0，当前 {per_rubric_timeout}"
-            )
+            raise ValueError(f"per_rubric_timeout 必须 > 0，当前 {per_rubric_timeout}")
 
         self._llm = llm
         if rubrics is None:
@@ -144,26 +140,19 @@ class RubricJudge:
         Raises:
             RubricJudgeError: 所有 rubric 都失败时抛出。
         """
-        tasks = [
-            self._evaluate_one(rubric, question, response, tool_calls)
-            for rubric in self._rubrics
-        ]
+        tasks = [self._evaluate_one(rubric, question, response, tool_calls) for rubric in self._rubrics]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         scores: list[Score] = []
         for rubric, outcome in zip(self._rubrics, results, strict=True):
             if isinstance(outcome, BaseException):
-                logger.warning(
-                    "rubric %s 评估异常: %s", rubric.name, outcome
-                )
+                logger.warning("rubric %s 评估异常: %s", rubric.name, outcome)
                 scores.append(_fallback_score(rubric.name, outcome))
             else:
                 scores.append(outcome)
 
         if all(s.score == 0.0 and "fallback" in s.reasoning for s in scores):
-            raise RubricJudgeError(
-                f"所有 {len(scores)} 个 rubric 评分均失败"
-            )
+            raise RubricJudgeError(f"所有 {len(scores)} 个 rubric 评分均失败")
         return scores
 
     # ------------------------------------------------------------------
@@ -181,9 +170,7 @@ class RubricJudge:
         last_error: Exception | None = None
         for attempt in range(self._max_parse_retries + 1):
             try:
-                messages = _build_messages(
-                    rubric, question, response, tool_calls, retry_feedback=last_error
-                )
+                messages = _build_messages(rubric, question, response, tool_calls, retry_feedback=last_error)
                 raw = await asyncio.wait_for(
                     self._llm.ainvoke(messages),
                     timeout=self._per_rubric_timeout,
@@ -256,11 +243,7 @@ def _build_messages(
         f'"evidence": ["片段1", "片段2"]}}'
     )
     if retry_feedback is not None:
-        user_body += (
-            f"\n\n【上次解析失败】\n"
-            f"错误：{retry_feedback}\n"
-            f"请只输出一个合法 JSON 对象，不要任何解释或前后缀。"
-        )
+        user_body += f"\n\n【上次解析失败】\n错误：{retry_feedback}\n请只输出一个合法 JSON 对象，不要任何解释或前后缀。"
     return [
         SystemMessage(content=rubric.prompt),
         HumanMessage(content=user_body),
@@ -278,9 +261,7 @@ def _format_tool_calls(tool_calls: Sequence[dict] | None) -> str:
         result = call.get("result", "")
         args_str = json.dumps(args, ensure_ascii=False) if args else "{}"
         result_str = str(result)[:200] if result else ""
-        lines.append(
-            f"{idx}. {name}({args_str}) → {result_str}"
-        )
+        lines.append(f"{idx}. {name}({args_str}) → {result_str}")
     return "\n".join(lines)
 
 
@@ -326,9 +307,7 @@ def _parse_score(rubric_name: str, content: str) -> Score:
     evidence_raw = data.get("evidence") or []
     if not isinstance(evidence_raw, list):
         evidence_raw = [str(evidence_raw)]
-    evidence = tuple(
-        str(item)[:200] for item in evidence_raw[: RubricJudge._EVIDENCE_MAX_ITEMS]
-    )
+    evidence = tuple(str(item)[:200] for item in evidence_raw[: RubricJudge._EVIDENCE_MAX_ITEMS])
 
     return Score(
         rubric_name=rubric_name,

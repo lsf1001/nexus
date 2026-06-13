@@ -117,9 +117,7 @@ class StreamGuard:
         """返回 stats 字典的**拷贝**，外部修改不影响内部状态。"""
         return dict(self._stats)
 
-    async def astream_events(
-        self, input: Any, **kwargs: Any
-    ) -> AsyncIterator[EventDict]:
+    async def astream_events(self, input: Any, **kwargs: Any) -> AsyncIterator[EventDict]:
         """流式生成事件，带 ``event_id`` 和错误处理。
 
         每个事件 dict 至少包含:
@@ -160,9 +158,7 @@ class StreamGuard:
                 # 正常流完，返回退出
                 return
             except Exception as exc:  # noqa: BLE001 — 边界统一收口
-                classified = (
-                    exc if isinstance(exc, ClassifiedError) else classify(exc)
-                )
+                classified = exc if isinstance(exc, ClassifiedError) else classify(exc)
 
                 # 不可重试错误（auth / bad_request / context_length）：
                 # 直接 yield error，不重试、不消耗重试额度。
@@ -178,9 +174,7 @@ class StreamGuard:
                 if attempt >= self._max_total_retries:
                     yield self._make_error_event(
                         error_code=_map_error_code(classified.kind) + "_exhausted",
-                        message=(
-                            f"重试 {attempt} 次后仍失败: {classified.message}"
-                        ),
+                        message=(f"重试 {attempt} 次后仍失败: {classified.message}"),
                         events_before_failure=self._event_id,
                     )
                     return

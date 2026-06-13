@@ -99,9 +99,7 @@ class Rubric:
         if not self.name:
             raise ValueError("Rubric.name 不能为空")
         if not (0.0 <= self.weight <= 1.0):
-            raise ValueError(
-                f"Rubric.weight 必须在 [0, 1]，当前 {self.weight}"
-            )
+            raise ValueError(f"Rubric.weight 必须在 [0, 1]，当前 {self.weight}")
         if not (0.0 <= self.repair_threshold <= self.accept_threshold <= 1.0):
             raise ValueError(
                 f"Rubric threshold 不合法: repair={self.repair_threshold} <= "

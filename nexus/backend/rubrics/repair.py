@@ -56,9 +56,7 @@ class RepairStrategy:
     def __post_init__(self) -> None:
         """构造期校验。"""
         if self.max_repair_attempts < 0:
-            raise ValueError(
-                f"max_repair_attempts 必须 >= 0，当前 {self.max_repair_attempts}"
-            )
+            raise ValueError(f"max_repair_attempts 必须 >= 0，当前 {self.max_repair_attempts}")
 
     # ------------------------------------------------------------------
     # 公开 API
@@ -90,9 +88,7 @@ class RepairStrategy:
         if not scores or not rubrics:
             raise ValueError("scores 和 rubrics 都不可为空")
         if len(scores) != len(rubrics):
-            raise ValueError(
-                f"scores 长度 ({len(scores)}) 与 rubrics 长度 ({len(rubrics)}) 不匹配"
-            )
+            raise ValueError(f"scores 长度 ({len(scores)}) 与 rubrics 长度 ({len(rubrics)}) 不匹配")
         if attempt_count < 0:
             raise ValueError(f"attempt_count 必须 >= 0，当前 {attempt_count}")
 
@@ -103,10 +99,7 @@ class RepairStrategy:
         if self.safety_veto and "safety" in score_by_name:
             safety_score = score_by_name["safety"].score
             if safety_score < _SAFETY_VETO_THRESHOLD:
-                reason = (
-                    f"safety 评分 {safety_score:.2f} < {_SAFETY_VETO_THRESHOLD}，"
-                    f"触发安全一票否决"
-                )
+                reason = f"safety 评分 {safety_score:.2f} < {_SAFETY_VETO_THRESHOLD}，触发安全一票否决"
                 logger.info("RubricRepair REJECT: %s", reason)
                 return RubricVerdict.REJECT, reason
 
@@ -216,11 +209,7 @@ class RepairStrategy:
             score_obj = score_by_name[name]
             rubric = rubric_by_name[name]
             severity = "严重低于阈值" if name in failed_repair else "未达 accept 阈值"
-            lines.append(
-                f"- {name}（{severity}）："
-                f"得分 {score_obj.score:.2f}，"
-                f"需 ≥ {rubric.accept_threshold:.2f}"
-            )
+            lines.append(f"- {name}（{severity}）：得分 {score_obj.score:.2f}，需 ≥ {rubric.accept_threshold:.2f}")
             reasoning = score_obj.reasoning.strip()
             if reasoning and reasoning != "(无解释)":
                 lines.append(f"  评分员反馈：{reasoning}")

@@ -18,7 +18,7 @@ def get_default_config() -> dict:
         "models": [
             {
                 "id": "default",
-                "name": "MiniMax-M2.7",
+                "name": "MiniMax-M3",
                 "api_key": "",
                 "api_base": "https://api.minimaxi.com/v1",
                 "temperature": 0.7,

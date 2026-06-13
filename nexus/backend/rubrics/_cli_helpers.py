@@ -71,8 +71,7 @@ def load_preference_records(
             continue
         # 计算每个 message 的平均分作为 ranking key
         message_scores: list[tuple[str, float]] = [
-            (mid, sum(e["score"] for e in ents) / len(ents))
-            for mid, ents in by_message.items()
+            (mid, sum(e["score"] for e in ents) / len(ents)) for mid, ents in by_message.items()
         ]
         message_scores.sort(key=lambda x: x[1], reverse=True)
         top_mid = message_scores[0][0]
@@ -87,12 +86,8 @@ def load_preference_records(
         # 拿 message 内容
         try:
             with get_db() as conn:
-                top_msg = conn.execute(
-                    "SELECT content FROM messages WHERE id = ?", (top_mid,)
-                ).fetchone()
-                bot_msg = conn.execute(
-                    "SELECT content FROM messages WHERE id = ?", (bot_mid,)
-                ).fetchone()
+                top_msg = conn.execute("SELECT content FROM messages WHERE id = ?", (top_mid,)).fetchone()
+                bot_msg = conn.execute("SELECT content FROM messages WHERE id = ?", (bot_mid,)).fetchone()
         except Exception:  # noqa: BLE001 — 容错
             top_msg = bot_msg = None
         if not top_msg or not bot_msg:

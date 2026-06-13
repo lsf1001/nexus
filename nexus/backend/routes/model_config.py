@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from threading import Lock
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from ..api.ws import require_token
 from ..models_config import load_models, save_models, set_active_model
 
-router = APIRouter(prefix="/api/models", tags=["models"])
+router = APIRouter(prefix="/api/models", tags=["models"], dependencies=[Depends(require_token)])
 
 # 这些全局对象由 main.py 注入（见 init_router）
 _agent_lock: Lock | None = None
@@ -60,11 +61,81 @@ class UpdateModelRequest(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0, description="温度参数")
 
 
+class DefaultModelRequest(BaseModel):
+    """首启配置 / 默认模型请求。"""
+
+    name: str = Field(..., min_length=1, description="模型名称")
+    api_key: str = Field(..., min_length=1, description="API密钥")
+    api_base: str = Field(..., min_length=1, description="API端点")
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="温度参数")
+
+
+@router.put("/default")
+async def set_default_model(body: DefaultModelRequest) -> dict:
+    """首启配置入口：写入激活模型并立即重置 Agent。
+
+    语义：把当前 active 模型（或第一个模型）替换为请求体内容并激活。
+    写入后调用 ``_create_agent_with_model`` 重建 Agent，避免用户必须重启。
+    """
+    config = load_models()
+    models = config.get("models") or []
+
+    target = None
+    for model in models:
+        if model.get("is_active"):
+            target = model
+            break
+    if target is None and models:
+        target = models[0]
+
+    if target is None:
+        # 没有任何模型：创建第一个
+        new_model = {
+            "id": "default",
+            "name": body.name,
+            "api_key": body.api_key,
+            "api_base": body.api_base,
+            "temperature": body.temperature,
+            "is_active": True,
+        }
+        config["models"] = [new_model]
+        target = new_model
+    else:
+        target["name"] = body.name
+        target["api_key"] = body.api_key
+        target["api_base"] = body.api_base
+        target["temperature"] = body.temperature
+        target["is_active"] = True
+        # 互斥：其它模型标为 inactive
+        for m in models:
+            if m is not target:
+                m["is_active"] = False
+
+    save_models(config)
+
+    # 立即重建 Agent，让首次配置后立刻可用
+    if _create_agent_with_model is not None:
+        new_agent = _create_agent_with_model(target, _mcp_tools)
+        if new_agent is not None and _set_global_agent is not None:
+            _set_global_agent(new_agent)
+
+    return {"success": True, "model": target}
+
+
 @router.get("")
 async def get_models():
     """获取所有模型列表。"""
     config = load_models()
-    return config.get("models", [])
+    # 出于安全：列表接口不返回真实 api_key，只返回是否已配置。
+    masked = []
+    for m in config.get("models", []):
+        item = dict(m)
+        if item.get("api_key"):
+            item["api_key"] = "***" + item["api_key"][-4:] if len(item["api_key"]) > 4 else "***"
+        else:
+            item["api_key"] = ""
+        masked.append(item)
+    return masked
 
 
 @router.post("/switch", response_model=SwitchModelResponse)
@@ -179,12 +250,28 @@ async def delete_model(model_id: str):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
 
     if target.get("is_active"):
+        # 在删 active 之前先把 fallback 选好并落盘。如果没有任何剩余 model 有
+        # 可用 api_key，则不能继续把全局 _agent 指向要删的 model。
+        fallback = None
         for model in models:
             if model.get("id") != model_id and model.get("api_key"):
-                set_active_model(model["id"])
-                new_agent = _create_agent_with_model(model, _mcp_tools)
-                _set_global_agent(new_agent)
+                fallback = model
                 break
+        if fallback is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="无法删除当前激活模型：没有其它已配置 API Key 的模型可切换",
+            )
+        set_active_model(fallback["id"])
+        new_agent = _create_agent_with_model(fallback, _mcp_tools)
+        if new_agent is None:
+            # 极端情况：fallback 看起来有 key 但 _create_agent_with_model 拒绝
+            # （如 model name 非法）。不要把全局 _agent 清成 None。
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"无法切换到备用模型 {fallback.get('name')}：构造 Agent 失败",
+            )
+        _set_global_agent(new_agent)
 
     config["models"] = [m for m in models if m.get("id") != model_id]
     save_models(config)

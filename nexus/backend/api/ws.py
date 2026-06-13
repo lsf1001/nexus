@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import threading
@@ -126,7 +127,7 @@ async def _run_agent_streaming(
     prompt: dict,
     agent: Any,
     resume_from_event_id: int | None = None,
-) -> tuple[int, str]:
+) -> tuple[int, str, bool]:
     """运行 agent 流式响应，把事件转发到 WebSocket。
 
     使用 :class:`StreamGuard` 包装 ``agent.astream_events``：
@@ -144,10 +145,11 @@ async def _run_agent_streaming(
             （每次流都有新的 event_id 序列）。
 
     Returns:
-        ``(last_event_id, response_text)``：
+        ``(last_event_id, response_text, completed)``：
           - ``last_event_id`` 本次流结束时的最后一个 event_id（供下次签发 resume token）。
           - ``response_text`` 剥离 ``<thinking>`` 标签后的纯回复文本（用于 DB 存储）。
             错误路径返回空字符串。
+          - ``completed`` 表示本次流是否正常完成；错误路径不应再发 ``done``。
     """
     if agent is None:
         # 没可用 agent（极端情况：启动时没模型 key）
@@ -160,7 +162,7 @@ async def _run_agent_streaming(
                 "event_id": 1,
             }
         )
-        return 1, ""
+        return 1, "", False
 
     # StreamGuard 包 astream_events；每次重试会重新调一次 astream_events
     # （幂等重试，由上游 LLM 自行决定是否真幂等）。
@@ -200,10 +202,10 @@ async def _run_agent_streaming(
             # 不可重试 / 已耗尽：停止流（不再发 done）。
             # 返回空字符串，避免在错误路径下把 raw 文本（含 thinking 标签）写入 DB。
             if not retryable:
-                return last_event_id, ""
+                return last_event_id, "", False
             # 可重试但 StreamGuard 仍 yield error，意味着情况特殊
             # （理论上不会到这里，StreamGuard 内部就用尽了）。安全起见停止。
-            return last_event_id, ""
+            return last_event_id, "", False
 
         # Phase 1 resume 过滤：跳过 event_id <= resume_from_event_id 的事件
         if resume_from_event_id is not None and event_id > 0 and event_id <= resume_from_event_id:
@@ -242,7 +244,7 @@ async def _run_agent_streaming(
 
     if had_error:
         # 已经有 error 事件发出，StreamGuard 走完就不要再发 done
-        return last_event_id, ""
+        return last_event_id, "", False
 
     # 正常结束：先做归一化 / token 估算 / 思考抽取 / 16 字符分块，
     # 然后按 token_usage → thinking → chunks → final → done 顺序发出去。
@@ -253,8 +255,8 @@ async def _run_agent_streaming(
 
         # 2) token_usage：估算 token + context 占用率
         estimated_tokens, context_usage = _estimate_tokens(
-        normalized, context_window=CONFIG.get("context_window", 32000)
-    )
+            normalized, context_window=CONFIG.get("context_window", 32000)
+        )
         token_usage_event_id = last_event_id + 1
         await websocket.send_json(
             {
@@ -326,15 +328,7 @@ async def _run_agent_streaming(
     )
     last_event_id = stats_event_id
 
-    done_event_id = last_event_id + 1
-    await websocket.send_json(
-        {
-            "type": "done",
-            "content": "",
-            "event_id": done_event_id,
-        }
-    )
-    return done_event_id, response_text
+    return stats_event_id, response_text, True
 
 
 async def _handle_resume_frame(websocket: WebSocket, data: dict) -> int | None:
@@ -485,7 +479,7 @@ async def handle_websocket(
 
             # 运行 agent 流（已自带 StreamGuard + error_code/retryable）
             agent = get_agent()
-            last_event_id, response_text = await _run_agent_streaming(
+            last_event_id, response_text, stream_completed = await _run_agent_streaming(
                 websocket, session_id, prompt, agent, resume_from_event_id
             )
 
@@ -539,8 +533,22 @@ async def handle_websocket(
             if response_text:
                 add_message(message_id, session_id, "assistant", response_text)
 
+            if stream_completed:
+                done_event_id = last_event_id + 1
+                await websocket.send_json(
+                    {
+                        "type": "done",
+                        "content": "",
+                        "event_id": done_event_id,
+                    }
+                )
+
     except WebSocketDisconnect:
         logger.info("客户端断开连接")
         with _clients_lock:
             if websocket in _ws_clients:
                 _ws_clients.remove(websocket)
+    except json.JSONDecodeError as err:
+        # 客户端发了非 JSON 帧(空字符串、心跳 ping、意外数据)。记 warn 不退出,
+        # 继续等下一帧,避免一个脏帧让整条 WS 断掉。
+        logger.warning("WS 收到非 JSON 帧: %s — 跳过并继续监听", err)

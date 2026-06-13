@@ -97,7 +97,7 @@ class RetryPolicy:
         """
         if attempt < 0:
             attempt = 0
-        base = self.base_delay * (2 ** attempt)
+        base = self.base_delay * (2**attempt)
         # jitter == 0 时直接退化为确定值，便于测试断言。
         noise = random.uniform(-self.jitter, self.jitter) if self.jitter > 0 else 0.0
         delay = base * (1.0 + noise)
@@ -123,10 +123,7 @@ class RetryPolicy:
         Returns:
             是否应当再重试一次。
         """
-        return (
-            attempt + 1 < self.max_attempts
-            and classified.kind in self.retryable_kinds
-        )
+        return attempt + 1 < self.max_attempts and classified.kind in self.retryable_kinds
 
 
 @dataclass(frozen=True)

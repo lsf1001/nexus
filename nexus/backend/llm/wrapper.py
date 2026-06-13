@@ -144,9 +144,7 @@ class ResilientRunnable(BaseChatModel):
         """同步 generate 路径：委托给底层 primary。公开入口走 ``ainvoke``。"""
         return self._primary._generate(messages, stop, run_manager, **kwargs)
 
-    async def _agenerate(
-        self, messages: list, stop=None, run_manager=None, **kwargs: Any
-    ) -> Any:
+    async def _agenerate(self, messages: list, stop=None, run_manager=None, **kwargs: Any) -> Any:
         """异步 generate 路径：委托给底层 primary。公开入口走 ``ainvoke``。"""
         return await self._primary._agenerate(messages, stop, run_manager, **kwargs)
 
@@ -154,13 +152,9 @@ class ResilientRunnable(BaseChatModel):
         """同步流路径：委托给底层 primary。公开入口走 ``astream``。"""
         yield from self._primary._stream(messages, stop, run_manager, **kwargs)
 
-    async def _astream(
-        self, messages: list, stop=None, run_manager=None, **kwargs: Any
-    ):
+    async def _astream(self, messages: list, stop=None, run_manager=None, **kwargs: Any):
         """异步流路径：委托给底层 primary。公开入口走 ``astream``。"""
-        async for chunk in self._primary._astream(
-            messages, stop, run_manager, **kwargs
-        ):
+        async for chunk in self._primary._astream(messages, stop, run_manager, **kwargs):
             yield chunk
 
     # ------------------------------------------------------------------
@@ -309,9 +303,7 @@ class ResilientRunnable(BaseChatModel):
         # 注意：astream 重试由 StreamGuard 负责，wrapper 只做超时 + 分类。
         try:
             iterator = self._primary.astream(input, **kwargs)
-            async for chunk in _iter_with_timeout(
-                iterator, self._timeout_policy.per_stream
-            ):
+            async for chunk in _iter_with_timeout(iterator, self._timeout_policy.per_stream):
                 yield chunk
         except ClassifiedError:
             raise
@@ -359,9 +351,7 @@ class ResilientRunnable(BaseChatModel):
                 with attempt:
                     try:
                         coro = runnable.ainvoke(input, **kwargs)
-                        result = await asyncio.wait_for(
-                            coro, self._timeout_policy.per_call
-                        )
+                        result = await asyncio.wait_for(coro, self._timeout_policy.per_call)
                     except TimeoutError as exc:
                         classified = classify(exc)
                     except ClassifiedError as exc:
@@ -374,9 +364,7 @@ class ResilientRunnable(BaseChatModel):
                     raise classified
         except ClassifiedError as last_classified:
             # 重试耗尽（stop 触发 + reraise=True），尝试 fallback
-            if self._fallback is not None and self._fallback_policy.should_fallback(
-                last_classified
-            ):
+            if self._fallback is not None and self._fallback_policy.should_fallback(last_classified):
                 logger.info(
                     "primary exhausted, switching to fallback: kind=%s",
                     last_classified.kind,
@@ -414,9 +402,7 @@ class ResilientRunnable(BaseChatModel):
             raise classify(exc) from exc
 
 
-async def _iter_with_timeout(
-    iterator: AsyncIterator[Any], timeout: float
-) -> AsyncIterator[Any]:
+async def _iter_with_timeout(iterator: AsyncIterator[Any], timeout: float) -> AsyncIterator[Any]:
     """对 async iterator 施加**累计**超时：整个流式响应超过 ``timeout`` 秒则抛 :class:`TimeoutError`。
 
     实现要点：

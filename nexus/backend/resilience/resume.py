@@ -62,9 +62,7 @@ def _get_secret() -> str:
     if ws_token:
         return ws_token
 
-    raise RuntimeError(
-        "未配置 NEXUS_RESUME_SECRET 或 ws_token，无法签发 resume token"
-    )
+    raise RuntimeError("未配置 NEXUS_RESUME_SECRET 或 ws_token，无法签发 resume token")
 
 
 def _b64url_encode(raw: bytes) -> str:

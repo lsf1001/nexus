@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import Depends, FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -17,6 +17,7 @@ from .api.ws import (
     _clients_lock,
     _ws_clients,
     handle_websocket,
+    require_token,
 )
 from .config import CONFIG
 from .mcp import load_all_mcp_tools
@@ -27,10 +28,57 @@ from .sessions import router as sessions_router
 _agent = None
 _mcp_tools: list[Any] = []
 _agent_lock = threading.RLock()
+# Agent 构造完成事件:WS 端在调 handle_websocket 前 await 这个,
+# 避免首条消息到达时 _agent 仍为 None,被 _run_agent_streaming 拒为 agent_unavailable。
+# 后台线程构造完成后 set;timeout 60s 后放弃,走原错误路径。
+_agent_ready_event: asyncio.Event | None = None
 
 # 微信消息处理线程池（全局复用）
 _wechat_executor: ThreadPoolExecutor | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
+
+# 微信用户 session 映射（user_id -> session_id）
+# 关键不变量：
+#   1. 同一 user_id 的两个并发消息不能创建两个 session → 必须用 asyncio.Lock 串行化
+#   2. 后端重启时 in-memory 映射丢失，但 DB 里 channel='wechat' 的旧 session 还在
+#      → 启动时按"该 user_id 最近一次 wechat session"重建映射
+_wechat_sessions: dict[str, str] = {}  # user_id -> session_id
+_wechat_sessions_lock: asyncio.Lock | None = None  # 在 lifespan 内初始化
+
+
+async def _resolve_wechat_session(user_id: str, account_id: str) -> str:
+    """在 asyncio.Lock 内调用：获取或创建 user_id 对应的 wechat session。
+
+    查找顺序：in-memory 映射 → DB 持久化映射（按"该 user_id 最近一条 wechat 消息
+    所属的 session"重建）→ 新建 session。
+    """
+    from .db import create_session, find_latest_session_by_user, get_session
+
+    # 1) in-memory 命中且 DB 仍有 → 复用
+    if user_id in _wechat_sessions:
+        existing_session_id = _wechat_sessions[user_id]
+        if get_session(existing_session_id):
+            return existing_session_id
+        # 内存有但 DB 已删 → 走 DB 重建
+        del _wechat_sessions[user_id]
+
+    # 2) DB 重建：找该 user_id 最近一次 wechat 消息所属的 session
+    db_session_id = find_latest_session_by_user(user_id, channel="wechat")
+    if db_session_id and get_session(db_session_id):
+        _wechat_sessions[user_id] = db_session_id
+        logger.info("Resumed WeChat session for %s from DB: %s", user_id, db_session_id)
+        return db_session_id
+
+    # 3) 都没有 → 新建
+    session_id = str(uuid.uuid4())
+    wx_id = user_id.split("@")[0][:8]
+    acc_id = account_id[:8]
+    title = f"微信 {acc_id} {wx_id}"
+    create_session(session_id, title=title, channel="wechat")
+    _wechat_sessions[user_id] = session_id
+    logger.info("Created session for WeChat user %s: %s", user_id, session_id)
+    return session_id
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -49,18 +97,17 @@ def _handle_wechat_message(channel_message) -> None:
             f"_handle_wechat_message CALLED: user={channel_message.user_id}, content={channel_message.content[:50]}..."
         )
 
-        message_data = {
-            "type": "wechat_message",
-            "content": channel_message.content,
-            "channel_id": channel_message.channel_id,
-            "user_id": channel_message.user_id,
-            "session_id": channel_message.session_id,
-        }
-
         with _clients_lock:
             clients = list(_ws_clients)
 
         logger.info(f"WebSocket clients: {len(clients)}")
+
+        # 构造广播帧：前端 ChatArea / DesktopShell 的 wechatInbox store 订阅此类型。
+        message_data = {
+            "type": "wechat_message",
+            "user_id": channel_message.user_id,
+            "content": channel_message.content,
+        }
 
         for client in clients:
             try:
@@ -119,34 +166,16 @@ async def _process_wechat_message(channel_message) -> None:
             logger.error("No active WeChat channel")
             return
 
-        # 获取或创建会话
+        # 获取或创建会话（在 asyncio.Lock 内串行化，避免同一 user_id 并发双建 session）
         user_id = channel_message.user_id
         account_id = channel._account.account_id if channel._account else "unknown"
 
-        # 检查是否需要创建新会话（会话不存在于数据库时）
-        should_create = user_id not in _wechat_sessions
-        if not should_create:
-            existing_session_id = _wechat_sessions[user_id]
-            from .db import get_session
-
-            existing_session = get_session(existing_session_id)
-            if not existing_session:
-                should_create = True
-
-        if should_create:
-            # 创建新会话
-            from .db import create_session
-
-            session_id = str(uuid.uuid4())
-            # 提取微信用户ID的简短标识
-            wx_id = channel_message.user_id.split("@")[0][:8]
-            acc_id = account_id[:8]
-            title = f"微信 {acc_id} {wx_id}"
-            create_session(session_id, title=title, channel="wechat")
-            _wechat_sessions[user_id] = session_id
-            logger.info(f"Created session for WeChat user {user_id}: {session_id}")
+        if _wechat_sessions_lock is None:
+            # lifespan 还没跑（极端：测试/热重载）→ 退化用无锁路径
+            session_id = await _resolve_wechat_session(user_id, account_id)
         else:
-            session_id = _wechat_sessions[user_id]
+            async with _wechat_sessions_lock:
+                session_id = await _resolve_wechat_session(user_id, account_id)
 
         # 保存用户消息
         from .db import add_message
@@ -209,11 +238,20 @@ async def _process_wechat_message(channel_message) -> None:
 
 def _get_frontend_path() -> Path | None:
     """获取前端构建目录路径。"""
-    # 安装目录下的 frontend
-    nexus_home = Path.home() / ".nexus"
+    env_frontend = os.environ.get("NEXUS_FRONTEND_DIST")
+    if env_frontend:
+        frontend_path = Path(env_frontend).expanduser()
+        if frontend_path.exists():
+            return frontend_path
+
+    nexus_home = Path(os.environ.get("NEXUS_HOME", str(Path.home() / ".nexus"))).expanduser()
     frontend_path = nexus_home / "frontend" / "dist"
     if frontend_path.exists():
-        return nexus_home / "frontend" / "dist"
+        return frontend_path
+
+    legacy_frontend = Path.home() / ".nexus" / "frontend" / "dist"
+    if legacy_frontend.exists():
+        return legacy_frontend
 
     # 开发模式：项目目录下的 frontend
     project_frontend = Path(__file__).parent.parent.parent / "frontend" / "dist"
@@ -233,7 +271,7 @@ def _create_agent_with_model(model_config: dict | None = None, mcp_tools: list[A
 
     api_key = model_config.get("api_key") or CONFIG.get("minimax_api_key", "")
     api_base = model_config.get("api_base") or CONFIG.get("minimax_api_base", "https://api.minimaxi.com/v1")
-    model_name = model_config.get("name", "MiniMax-M2.7")
+    model_name = model_config.get("name", "MiniMax-M3")
     temperature = model_config.get("temperature", 0.7)
 
     if not api_key:
@@ -250,22 +288,30 @@ def _create_agent_with_model(model_config: dict | None = None, mcp_tools: list[A
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时初始化，关闭时清理。"""
-    global _agent, _mcp_tools, _wechat_executor, _main_loop
+    """启动时初始化，关闭时清理。
+
+    性能关键：Agent / QualityPipeline 的构造（import langchain / deepagents /
+    编译 LangGraph 图）耗时在 PyInstaller 打包后会被放大 10-30x。把这部分
+    从 lifespan 推到首次使用时，/health 在 1-2s 内就能响应 → 桌面端无需
+    等待 30s 就能加载 UI。Agent / pipeline 走"懒构造"路径。
+    """
+    global _agent, _mcp_tools, _wechat_executor, _main_loop, _wechat_sessions_lock
     # 保存主事件循环引用，供子线程提交协程使用
     _main_loop = asyncio.get_running_loop()
     app.state.main_loop = _main_loop
+    # 初始化 asyncio.Lock：用于 _wechat_sessions 字典的并发读写。
+    # 必须在 lifespan 内创建（绑定到主事件循环），否则在子线程中 asyncio.Lock()
+    # 绑定到子线程的事件循环会出错。
+    _wechat_sessions_lock = asyncio.Lock()
     # 初始化数据库
     from .db import init_db
 
     init_db()
-    # 检查是否启用 MCP（通过环境变量控制）
-    if os.environ.get("NEXUS_ENABLE_MCP", "true").lower() == "true":
-        _mcp_tools = await load_all_mcp_tools()
-    else:
-        _mcp_tools = []
-        logger.info("MCP 功能已禁用")
-    _agent = _create_agent_with_model(mcp_tools=_mcp_tools)
+    # MCP 加载延后到 agent 首次构造时（省 0.5-3s）
+    _mcp_tools = []
+    # 关键：_agent 不在 lifespan 内构造。首次 WS 消息 / setup 完成时
+    # 走 _ensure_agent_ready() 触发构造。期间 /health / REST 路由正常工作。
+    _agent = None
     # 注入共享依赖到 model_config 路由
     model_config_routes.init_router(
         agent_lock=_agent_lock,
@@ -277,43 +323,72 @@ async def lifespan(app: FastAPI):
     from .channels import ChannelRegistry
 
     app.state.channel_registry = ChannelRegistry()
-    # 初始化 QualityPipeline（Phase 2 Task 2.5）：把 prompt 注入 DEFAULT_RUBRICS
-    # 后再构造 pipeline；ws.py 会在每个新消息进入时调 pipeline.run_with_quality。
-    # 关键：judge.llm 和 main_llm 都必须是 BaseChatModel，不能传 deepagent
-    # 编译图（_agent 是 create_deep_agent 的返回值，是 LangGraph CompiledGraph，
-    # ainvoke 期望 state dict 而不是 messages 列表，会导致评分全部失败）。
-    from .agent import get_llm
-    from .quality.pipeline import QualityPipeline
-    from .rubrics.judge import RubricJudge
-    from .rubrics.prompts import apply_prompts_to_default_rubrics
-    from .rubrics.repair import RepairStrategy
-
-    apply_prompts_to_default_rubrics()
-    # 评分用 LLM：与主 Agent 共用同一份 model_config（api_key / api_base /
-    # model_name / temperature），避免 404。直接用 CONFIG 默认渠道时模型
-    # 路径可能与主 Agent 的 model_config 不一致（前者是 ENV，后者是
-    # get_active_model()），主 Agent 能跑通而 Judge 报 404。
-    from .models_config import get_active_model as _get_active_model
-
-    _model_config = _get_active_model() or {}
-    judge_llm = get_llm(
-        api_key=_model_config.get("api_key") or CONFIG.get("minimax_api_key", ""),
-        api_base=_model_config.get("api_base") or CONFIG.get("minimax_api_base"),
-        model_name=_model_config.get("name", CONFIG.get("model_name", "MiniMax-M2.7")),
-        temperature=_model_config.get("temperature", CONFIG.get("temperature", 0.7)),
-    )
-    app.state.quality_pipeline = QualityPipeline(
-        judge=RubricJudge(llm=judge_llm),
-        repair_strategy=RepairStrategy(),
-        main_llm=judge_llm,
-    )
-    logger.info(f"Nexus Backend 已初始化 (MCP 工具: {len(_mcp_tools)} 个)")
+    # QualityPipeline 也延后到 agent 构造完后再做（依赖 judge_llm）
+    app.state.quality_pipeline = None
+    logger.info("Nexus Backend 已就绪（Agent 懒构造）")
     yield
     logger.info("Nexus Backend 关闭中")
     # 清理线程池
     if _wechat_executor:
         _wechat_executor.shutdown(wait=False)
         _wechat_executor = None
+    # 重置 lock 和 in-memory 状态，避免热重载残留
+    _wechat_sessions_lock = None
+    _wechat_sessions.clear()
+
+
+def _ensure_agent_ready(app) -> None:
+    """懒构造 Agent：首次调用时同步阻塞完成。
+
+    由于构造过程涉及 langchain / deepagents 的大量 import，无法在 async 上下文
+    内 await。调用方应在第一次 WS 消息到达前在独立线程触发它，构造完成后
+    主流程直接使用 _agent。
+    """
+    global _agent, _mcp_tools
+    with _agent_lock:
+        if _agent is not None:
+            return
+        import os
+
+        if not _mcp_tools and os.environ.get("NEXUS_ENABLE_MCP", "true").lower() == "true":
+            try:
+                _mcp_tools = asyncio.run_coroutine_threadsafe(load_all_mcp_tools(), _main_loop).result(timeout=10)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("MCP 加载失败，继续启动: %s", e)
+                _mcp_tools = []
+        new_agent = _create_agent_with_model(mcp_tools=_mcp_tools)
+        if new_agent is not None:
+            _agent = new_agent
+        # 构造 QualityPipeline
+        try:
+            from .agent import get_llm
+            from .quality.pipeline import QualityPipeline
+            from .rubrics.judge import RubricJudge
+            from .rubrics.prompts import apply_prompts_to_default_rubrics
+            from .rubrics.repair import RepairStrategy
+
+            apply_prompts_to_default_rubrics()
+            from .models_config import get_active_model as _get_active_model
+
+            _model_config = _get_active_model() or {}
+            judge_api_key = _model_config.get("api_key") or CONFIG.get("minimax_api_key", "")
+            if judge_api_key:
+                judge_llm = get_llm(
+                    api_key=judge_api_key,
+                    api_base=_model_config.get("api_base") or CONFIG.get("minimax_api_base"),
+                    model_name=_model_config.get("name", CONFIG.get("model_name", "MiniMax-M3")),
+                    temperature=_model_config.get("temperature", CONFIG.get("temperature", 0.7)),
+                )
+                app.state.quality_pipeline = QualityPipeline(
+                    judge=RubricJudge(llm=judge_llm),
+                    repair_strategy=RepairStrategy(),
+                    main_llm=judge_llm,
+                )
+                logger.info("QualityPipeline 已就绪")
+            else:
+                logger.info("未配置 API Key，质量门已跳过")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("QualityPipeline 构造失败，已跳过: %s", e)
 
 
 app = FastAPI(title="Nexus Backend", lifespan=lifespan)
@@ -378,7 +453,7 @@ async def health_check():
     }
 
 
-@app.get(f"{API_PREFIX}/context")
+@app.get(f"{API_PREFIX}/context", dependencies=[Depends(require_token)])
 async def get_context_info():
     """获取上下文窗口使用信息。
 
@@ -405,7 +480,7 @@ async def get_context_info():
     }
 
 
-@app.post(f"{API_PREFIX}/context/compact")
+@app.post(f"{API_PREFIX}/context/compact", dependencies=[Depends(require_token)])
 async def trigger_compact():
     """手动触发上下文压缩（类似 Claude Code 的 /compact）。
 
@@ -418,13 +493,13 @@ async def trigger_compact():
     }
 
 
-@app.get(f"{API_PREFIX}/model")
+@app.get(f"{API_PREFIX}/model", dependencies=[Depends(require_token)])
 async def get_model_info():
     """获取当前激活的模型信息。"""
     active = get_active_model()
     if active:
         return {
-            "model_name": active.get("name", "MiniMax-M2.7"),
+            "model_name": active.get("name", "MiniMax-M3"),
             "temperature": active.get("temperature", 0.7),
             "api_base": active.get("api_base", CONFIG["minimax_api_base"]),
             "id": active.get("id"),
@@ -447,13 +522,53 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await websocket.accept()
 
+    # 懒构造 Agent：在子线程里跑，构造期间 /health 已经能 200。
+    # 用一次性触发：一旦构造过就 noop。
+    _agent_init_started = False
+
+    def _ensure_agent_async() -> None:
+        nonlocal _agent_init_started
+        global _agent_ready_event
+        with _agent_lock:
+            if _agent is not None or _agent_init_started:
+                return
+            _agent_init_started = True
+        if _agent_ready_event is None:
+            _agent_ready_event = asyncio.Event()
+        import threading
+
+        def _run_init_and_signal() -> None:
+            try:
+                _ensure_agent_ready(websocket.app)
+            finally:
+                # 跨线程设置 asyncio.Event:必须用 call_soon_threadsafe
+                if _main_loop and not _main_loop.is_closed() and _agent_ready_event is not None:
+                    _main_loop.call_soon_threadsafe(_agent_ready_event.set)
+
+        threading.Thread(
+            target=_run_init_and_signal,
+            name="nexus-agent-init",
+            daemon=True,
+        ).start()
+
+    _ensure_agent_async()
+
+    # 等 Agent 构造完成(首启 / PyInstaller 冷启场景下 10-30s 是常态)。
+    # 设 60s 上限,极端慢盘 / MCP 加载失败场景下放弃,让 _run_agent_streaming
+    # 走原 agent_unavailable 错误路径,而不是阻塞 WS 升级握手。
+    if _agent is None and _agent_ready_event is not None:
+        try:
+            await asyncio.wait_for(_agent_ready_event.wait(), timeout=60.0)
+        except TimeoutError:
+            logger.warning("Agent 懒构造 60s 超时,首条消息将走 agent_unavailable 错误路径")
+
     def _get_current_agent() -> Any:
-        # 通过 _agent_lock 读一致快照；调用方在 _run_agent_streaming 内不再加锁
+        # 触发懒构造（首次调用时启动后台线程）
+        _ensure_agent_async()
         with _agent_lock:
             return _agent
 
     def _get_quality_pipeline() -> Any:
-        # Phase 2 Task 2.5：从 app.state 取 quality_pipeline（lifespan 构造）
         return getattr(websocket.app.state, "quality_pipeline", None)
 
     await handle_websocket(
@@ -467,7 +582,7 @@ async def websocket_endpoint(websocket: WebSocket):
 # ========== 微信通道 API ==========
 
 
-@app.post(f"{API_PREFIX}/channels/wechat/qr")
+@app.post(f"{API_PREFIX}/channels/wechat/qr", dependencies=[Depends(require_token)])
 async def wechat_qr_login():
     """获取微信登录二维码"""
     from .channels.wechat import wechat_qr_login as do_qr_login
@@ -480,7 +595,7 @@ async def wechat_qr_login():
         return {"success": False, "error": str(e)}
 
 
-@app.get(f"{API_PREFIX}/channels/wechat/status/{{session_key}}")
+@app.get(f"{API_PREFIX}/channels/wechat/status/{{session_key}}", dependencies=[Depends(require_token)])
 async def wechat_qr_status(session_key: str, timeout_ms: int = 10000):
     """获取微信登录二维码状态"""
     from .channels.wechat import wait_qr_scan
@@ -493,7 +608,7 @@ async def wechat_qr_status(session_key: str, timeout_ms: int = 10000):
         return {"success": False, "error": str(e)}
 
 
-@app.get(f"{API_PREFIX}/channels/wechat/bind")
+@app.get(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
 async def wechat_bind_status():
     """获取微信绑定状态"""
     from .channels.wechat import _list_indexed_weixin_account_ids, _load_account, get_active_wechat_channel
@@ -525,7 +640,7 @@ async def wechat_bind_status():
     }
 
 
-@app.post(f"{API_PREFIX}/channels/wechat/bind")
+@app.post(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
 async def wechat_do_bind():
     """绑定微信账号"""
     from .channels.wechat import (
@@ -599,7 +714,7 @@ async def wechat_do_bind():
     }
 
 
-@app.delete(f"{API_PREFIX}/channels/wechat/bind")
+@app.delete(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
 async def wechat_unbind():
     """解除微信绑定"""
     from .channels.wechat import _clear_active_channel, get_active_wechat_channel
@@ -612,7 +727,7 @@ async def wechat_unbind():
     return {"success": True}
 
 
-@app.get(f"{API_PREFIX}/channels")
+@app.get(f"{API_PREFIX}/channels", dependencies=[Depends(require_token)])
 async def get_channels(request: Request):
     """获取所有通道状态"""
     from .channels import ChannelRegistry

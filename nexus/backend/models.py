@@ -48,7 +48,7 @@ class ModelConfig(BaseModel):
     """模型配置。"""
 
     id: str = Field(..., min_length=1, description="模型ID")
-    name: str = Field(default="MiniMax-M2.7", description="模型名称")
+    name: str = Field(default="MiniMax-M3", description="模型名称")
     api_key: str | None = Field(default=None, description="API密钥")
     api_base: str | None = Field(default=None, description="API端点")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="温度参数")

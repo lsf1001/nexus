@@ -17,17 +17,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from deepagents import create_deep_agent
-from deepagents.backends.composite import CompositeBackend
-from deepagents.backends.filesystem import FilesystemBackend
-from deepagents.backends.state import StateBackend
-from deepagents.backends.store import StoreBackend
-from deepagents.middleware.subagents import SubAgent
-from langchain_openai import ChatOpenAI
-
+# 关键：langchain_openai / deepagents / llm.wrapper 都延后到函数内 import。
+# 原因：PyInstaller frozen 模式下从 PYZ-00.pyz 解压 40+ 隐藏模块非常慢（10-20s）。
+# 模块顶层只保留轻量依赖（re / Path / config / 预编译正则）。
 from .config import CONFIG
-from .llm.policies import FallbackPolicy, RetryPolicy, TimeoutPolicy
-from .llm.wrapper import ResilientRunnable, build_resilient_llm
 from .memory import MemoryService
 
 logger = logging.getLogger(__name__)
@@ -129,11 +122,11 @@ def get_llm(
     api_key: str | None = None,
     api_base: str | None = None,
     temperature: float | None = None,
-    retry: RetryPolicy | None = None,
-    fallback: ChatOpenAI | None = None,
-    fallback_policy: FallbackPolicy | None = None,
-    timeout: TimeoutPolicy | None = None,
-) -> ResilientRunnable:
+    retry=None,
+    fallback=None,
+    fallback_policy=None,
+    timeout=None,
+):
     """创建带韧性包装的 LLM 实例（默认即包装）。
 
     本函数与历史版本保持向后兼容：
@@ -165,6 +158,8 @@ def get_llm(
     """
     if api_key:
         # 自定义模型路径：保持旧行为
+        from langchain_openai import ChatOpenAI
+
         chat = ChatOpenAI(
             model=model_name or "gpt-4",
             openai_api_key=api_key,
@@ -176,12 +171,16 @@ def get_llm(
         raise ValueError("model_name and api_key are both required")
     else:
         # 走 CONFIG 默认渠道
+        from langchain_openai import ChatOpenAI
+
         chat = ChatOpenAI(
             model=model_name,
             openai_api_key=CONFIG["minimax_api_key"],
             openai_api_base=CONFIG["minimax_api_base"],
             temperature=temperature if temperature is not None else CONFIG["temperature"],
         )
+
+    from .llm.wrapper import build_resilient_llm
 
     return build_resilient_llm(
         primary=chat,
@@ -211,7 +210,7 @@ def get_project_root() -> Path:
     return Path(__file__).parent.parent
 
 
-def _create_backend(project_root: Path) -> CompositeBackend:
+def _create_backend(project_root: Path):
     """创建组合 backend。
 
     使用 CompositeBackend 组合多个 backend：
@@ -219,6 +218,11 @@ def _create_backend(project_root: Path) -> CompositeBackend:
     - StateBackend: 状态管理（内存）
     - StoreBackend: 持久化存储（会话恢复）
     """
+    from deepagents.backends.composite import CompositeBackend
+    from deepagents.backends.filesystem import FilesystemBackend
+    from deepagents.backends.state import StateBackend
+    from deepagents.backends.store import StoreBackend
+
     fs_backend = FilesystemBackend(root_dir=project_root, virtual_mode=True)
 
     return CompositeBackend(
@@ -245,7 +249,7 @@ def _create_permissions(project_root: Path) -> list:
     ]
 
 
-def create_subagents(model: ChatOpenAI | None = None) -> list[SubAgent]:
+def create_subagents(model=None):
     """创建子代理列表。
 
     每个 subagent 的"重试 + 超时"策略以**文字提示**形式嵌入 system prompt
@@ -282,6 +286,8 @@ def create_subagents(model: ChatOpenAI | None = None) -> list[SubAgent]:
         "网络瞬时错误（超时、5xx、限流）可以安全重试；"
         "鉴权失败、参数错误、上下文超长等错误不要重试，应原样向上报告。"
     )
+
+    from deepagents.middleware.subagents import SubAgent
 
     code_writer = SubAgent(
         name="code_writer",
@@ -350,6 +356,8 @@ def create_agent(
 
     # memory 文件（会被 create_deep_agent 自动用于 MemoryMiddleware）
     memory_files = [str(agents_md)] if agents_md.exists() else []
+
+    from deepagents import create_deep_agent
 
     return create_deep_agent(
         model=llm,

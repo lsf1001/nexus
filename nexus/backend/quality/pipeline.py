@@ -223,9 +223,7 @@ class QualityPipeline:
                 repair_attempted=True,
             )
 
-        second_verdict, second_reasoning = self._repair.decide(
-            second_scores, rubrics, attempt_count=1
-        )
+        second_verdict, second_reasoning = self._repair.decide(second_scores, rubrics, attempt_count=1)
         self._persist_scores(
             second_scores,
             second_verdict.value,

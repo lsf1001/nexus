@@ -5,8 +5,9 @@ from __future__ import annotations
 import threading
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from .api.ws import require_token
 from .db import (
     add_message,
     create_session,
@@ -23,7 +24,7 @@ from .db import (
 )
 from .memory import MemoryService
 
-router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+router = APIRouter(prefix="/api/sessions", tags=["sessions"], dependencies=[Depends(require_token)])
 
 
 # ============================================================================
@@ -122,7 +123,7 @@ async def get_sessions(limit: int = 50) -> list[dict]:
 
 
 @router.post("")
-async def create_new_session(body: dict = None) -> dict:
+async def create_new_session(body: dict | None = None) -> dict:
     """创建新会话。"""
     session_id = str(uuid.uuid4())
     title = body.get("title") if body else None

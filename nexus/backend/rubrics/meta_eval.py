@@ -149,9 +149,7 @@ def compute_cohens_kappa(
         ValueError: 长度不匹配或为空。
     """
     if len(labels_a) != len(labels_b):
-        raise ValueError(
-            f"长度不匹配：len(labels_a)={len(labels_a)} vs len(labels_b)={len(labels_b)}"
-        )
+        raise ValueError(f"长度不匹配：len(labels_a)={len(labels_a)} vs len(labels_b)={len(labels_b)}")
     if not labels_a:
         raise ValueError("输入不能为空")
 

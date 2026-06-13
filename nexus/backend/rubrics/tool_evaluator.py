@@ -90,8 +90,7 @@ class ToolSelfEvaluator:
         """构造期校验阈值。"""
         if not (0.0 <= self.fallback_threshold <= self.retry_threshold <= 1.0):
             raise ValueError(
-                f"阈值不合法：fallback={self.fallback_threshold} ≤ "
-                f"retry={self.retry_threshold}，且都在 [0, 1]"
+                f"阈值不合法：fallback={self.fallback_threshold} ≤ retry={self.retry_threshold}，且都在 [0, 1]"
             )
 
     async def evaluate(

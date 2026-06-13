@@ -20,6 +20,7 @@ if __name__ == "__main__":
     import argparse
 
     from nexus.backend.config import CONFIG
+    from nexus.backend.main import app
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default=None)
@@ -30,9 +31,4 @@ if __name__ == "__main__":
     host = args.host if args.host is not None else CONFIG.get("server_host", "0.0.0.0")
     port = args.port if args.port is not None else CONFIG.get("server_port", 30000)
 
-    uvicorn.run(
-        "nexus.backend.main:app",
-        host=host,
-        port=port,
-        reload=False,
-    )
+    uvicorn.run(app, host=host, port=port, reload=False)

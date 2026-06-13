@@ -8,14 +8,19 @@ MODELS_FILE = Path.home() / ".nexus" / "models.json"
 
 
 def load_models() -> dict[str, Any]:
-    """从 ~/.nexus/models.json 加载模型配置。"""
+    """从 ~/.nexus/models.json 加载模型配置。
+
+    健壮性:历史 bug 里有人手动把文件写成 ``[]``(裸 list)或缺失 ``models`` 键,
+    load_models 必须返回 ``{"models": [...]}`` 的规范 schema,否则调用方
+    的 ``config.get("models")`` 会报 'list' has no attribute 'get'。
+    """
     if not MODELS_FILE.exists():
         MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
         default_config = {
             "models": [
                 {
                     "id": "default",
-                    "name": "MiniMax-M2.7",
+                    "name": "MiniMax-M3",
                     "api_key": "",
                     "api_base": "https://api.minimaxi.com/v1",
                     "temperature": 0.7,
@@ -28,9 +33,19 @@ def load_models() -> dict[str, Any]:
 
     try:
         with open(MODELS_FILE) as f:
-            return json.load(f)
+            data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return {"models": []}
+
+    # 规范化: 裸 list / 缺 models 键 / 不是 dict 都修成 {"models": [...]}
+    if not isinstance(data, dict):
+        # 裸 list 或其它类型 → 包成 dict
+        if isinstance(data, list):
+            return {"models": data}
+        return {"models": []}
+    if "models" not in data or not isinstance(data["models"], list):
+        data["models"] = []
+    return data
 
 
 def save_models(config: dict[str, Any]) -> None:

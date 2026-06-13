@@ -20,7 +20,7 @@ _INITED = False
 
 def _get_db_path() -> Path:
     """获取数据库路径，确保目录存在。"""
-    db_path = Path(CONFIG.get("db_path", str(DB_PATH)))
+    db_path = Path(CONFIG.get("db_path") or CONFIG.get("database_url") or str(DB_PATH))
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return db_path
 
@@ -244,6 +244,30 @@ def get_session(session_id: str) -> dict | None:
         if row:
             return dict(row)
         return None
+
+
+def find_latest_session_by_user(user_id: str, channel: str = "wechat") -> str | None:
+    """查找该 user_id 在指定 channel 上最近活跃的 session_id。
+
+    用于：后端重启后，从 DB 重建"微信 user_id → session_id"映射，
+    避免每次重启都给同一微信用户建一个新 session 导致历史断流。
+    """
+    with get_db() as conn:
+        # 通过 messages 表按 created_at 倒序找该 user_id 最近一条消息所属 session
+        row = conn.execute(
+            """
+            SELECT s.id
+              FROM messages m
+              JOIN sessions s ON m.session_id = s.id
+             WHERE s.channel = ?
+               AND s.deleted_at IS NULL
+               AND m.content LIKE ?
+             ORDER BY m.created_at DESC
+             LIMIT 1
+            """,
+            (channel, f"%{user_id}%"),
+        ).fetchone()
+        return row["id"] if row else None
 
 
 def list_sessions(limit: int = 50) -> list[dict]:

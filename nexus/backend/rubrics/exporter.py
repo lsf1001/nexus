@@ -104,9 +104,7 @@ class PreferenceExporter:
             ValueError: 阈值非 [0, 1] 区间。
         """
         if not (0.0 <= min_score_gap <= 1.0):
-            raise ValueError(
-                f"min_score_gap 必须在 [0, 1]，当前 {min_score_gap}"
-            )
+            raise ValueError(f"min_score_gap 必须在 [0, 1]，当前 {min_score_gap}")
         self._min_score_gap = min_score_gap
 
     @property
@@ -232,9 +230,7 @@ def register_export_command(app: Any) -> None:
     def _export_preferences(
         output: str = typer.Option(..., "--output", "-o", help="输出文件路径"),
         fmt: str = typer.Option("dpo", "--format", "-f", help="格式：dpo / kto"),
-        min_gap: float = typer.Option(
-            DEFAULT_MIN_SCORE_GAP, "--min-gap", help="score gap 阈值"
-        ),
+        min_gap: float = typer.Option(DEFAULT_MIN_SCORE_GAP, "--min-gap", help="score gap 阈值"),
     ) -> None:
         """从 quality_scores 表导出 DPO / KTO 偏好数据。
 

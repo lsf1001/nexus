@@ -91,12 +91,12 @@ async def _load_tools_for_server(
 
         # 使用 session=None + connection 参数
         # 这样工具会在每次调用时创建新的临时会话，避免会话生命周期问题
-        tools = await asyncio.wait_for(load_mcp_tools(session=None, connection=conn_config), timeout=30.0)
+        tools = await asyncio.wait_for(load_mcp_tools(session=None, connection=conn_config), timeout=8.0)
         logger.info(f"从 MCP 服务器 {server_name} 加载了 {len(tools)} 个工具")
         return tools
 
     except TimeoutError:
-        logger.error(f"加载 MCP 服务器 {server_name} 超时（30秒）")
+        logger.error(f"加载 MCP 服务器 {server_name} 超时（8秒）")
         return []
     except Exception as e:
         logger.error(f"加载 MCP 服务器 {server_name} 失败: {e}")
@@ -106,6 +106,9 @@ async def _load_tools_for_server(
 async def load_all_mcp_tools() -> list[Any]:
     """加载所有配置的 MCP 服务器工具。
 
+    关键：每个 server 的加载并发跑（asyncio.gather），总时间 ≈ max(server_time)
+    而不是 sum(server_time)。单个 server 上限 8s（之前 30s）。
+
     Returns:
         所有 MCP 服务器的工具列表
     """
@@ -114,14 +117,14 @@ async def load_all_mcp_tools() -> list[Any]:
         logger.debug("未找到 MCP 服务器配置")
         return []
 
+    tasks = [_load_tools_for_server(server_config.get("name", "unknown"), server_config) for server_config in servers]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     all_tools = []
-    for server_config in servers:
-        server_name = server_config.get("name", "unknown")
-        try:
-            tools = await _load_tools_for_server(server_name, server_config)
-            all_tools.extend(tools)
-        except Exception as e:
-            logger.error(f"加载 MCP 服务器 {server_name} 失败: {e}")
+    for result in results:
+        if isinstance(result, Exception):
+            logger.error(f"MCP 加载失败: {result}")
+            continue
+        all_tools.extend(result)
 
     # 过滤掉与内置工具重复的工具（按名称）
     from .tools import TOOLS
