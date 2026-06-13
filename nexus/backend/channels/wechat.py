@@ -29,11 +29,18 @@ from .base import (
     ChannelType,
     MessageType,
 )
+from .wechat_state import (
+    _accounts,  # noqa: F401  保留 re-export
+    _active_channel,  # noqa: F401  保留 re-export
+    _active_logins,  # noqa: F401  保留 re-export
+    _context_tokens,  # noqa: F401  保留 re-export
+    _global_lock,
+)
 from .wechat_types import (
     FIXED_BASE_URL,  # noqa: F401  保留 re-export 兼容旧导入
-    MessageItemType,
-    MessageState,
-    MessageTypeEnum,
+    MessageItemType,  # noqa: F401  保留 re-export
+    MessageState,  # noqa: F401  保留 re-export
+    MessageTypeEnum,  # noqa: F401  保留 re-export
     QRSession,
     WeixinAccount,
 )
@@ -54,15 +61,10 @@ ACTIVE_LOGIN_TTL_MS = 5 * 60 * 1000
 # （WeixinAccount / QRSession 数据类已移至 wechat_types.py）
 
 
-# 全局状态（带线程锁保护）
-_active_logins: dict[str, QRSession] = {}
-_accounts: dict[str, WeixinAccount] = {}
-_context_tokens: dict[str, str] = {}  # account_id:user_id -> context_token
-_global_lock = threading.RLock()
-_active_channel: Optional["WeChatChannel"] = None  # 当前活跃的微信通道
+# 全局状态（带线程锁保护）已移至 wechat_state.py
 
 
-def get_active_wechat_channel() -> Optional["WeChatChannel"]:
+def get_active_wechat_channel():
     """获取当前活跃的微信通道"""
     return _active_channel
 
