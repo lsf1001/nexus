@@ -67,6 +67,10 @@ export function sendButton(page: Page): Locator {
  * 完整流：user 气泡 → assistant 气泡（isLoading=true → 收到 chunk → done → isLoading=false）。
  * done 事件本身不更新气泡文本，但会触发 isLoading 回到 false。
  * 我们等"loading 消失 + 助手气泡里有非空文本" 来判断完成。
+ *
+ * 关键：必须等 **新一条** assistant 出现且非空，不能只看"最后一个 assistant 有文本"——
+ * 紧接上一条还没回完时，helper 可能拿到上一条的文本提前返回。多轮场景下这会导致
+ * 总气泡数少 1（user N 已发，assistant N 还在生成中）。
  */
 export async function sendMessageAndWaitForReply(
   page: Page,
@@ -74,28 +78,38 @@ export async function sendMessageAndWaitForReply(
   options: { minReplyLength?: number; timeoutMs?: number } = {},
 ): Promise<string> {
   const { minReplyLength = 1, timeoutMs = 60_000 } = options;
+
+  // 发送前的 user / assistant 数量基线
+  const userRowsBefore = await page.locator('.message-row.is-user').count();
+  const assistantRowsBefore = await page.locator('.message-row.is-assistant').count();
+
   await expect(messageInput(page)).toBeEnabled({ timeout: 30_000 });
   await messageInput(page).fill(content);
   await sendButton(page).click();
 
-  // 等 user 气泡出现
-  await expect.poll(async () => lastUserBubbleText(page), {
-    timeout: 5_000,
-  }).toBe(content);
+  // 等 user 气泡出现且数量增加 1
+  await expect
+    .poll(
+      async () => await page.locator('.message-row.is-user').count(),
+      { timeout: 5_000 },
+    )
+    .toBe(userRowsBefore + 1);
 
-  // 等 loading 三点动画消失（即 isLoading=false → done 事件已到）
-  // 加载动画是三个 animate-bounce 圆点，包在 border 容器里
-  const loadingDots = page.locator('.animate-bounce');
-  // 至少要看到过 loading
-  await loadingDots.first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
-
-  // 等所有 bubble 都稳定下来 → 找到包含 assistant 回复的最后一个气泡
-  // 策略：等 send 按钮重新可点（isLoading=false）+ 找带 prose 类的 div
+  // 等对应的新 assistant 行出现且非空文本——
+  // 这里 "数量 >= 旧数 + 1" 是关键：避免错把上一轮已结束的 assistant 当成新的
   await expect(async () => {
+    const userCount = await page.locator('.message-row.is-user').count();
+    const assistantCount = await page.locator('.message-row.is-assistant').count();
+    // 等待新 assistant 行已渲染
+    expect(assistantCount).toBeGreaterThanOrEqual(assistantRowsBefore + 1);
+    // 等 user / assistant 行数一致（最后一条 assistant 是当前这条的回复）
+    expect(assistantCount).toBe(userCount);
+    // 最后一条 assistant 必须有非空文本
     const reply = await lastAssistantBubbleText(page);
     expect(reply.length).toBeGreaterThanOrEqual(minReplyLength);
   }).toPass({ timeout: timeoutMs, intervals: [500, 1000, 2000] });
 
+  // 最后等输入框重新可点（流彻底结束、loading 状态彻底清掉）
   await expect(messageInput(page)).toBeEnabled({ timeout: timeoutMs });
   return lastAssistantBubbleText(page);
 }
@@ -126,9 +140,12 @@ export async function lastUserBubbleText(page: Page): Promise<string> {
   return (await userRows.nth(count - 1).innerText()).trim();
 }
 
-/** 当前消息数（user + assistant 总和，按 main 区 paragraph 计数）。 */
+/** 当前消息数（user + assistant 总和，按 main 区 .message-row 计数）。
+ *  - 新 UI 一条 assistant 消息含"思考过程"+"回复"两个段落，单算 <p> 会算成 2 条；
+ *    直接数 .message-row 才是 1 条 1 气泡。
+ */
 export async function messageCount(page: Page): Promise<number> {
-  return await page.locator('main p').count();
+  return await page.locator('main .message-row').count();
 }
 
 /** 等错误提示出现（重试按钮可见）。 */
