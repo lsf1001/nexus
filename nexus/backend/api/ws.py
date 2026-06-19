@@ -53,6 +53,13 @@ _clients_lock = threading.RLock()
 # 不可重试的错误码集合（与 StreamGuard 的 _map_error_code 输出对齐）
 _NON_RETRYABLE_ERROR_CODES = frozenset({"auth", "bad_request", "context_length", "content_filter"})
 
+# 澄清工具名（与 nexus.backend.tools.ask_user.name 对齐）
+_CLARIFY_TOOL_NAME = "ask_user"
+# WS 帧类型常量
+_EVT_CLARIFICATION_REQUEST = "clarification_request"
+# _run_agent_streaming 返回值新增第四个:clarification_question(str|None)、
+# clarification_options(list[str]|None),供 handle_websocket 判断是否被澄清挂起。
+
 
 def _estimate_tokens(text: str, context_window: int = 32000) -> tuple[int, int]:
     """估算 token 数量和上下文使用率。
@@ -127,13 +134,15 @@ async def _run_agent_streaming(
     prompt: dict,
     agent: Any,
     resume_from_event_id: int | None = None,
-) -> tuple[int, str, bool]:
+) -> tuple[int, str, bool, tuple[str, list[str]] | None]:
     """运行 agent 流式响应，把事件转发到 WebSocket。
 
     使用 :class:`StreamGuard` 包装 ``agent.astream_events``：
       - 给每个事件附加进程内单调递增的 ``event_id``
       - 可重试错误自动重试；不可重试 / 重试用尽 → yield 1 个 error 事件
       - 永不抛异常（StreamGuard 已保证），调用方不需要再 try/except
+      - 检测到 LLM 调用 ``ask_user`` 工具时,发送 ``clarification_request``
+        帧并挂起(不再发 final / done),用户回答通过新 turn 注入历史。
 
     Args:
         websocket: 目标 WebSocket 连接。
@@ -145,11 +154,13 @@ async def _run_agent_streaming(
             （每次流都有新的 event_id 序列）。
 
     Returns:
-        ``(last_event_id, response_text, completed)``：
+        ``(last_event_id, response_text, completed, clarification)``：
           - ``last_event_id`` 本次流结束时的最后一个 event_id（供下次签发 resume token）。
           - ``response_text`` 剥离 ``<thinking>`` 标签后的纯回复文本（用于 DB 存储）。
             错误路径返回空字符串。
-          - ``completed`` 表示本次流是否正常完成；错误路径不应再发 ``done``。
+          - ``completed`` 表示本次流是否正常完成；错误 / 澄清挂起 路径不应再发 ``done``。
+          - ``clarification`` ``(question, options)`` 当 LLM 调用 ``ask_user``
+            时填入,handle_websocket 据此跳过质量门 + 跳过 ``done`` 帧。
     """
     if agent is None:
         # 没可用 agent（极端情况：启动时没模型 key）
@@ -162,7 +173,7 @@ async def _run_agent_streaming(
                 "event_id": 1,
             }
         )
-        return 1, "", False
+        return 1, "", False, None
 
     # StreamGuard 包 astream_events；每次重试会重新调一次 astream_events
     # （幂等重试，由上游 LLM 自行决定是否真幂等）。
@@ -202,10 +213,10 @@ async def _run_agent_streaming(
             # 不可重试 / 已耗尽：停止流（不再发 done）。
             # 返回空字符串，避免在错误路径下把 raw 文本（含 thinking 标签）写入 DB。
             if not retryable:
-                return last_event_id, "", False
+                return last_event_id, "", False, None
             # 可重试但 StreamGuard 仍 yield error，意味着情况特殊
             # （理论上不会到这里，StreamGuard 内部就用尽了）。安全起见停止。
-            return last_event_id, "", False
+            return last_event_id, "", False, None
 
         # Phase 1 resume 过滤：跳过 event_id <= resume_from_event_id 的事件
         if resume_from_event_id is not None and event_id > 0 and event_id <= resume_from_event_id:
@@ -221,13 +232,60 @@ async def _run_agent_streaming(
                 full_response += content
         elif event_type == "on_tool_start":
             tool_name = event.get("name", "未知工具")
-            await websocket.send_json(
-                {
-                    "type": "thinking",
-                    "content": f"[调用工具] {tool_name}",
-                    "event_id": event_id,
-                }
-            )
+            if tool_name == _CLARIFY_TOOL_NAME:
+                # === 澄清挂起 ===
+                # LLM 决定追问用户:把工具入参(问题 + 候选项)作为
+                # clarification_request 帧发出,然后**挂起本轮流**——
+                # 不发 final / done,让客户端在 UI 弹表单。
+                # 用户回答通过新 turn 的用户消息注入,LLM 看到 ask_user 调
+                # 用历史 + 用户回答,继续原任务。
+                tool_input = event.get("data", {}).get("input") or {}
+                question = str(tool_input.get("question", "")).strip()
+                raw_options = tool_input.get("options") or []
+                options: list[str] = []
+                if isinstance(raw_options, list):
+                    for opt in raw_options:
+                        if isinstance(opt, str) and opt.strip():
+                            options.append(opt.strip())
+                        if len(options) >= 6:
+                            break
+
+                if not question:
+                    # 工具入参异常 —— 走默认分支,继续按普通工具处理
+                    logger.warning("ask_user 工具入参缺少 question,降级为普通工具调用")
+                    await websocket.send_json(
+                        {
+                            "type": "thinking",
+                            "content": f"[调用工具] {tool_name}",
+                            "event_id": event_id,
+                        }
+                    )
+                else:
+                    if event_id > last_event_id:
+                        last_event_id = event_id
+                    await websocket.send_json(
+                        {
+                            "type": _EVT_CLARIFICATION_REQUEST,
+                            "content": question,
+                            "options": options,
+                            "event_id": last_event_id,
+                        }
+                    )
+                    logger.info(
+                        "WS clarification_request 发送: session=%s, q=%s, options=%d",
+                        session_id,
+                        question[:60],
+                        len(options),
+                    )
+                    return last_event_id, "", False, (question, options)
+            else:
+                await websocket.send_json(
+                    {
+                        "type": "thinking",
+                        "content": f"[调用工具] {tool_name}",
+                        "event_id": event_id,
+                    }
+                )
         elif event_type == "on_tool_end":
             output = event.get("data", {}).get("output")
             await websocket.send_json(
@@ -244,7 +302,7 @@ async def _run_agent_streaming(
 
     if had_error:
         # 已经有 error 事件发出，StreamGuard 走完就不要再发 done
-        return last_event_id, "", False
+        return last_event_id, "", False, None
 
     # 正常结束：先做归一化 / token 估算 / 思考抽取 / 16 字符分块，
     # 然后按 token_usage → thinking → chunks → final → done 顺序发出去。
@@ -328,7 +386,7 @@ async def _run_agent_streaming(
     )
     last_event_id = stats_event_id
 
-    return stats_event_id, response_text, True
+    return stats_event_id, response_text, True, None
 
 
 async def _handle_resume_frame(websocket: WebSocket, data: dict) -> int | None:
@@ -419,7 +477,15 @@ async def handle_websocket(
 
     try:
         while True:
-            data = await websocket.receive_json()
+            # 内层 try 单独接住 receive_json 抛的 JSONDecodeError(心跳 ping /
+            # 空字符串 / 意外数据),continue 重新 receive,不让 handler 整体退出。
+            # 之前只在外层 except JSONDecodeError 里 log warn 然后函数结束,
+            # 等价于 ws 关闭,客户端重连后又会被下一个 ping 杀掉,死循环。
+            try:
+                data = await websocket.receive_json()
+            except json.JSONDecodeError as err:
+                logger.warning("WS 收到非 JSON 帧: %s — 跳过并继续监听", err)
+                continue
 
             # 1) resume 帧：单独处理，不进入主消息流
             if data.get("type") == "resume":
@@ -441,7 +507,17 @@ async def handle_websocket(
                     from ..db import create_session
 
                     session_id = str(uuid.uuid4())
-                    title = data.get("title") or "新会话"
+                    # 用首条用户消息做 title（前 30 字）—— 否则侧边栏会
+                    # 显示 N 条"新会话"占位,用户找不到自己的对话。客户端
+                    # 也可显式传 title 字段覆盖(用于会话改名等场景)。
+                    client_title = (data.get("title") or "").strip()
+                    if client_title:
+                        title = client_title
+                    else:
+                        cleaned = user_content.strip().replace("\n", " ")
+                        title = cleaned[:30] + ("…" if len(cleaned) > 30 else "")
+                        if not title:
+                            title = "新会话"
                     create_session(session_id, title=title, channel="main")
                     new_session_created = True
 
@@ -479,9 +555,24 @@ async def handle_websocket(
 
             # 运行 agent 流（已自带 StreamGuard + error_code/retryable）
             agent = get_agent()
-            last_event_id, response_text, stream_completed = await _run_agent_streaming(
-                websocket, session_id, prompt, agent, resume_from_event_id
-            )
+            (
+                last_event_id,
+                response_text,
+                stream_completed,
+                clarification,
+            ) = await _run_agent_streaming(websocket, session_id, prompt, agent, resume_from_event_id)
+
+            # 澄清挂起分支:LLM 调了 ask_user,clarification_request 已发出,
+            # 本轮不再发 final / done,也不跑质量门(没有可评判的 response)。
+            # 把 ask_user 调用 + 问题追加到会话历史(作为 assistant 角色),
+            # 这样用户下一条消息进来时,LLM 看到上下文里的"刚才问了用户 X"
+            # 能自然接住。
+            if clarification is not None:
+                clarify_question, _clarify_options = clarification
+                placeholder = f"[澄清中] {clarify_question}"
+                add_message(str(uuid.uuid4()), session_id, "assistant", placeholder)
+                # 也不发 resume_token:本轮没真正完成,resume 语义不适用
+                continue  # 回到 while True 顶部,等待用户回答
 
             # Phase 2 Task 2.5：质量门。对 raw_response 跑 RubricJudge + Repair；
             # verdict 决定入库文本（ACCEPT→raw / REPAIR→重生 / REJECT→fallback）。
@@ -497,19 +588,23 @@ async def handle_websocket(
                         raw_response=response_text,
                         message_id=message_id,
                     )
-                    # 若 verdict 改变最终文本（如 REJECT 用了 fallback），
-                    # 补发一个 final 帧给客户端（不重发 chunk，避免重复）
-                    if final.response_text != response_text:
-                        replacement_event_id = last_event_id + 1
-                        await websocket.send_json(
-                            {
-                                "type": "final",
-                                "content": final.response_text,
-                                "event_id": replacement_event_id,
-                            }
-                        )
-                        last_event_id = replacement_event_id
-                    response_text = final.response_text
+                    # 关键:agent 流式结束时已经在 _run_agent_streaming 里发过
+                    # 一个 `final: 长回复` 帧给客户端(line 360-365)。此时用户已经
+                    # 看到完整流式回复。
+                    #
+                    # quality gate 的 verdict 影响"最终入库文本",但不应该再给用户
+                    # 多发一个 final 帧 —— 否则 REJECT 时用户会先看到完整长回复,
+                    # 然后紧跟一句"抱歉这个问题我答得不够好",体验灾难。
+                    #
+                    # 策略:
+                    #   - ACCEPT  → 入库用原 response_text(用户已经看到)
+                    #   - REPAIR 后 ACCEPT → 入库用重生文本;但用户已看过原回复,
+                    #     此时直接替换为重生文本会让用户困惑;保守起见仍用原回复。
+                    #   - REJECT → 入库用原 response_text;fallback 仅是审计占位
+                    #     (用于 quality_scores 留痕),不污染用户视图。
+                    #
+                    # 不补发 final 帧;response_text 保持原值,后续 add_message 用它。
+                    _ = final  # noqa: F841 — 暂不消费;后续可基于 verdict 改入库文本
                 except Exception as exc:  # noqa: BLE001 — 质量门异常不污染主流程
                     logger.warning("QualityPipeline 失败，使用原回复: %s", exc)
 
@@ -548,7 +643,13 @@ async def handle_websocket(
         with _clients_lock:
             if websocket in _ws_clients:
                 _ws_clients.remove(websocket)
-    except json.JSONDecodeError as err:
-        # 客户端发了非 JSON 帧(空字符串、心跳 ping、意外数据)。记 warn 不退出,
-        # 继续等下一帧,避免一个脏帧让整条 WS 断掉。
-        logger.warning("WS 收到非 JSON 帧: %s — 跳过并继续监听", err)
+    except RuntimeError as err:
+        # Starlette 竞态:客户端断开 → 我们已发 close message → 后续 send_json 抛
+        # "Cannot call 'send' once a close message has been sent." 不影响业务,
+        # 仅在日志里 stacktrace。降级为 info 避免污染告警。
+        if "close message has been sent" in str(err):
+            logger.info("WS 已关闭,跳过残留 send: %s", err)
+        else:
+            raise
+    except Exception as err:  # noqa: BLE001 — 最后兜底,任何未预期异常不应击穿进程
+        logger.exception("handle_websocket 未预期异常: %s", err)
