@@ -1,0 +1,656 @@
+/* ===== Setup / Wechat / Settings 视图通用布局 ===== */
+
+.setup-view,
+.wechat-view,
+.settings-view {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(360px, 0.92fr) minmax(420px, 1.08fr);
+}
+
+/* Settings 视图特例：单列全宽（左侧文案已删除） */
+.settings-view {
+  grid-template-columns: minmax(0, 1fr);
+  /* 关键：覆盖 .main grid item 默认 align-self: stretch 在某些 Chrome 版本下
+     推算失败的 bug。直接 absolute 填满父容器 1fr cell。 */
+  position: absolute;
+  inset: 0;
+}
+
+/* 左侧文案区 */
+.setup-copy,
+.wechat-copy,
+.settings-copy {
+  border-right: 1px solid var(--line);
+  padding: 48px 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+}
+
+.nexus-desktop[data-theme="dark"] .setup-copy,
+.nexus-desktop[data-theme="dark"] .wechat-copy,
+.nexus-desktop[data-theme="dark"] .settings-copy {
+  border-right-color: var(--line);
+}
+
+.setup-copy h1,
+.wechat-copy h1,
+.settings-copy h1 {
+  margin: 0;
+  max-width: 560px;
+  font-size: 44px;
+  line-height: 1.04;
+  letter-spacing: -0.012em;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+/* Wechat 视图的标题字号略小，避免在 360-480 窄列里过度折行 */
+.wechat-copy h1 {
+  font-size: 28px;
+  line-height: 1.26;
+  letter-spacing: -0.006em;
+}
+
+.setup-copy p,
+.wechat-copy p,
+.settings-copy p {
+  max-width: 500px;
+  margin: 0;
+  line-height: 1.78;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+/* Kicker：暖色调，浅森林色背景 */
+.kicker {
+  width: fit-content;
+  border: 1px solid rgba(49, 79, 56, 0.22);
+  border-radius: 999px;
+  background: var(--forest-soft);
+  color: var(--forest);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.nexus-desktop[data-theme="dark"] .kicker {
+  background: var(--forest-soft);
+  color: #b6cfac;
+  border-color: rgba(120, 160, 110, 0.30);
+}
+
+/* ===== Setup 表单卡 ===== */
+.setup-card,
+.wechat-bind-card {
+  align-self: center;
+  justify-self: center;
+  width: min(100%, 520px);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--paper);
+  box-shadow: var(--shadow-md);
+  padding: 26px;
+}
+
+/* Wechat 视图特殊：左窄右宽，容纳完整绑定卡 */
+.wechat-view {
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+}
+
+.nexus-desktop[data-theme="dark"] .setup-card,
+.nexus-desktop[data-theme="dark"] .wechat-bind-card {
+  background: var(--paper-soft);
+  border-color: var(--line);
+}
+
+.card-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  align-items: flex-start;
+}
+
+.card-heading h2,
+.wechat-bind-card h2 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  color: var(--ink);
+}
+
+.card-heading p,
+.wechat-bind-card p {
+  margin: 0;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.card-heading .step-tag {
+  height: fit-content;
+  border-radius: 999px;
+  background: var(--forest);
+  color: var(--paper-tint);
+  padding: 8px 11px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.setup-card label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.setup-card input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--paper-soft);
+  padding: 13px 14px;
+  outline: none;
+  color: var(--ink);
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.nexus-desktop[data-theme="dark"] .setup-card input {
+  background: var(--paper);
+}
+
+.setup-card input:focus {
+  border-color: var(--forest);
+  background: var(--paper);
+}
+
+.hint {
+  border-radius: var(--r-md);
+  background: var(--forest-soft);
+  color: var(--forest);
+  padding: 12px 13px;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 6px 0 18px;
+  line-height: 1.5;
+}
+
+.nexus-desktop[data-theme="dark"] .hint {
+  background: var(--forest-soft);
+  color: #b6cfac;
+}
+
+.hint.is-error {
+  background: rgba(192, 84, 67, 0.10);
+  color: #a83a25;
+  border: 1px solid rgba(192, 84, 67, 0.30);
+}
+
+.nexus-desktop[data-theme="dark"] .hint.is-error {
+  background: rgba(192, 84, 67, 0.16);
+  color: #e1a89b;
+  border-color: rgba(192, 84, 67, 0.40);
+}
+
+/* ===== 按钮 ===== */
+.btn-primary,
+.btn-secondary {
+  border: 0;
+  border-radius: var(--r-sm);
+  padding: 11px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 140ms ease, opacity 140ms ease, transform 120ms ease;
+}
+
+.btn-primary {
+  background: var(--forest);
+  color: var(--paper-tint);
+  box-shadow: 0 6px 16px rgba(49, 79, 56, 0.20);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--forest-2);
+  transform: translateY(-1px);
+}
+
+.btn-primary:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.nexus-desktop[data-theme="dark"] .btn-secondary {
+  background: var(--paper-soft);
+  border-color: var(--line);
+}
+
+.btn-secondary:hover {
+  background: var(--paper-soft);
+  border-color: var(--line-strong);
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+.actions .btn-primary,
+.actions .btn-secondary {
+  flex: 1;
+}
+
+/* ===== Wechat 视图 ===== */
+.wechat-mark {
+  width: 60px;
+  height: 60px;
+  border-radius: 20px;
+  background: var(--wechat);
+  color: white;
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  font-weight: 900;
+  box-shadow: 0 16px 36px rgba(7, 193, 96, 0.22);
+}
+
+.wechat-benefits {
+  display: grid;
+  gap: 10px;
+}
+
+.wechat-benefits span {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(255, 253, 248, 0.75);
+  padding: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.nexus-desktop[data-theme="dark"] .wechat-benefits span {
+  background: var(--paper-soft);
+}
+
+.wechat-status-chip {
+  width: fit-content;
+  margin-bottom: 16px;
+  border-radius: 999px;
+  background: rgba(215, 167, 102, 0.18);
+  color: #8a5e1f;
+  padding: 7px 13px;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+}
+
+.nexus-desktop[data-theme="dark"] .wechat-status-chip {
+  background: rgba(215, 167, 102, 0.22);
+  color: #d7a766;
+}
+
+.wechat-status-chip.connected {
+  background: var(--forest-soft);
+  color: var(--forest);
+}
+
+.nexus-desktop[data-theme="dark"] .wechat-status-chip.connected {
+  color: #b6cfac;
+}
+
+.wechat-status-list {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0;
+}
+
+.wechat-status-list > div {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(255, 253, 248, 0.75);
+  padding: 12px;
+}
+
+.nexus-desktop[data-theme="dark"] .wechat-status-list > div {
+  background: var(--paper-soft);
+}
+
+/* 微信收件箱：列出最近 wechat_message 事件的内容 */
+.wechat-inbox {
+  margin-top: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(255, 253, 248, 0.55);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.nexus-desktop[data-theme="dark"] .wechat-inbox {
+  background: rgba(45, 42, 35, 0.55);
+}
+
+.inbox-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inbox-header strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.inbox-header .btn-secondary {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.wechat-inbox ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.inbox-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.nexus-desktop[data-theme="dark"] .inbox-item {
+  background: rgba(60, 56, 48, 0.5);
+}
+
+.inbox-time {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-content {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.wechat-status-list strong,
+.wechat-status-list span {
+  display: block;
+}
+
+.wechat-status-list strong {
+  margin-bottom: 4px;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.wechat-status-list span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ===== Settings 视图 ===== */
+.settings-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 44px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  /* 单列布局后，限制最大宽度让行不撑满整个 1320px 窗口 */
+  width: min(720px, 100%);
+  justify-self: center;
+  align-self: center;
+}
+
+.setting-row {
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  background: var(--paper);
+  padding: 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  box-shadow: 0 10px 26px rgba(24, 26, 32, 0.05);
+  min-width: 0;
+  user-select: none;
+}
+
+.setting-row > div {
+  min-width: 0;
+  /* description 区域允许文本选中 + 右击复制 */
+  user-select: text;
+}
+
+.setting-row > div {
+  min-width: 0;
+}
+
+.setting-row > div span {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.nexus-desktop[data-theme="dark"] .setting-row {
+  background: var(--paper-soft);
+  border-color: var(--line);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25);
+}
+
+.setting-row strong,
+.setting-row span {
+  display: block;
+}
+
+.setting-row span {
+  color: var(--muted);
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.setting-row strong {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.setting-row .toggle {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: var(--r-sm);
+  padding: 9px 12px;
+  font-weight: 700;
+  font-size: 13px;
+  min-width: 84px;
+  max-width: 100%;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  justify-self: end;
+}
+
+.nexus-desktop[data-theme="dark"] .setting-row .toggle {
+  background: var(--paper-soft);
+  border-color: var(--line);
+}
+
+.setting-row .toggle.is-on {
+  background: var(--forest);
+  color: var(--paper);
+  border-color: var(--forest);
+}
+
+/* 不可点击的 toggle（如 "稍后开放"）：调暗 + 灰背景 + cursor: not-allowed。
+   视觉上明确告诉用户"这不是个按钮",避免误以为可点。
+   CSS 优先级: 用 .nexus-desktop[data-theme="dark"] 提升权重以覆盖下面的
+   dark 主题默认 toggle 样式。 */
+.nexus-desktop .setting-row .toggle.is-disabled {
+  background: rgba(184, 157, 114, 0.10);
+  border-color: rgba(184, 157, 114, 0.20);
+  color: var(--muted);
+  cursor: not-allowed;
+  font-weight: 600;
+  font-style: italic;
+}
+
+.nexus-desktop[data-theme="dark"] .setting-row .toggle.is-disabled {
+  background: rgba(120, 100, 70, 0.18);
+  border-color: rgba(120, 100, 70, 0.36);
+  color: rgba(244, 234, 216, 0.62);
+}
+
+.nexus-desktop[data-theme="dark"] .setting-row .toggle.is-on {
+  background: var(--forest-2);
+  color: var(--paper);
+  border-color: var(--forest-2);
+}
+
+.nexus-desktop[data-theme="dark"] .setting-row .toggle {
+  background: var(--paper-soft);
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+/* ===== 右击复制菜单（全局浮层） ===== */
+.context-menu-floating {
+  position: fixed;
+  z-index: 1000;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  min-width: 160px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--paper);
+  box-shadow: 0 10px 32px rgba(24, 26, 32, 0.18);
+  font-size: 13px;
+  color: var(--ink);
+  animation: context-menu-in 120ms ease-out;
+}
+
+@keyframes context-menu-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.nexus-desktop[data-theme="dark"] .context-menu-floating {
+  background: var(--paper-soft);
+  border-color: var(--line);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
+}
+
+.context-menu-floating .context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-menu-floating .context-menu-item:hover {
+  background: rgba(91, 65, 34, 0.10);
+}
+
+.nexus-desktop[data-theme="dark"] .context-menu-floating .context-menu-item:hover {
+  background: rgba(255, 248, 236, 0.10);
+}
+
+.context-menu-floating .context-menu-item svg {
+  flex: 0 0 auto;
+  opacity: 0.78;
+}
+
+.context-menu-floating .kbd-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.7;
+}
+
+/* ===== 子视图顶部返回条(settings / wechat 共用) ===== */
+/* 进入设置/微信通道时,主聊天区被替换,用户没有"返回"出口容易迷失。
+   顶部贴一条小尺寸的返回按钮,沿用主题色,不和 .btn-primary 抢眼。 */
+.settings-header,
+.wechat-header {
+  position: absolute;
+  top: 14px;
+  left: 18px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-header .back-btn,
+.wechat-header .back-btn {
+  appearance: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+  background: rgba(255, 248, 236, 0.7);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 6px 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.15s ease, transform 0.1s ease;
+  backdrop-filter: blur(6px);
+}
+
+.settings-header .back-btn:hover,
+.wechat-header .back-btn:hover {
+  background: rgba(91, 65, 34, 0.08);
+}
+
+.settings-header .back-btn:active,
+.wechat-header .back-btn:active {
+  transform: scale(0.97);
+}
+
+.nexus-desktop[data-theme="dark"] .settings-header .back-btn,
+.nexus-desktop[data-theme="dark"] .wechat-header .back-btn {
+  color: var(--ink);
+  background: rgba(36, 32, 27, 0.7);
+  border-color: var(--line);
+}
+
+.nexus-desktop[data-theme="dark"] .settings-header .back-btn:hover,
+.nexus-desktop[data-theme="dark"] .wechat-header .back-btn:hover {
+  background: rgba(255, 248, 236, 0.10);
+}
