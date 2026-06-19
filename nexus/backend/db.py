@@ -76,6 +76,7 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)")
 
     _ensure_column(conn, "messages", "thinking_content", "TEXT")
+    _ensure_column(conn, "messages", "intent", "TEXT")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS memory (
@@ -365,14 +366,31 @@ def purge_old_sessions(days: int = 30) -> int:
 # ============================================================================
 
 
-def add_message(message_id: str, session_id: str, role: str, content: str, thinking_content: str | None = None) -> dict:
-    """添加消息到会话。"""
+def add_message(
+    message_id: str,
+    session_id: str,
+    role: str,
+    content: str,
+    thinking_content: str | None = None,
+    intent: str | None = None,
+) -> dict:
+    """添加消息到会话。
+
+    Args:
+        message_id: 消息 ID。
+        session_id: 所属会话 ID。
+        role: 角色（user / assistant）。
+        content: 消息正文。
+        thinking_content: 思维链内容（可空）。
+        intent: 意图分类标签（chitchat / knowledge / task / None）。
+            旧调用方不传时，字段为 NULL，行为向后兼容。
+    """
     now = datetime.now().isoformat()
     with get_db() as conn:
         conn.execute(
-            """INSERT INTO messages (id, session_id, role, content, thinking_content, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (message_id, session_id, role, content, thinking_content, now),
+            """INSERT INTO messages (id, session_id, role, content, thinking_content, intent, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (message_id, session_id, role, content, thinking_content, intent, now),
         )
         # 更新会话的更新时间
         conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
@@ -384,6 +402,7 @@ def add_message(message_id: str, session_id: str, role: str, content: str, think
             "role": role,
             "content": content,
             "thinking_content": thinking_content,
+            "intent": intent,
             "created_at": now,
         }
 
