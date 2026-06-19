@@ -415,6 +415,9 @@ def _ensure_agent_ready(app) -> None:
                 )
             except Exception as ex2:  # noqa: BLE001
                 logger.warning("意图识别 LLM 退化构造也失败，留空: %s", ex2)
+                # 退化构造失败时所有输入会被判为 chitchat,质量门仍按原逻辑跑,
+                # 运维需感知这条 INFO 以排查 LLM 不可用根因。
+                logger.info("intent LLM 未就绪,所有用户输入将兜底为 chitchat,质量门继续按原路径运行")
 
 
 def _get_intent_llm() -> Any:

@@ -140,6 +140,6 @@ console.log(
 );
 
 const ok = chitchatOk && taskOk && chitchatIntentOk && taskIntentOk;
-console.log(ok ? '✅ intent E2E 通过' : '❌ FAIL');
+console.log(ok ? '[PASS] intent E2E 通过' : '[FAIL]');
 ws.close();
 process.exit(ok ? 0 : 1);
