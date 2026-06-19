@@ -34,9 +34,10 @@ _agent_lock = threading.RLock()
 _agent_ready_event: asyncio.Event | None = None
 
 # 意图识别 LLM:复用 quality pipeline 的 judge_llm(同实例,
-# 避免双倍 token 配额与网络连接)。在 _ensure_agent_ready 之后懒构造。
+# 避免双倍 token 配额与网络连接)。
+# 在 _ensure_agent_ready 的 daemon 线程中随 judge_llm 一同赋值,
+# 60s 超时场景下该全局保持 None,getter 安全返回 None。
 _intent_llm: Any = None
-_intent_llm_lock = threading.RLock()
 
 # 微信消息处理线程池（全局复用）
 _wechat_executor: ThreadPoolExecutor | None = None
@@ -345,7 +346,7 @@ def _ensure_agent_ready(app) -> None:
     内 await。调用方应在第一次 WS 消息到达前在独立线程触发它，构造完成后
     主流程直接使用 _agent。
     """
-    global _agent, _mcp_tools
+    global _agent, _mcp_tools, _intent_llm
     with _agent_lock:
         if _agent is not None:
             return
@@ -390,44 +391,37 @@ def _ensure_agent_ready(app) -> None:
                     repair_strategy=RepairStrategy(),
                     main_llm=judge_llm,
                 )
-                logger.info("QualityPipeline 已就绪")
+                # 复用同一个 judge_llm 实例:零新模型、零新网络连接、零 token 配额翻倍
+                # 仍在 daemon 线程内赋值,不会阻塞 WS 事件循环。
+                _intent_llm = judge_llm
+                logger.info("QualityPipeline 已就绪（intent LLM 共用 judge_llm）")
             else:
                 logger.info("未配置 API Key，质量门已跳过")
         except Exception as e:  # noqa: BLE001
             logger.warning("QualityPipeline 构造失败，已跳过: %s", e)
-
-
-def _ensure_intent_llm_ready(app) -> None:
-    """懒构造意图识别 LLM:复用 quality pipeline 的 judge_llm(同实例,
-    避免双倍 token 配额与网络连接)。
-
-    必须在 ``_ensure_agent_ready`` 之后调用(quality pipeline 完成初始化)。
-    """
-    global _intent_llm
-    with _intent_llm_lock:
-        if _intent_llm is not None:
-            return
-        pipeline = getattr(app.state, "quality_pipeline", None)
-        if pipeline is not None and hasattr(pipeline, "judge"):
-            _intent_llm = pipeline.judge.llm
-        else:
-            # 退化路径:重新构造一个轻量 LLM(同 quality pipeline 配置)
+            # 退化路径:judge_llm 构造过但 QualityPipeline 装配失败时,
+            # 在 daemon 线程内重新构造一个轻量 LLM 作为 intent 兜底,
+            # 仍留在该线程不阻塞 event loop。
             try:
-                from .agent import get_llm
+                from .agent import get_llm as _get_llm_for_intent
                 from .models_config import get_active_model as _gam
 
                 _model_config = _gam() or {}
-                _intent_llm = get_llm(
+                _intent_llm = _get_llm_for_intent(
                     api_key=_model_config.get("api_key") or CONFIG.get("minimax_api_key", ""),
                     api_base=_model_config.get("api_base") or CONFIG.get("minimax_api_base"),
                     model_name=_model_config.get("name", CONFIG.get("model_name", "MiniMax-M3")),
                     temperature=0,
                 )
-            except Exception:  # noqa: BLE001
-                _intent_llm = None
+            except Exception as ex2:  # noqa: BLE001
+                logger.warning("意图识别 LLM 退化构造也失败，留空: %s", ex2)
 
 
 def _get_intent_llm() -> Any:
+    """获取意图识别 LLM。返回 ``_intent_llm`` 全局值（在 ``_ensure_agent_ready``
+    的 daemon 线程中随 ``judge_llm`` 一同赋值）；agent 懒构造尚未完成或失败时
+    返回 ``None``，调用方应按 chitchat 兜底处理。
+    """
     return _intent_llm
 
 
@@ -611,8 +605,8 @@ async def websocket_endpoint(websocket: WebSocket):
     def _get_quality_pipeline() -> Any:
         return getattr(websocket.app.state, "quality_pipeline", None)
 
-    # 等 quality pipeline 构造完再准备 intent llm(共用 judge_llm 实例)
-    _ensure_intent_llm_ready(websocket.app)
+    # intent LLM 已在 _ensure_agent_ready 内的 daemon 线程随 judge_llm 一同赋值,
+    # 60s 超时场景下该全局保持 None,_get_intent_llm() 安全返回 None。
 
     await handle_websocket(
         websocket,
