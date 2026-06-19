@@ -32,6 +32,12 @@ from typing import Any
 from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
 
 from ..config import CONFIG
+from ..db import add_message
+from ..intent.router import (
+    DEFAULT_INTENT,
+    IntentKind,
+    classify_intent,
+)
 from ..llm.policies import RetryPolicy
 from ..resilience.resume import (
     InvalidResumeToken,
@@ -126,6 +132,29 @@ def _is_retryable_error_code(error_code: str) -> bool:
     if error_code.endswith("_exhausted"):
         return False
     return error_code not in _NON_RETRYABLE_ERROR_CODES
+
+
+async def _classify_and_record(
+    get_intent_llm: Callable[[], Any] | None,
+    session_id: str,
+    user_content: str,
+) -> IntentKind:
+    """调主 LLM 分类 + 把 user 消息(含 intent)写库。
+
+    任何异常 / llm=None 一律兜底 chitchat(最安全:不影响 task 工具链)。
+    """
+    intent: IntentKind = DEFAULT_INTENT
+    llm: Any = None
+    if get_intent_llm is not None:
+        try:
+            llm = get_intent_llm()
+        except Exception:  # noqa: BLE001
+            llm = None
+    if llm is not None:
+        intent = await classify_intent(llm, user_content)
+    # 入库(用 generate uuid;不传 thinking_content,跟 add_message 默认对齐)
+    add_message(str(uuid.uuid4()), session_id, "user", user_content, intent=intent)
+    return intent
 
 
 async def _run_agent_streaming(
@@ -441,6 +470,7 @@ async def handle_websocket(
     get_agent: Callable[[], Any],
     wechat_callback: Callable | None = None,
     get_quality_pipeline: Callable[[], Any] | None = None,
+    get_intent_llm: Callable[[], Any] | None = None,
 ) -> None:
     """WebSocket 主端点的业务逻辑（不含路由装饰器）。
 
@@ -456,6 +486,9 @@ async def handle_websocket(
             客户端连接时给微信通道挂上广播。``None`` 表示不挂（仅 WS 自用）。
         get_quality_pipeline: Phase 2 Task 2.5：返回 ``QualityPipeline`` 实例
             的无参可调用。``None`` 或返回 ``None`` 时跳过质量门（向后兼容）。
+        get_intent_llm: Phase 2 Task 3：返回分类用 ``BaseChatModel`` 实例
+            的无参可调用（建议复用 quality pipeline 的 ``judge_llm``）。
+            ``None`` 或返回 ``None`` 时跳过分类，intent 列落 ``chitchat`` 兜底。
     """
     # 注册客户端
     with _clients_lock:
@@ -530,10 +563,8 @@ async def handle_websocket(
                     }
                 )
 
-            # 添加用户消息到历史
-            from ..db import add_message
-
-            add_message(str(uuid.uuid4()), session_id, "user", user_content)
+            # 添加用户消息到历史(intent 由意图识别层落库)
+            await _classify_and_record(get_intent_llm, session_id, user_content)
 
             # 使用 SessionManager 构建带记忆的 prompt
             prompt = session_manager.build_prompt(session_id, user_content)

@@ -33,6 +33,11 @@ _agent_lock = threading.RLock()
 # 后台线程构造完成后 set;timeout 60s 后放弃,走原错误路径。
 _agent_ready_event: asyncio.Event | None = None
 
+# 意图识别 LLM:复用 quality pipeline 的 judge_llm(同实例,
+# 避免双倍 token 配额与网络连接)。在 _ensure_agent_ready 之后懒构造。
+_intent_llm: Any = None
+_intent_llm_lock = threading.RLock()
+
 # 微信消息处理线程池（全局复用）
 _wechat_executor: ThreadPoolExecutor | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
@@ -392,6 +397,40 @@ def _ensure_agent_ready(app) -> None:
             logger.warning("QualityPipeline 构造失败，已跳过: %s", e)
 
 
+def _ensure_intent_llm_ready(app) -> None:
+    """懒构造意图识别 LLM:复用 quality pipeline 的 judge_llm(同实例,
+    避免双倍 token 配额与网络连接)。
+
+    必须在 ``_ensure_agent_ready`` 之后调用(quality pipeline 完成初始化)。
+    """
+    global _intent_llm
+    with _intent_llm_lock:
+        if _intent_llm is not None:
+            return
+        pipeline = getattr(app.state, "quality_pipeline", None)
+        if pipeline is not None and hasattr(pipeline, "judge"):
+            _intent_llm = pipeline.judge.llm
+        else:
+            # 退化路径:重新构造一个轻量 LLM(同 quality pipeline 配置)
+            try:
+                from .agent import get_llm
+                from .models_config import get_active_model as _gam
+
+                _model_config = _gam() or {}
+                _intent_llm = get_llm(
+                    api_key=_model_config.get("api_key") or CONFIG.get("minimax_api_key", ""),
+                    api_base=_model_config.get("api_base") or CONFIG.get("minimax_api_base"),
+                    model_name=_model_config.get("name", CONFIG.get("model_name", "MiniMax-M3")),
+                    temperature=0,
+                )
+            except Exception:  # noqa: BLE001
+                _intent_llm = None
+
+
+def _get_intent_llm() -> Any:
+    return _intent_llm
+
+
 app = FastAPI(title="Nexus Backend", lifespan=lifespan)
 
 
@@ -572,11 +611,15 @@ async def websocket_endpoint(websocket: WebSocket):
     def _get_quality_pipeline() -> Any:
         return getattr(websocket.app.state, "quality_pipeline", None)
 
+    # 等 quality pipeline 构造完再准备 intent llm(共用 judge_llm 实例)
+    _ensure_intent_llm_ready(websocket.app)
+
     await handle_websocket(
         websocket,
         get_agent=_get_current_agent,
         wechat_callback=_handle_wechat_message,
         get_quality_pipeline=_get_quality_pipeline,
+        get_intent_llm=_get_intent_llm,
     )
 
 
