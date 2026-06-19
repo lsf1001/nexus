@@ -120,7 +120,7 @@ async def test_accept_path_returns_raw_response_directly():
 
     with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
         result = await pipeline.run_with_quality(
-            question="什么是 Python？",
+            question="请帮我详细解释一下 Python 这门编程语言的核心特性和典型应用场景",
             raw_response="Python 是一种解释型编程语言。",
         )
 
@@ -151,7 +151,7 @@ async def test_repair_path_regenerates_and_returns_new_text():
 
     with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
         result = await pipeline.run_with_quality(
-            question="什么是 Python？",
+            question="请帮我详细解释一下 Python 这门编程语言的核心特性和典型应用场景",
             raw_response="Python 是同步的语言（错误）",
         )
 
@@ -176,14 +176,14 @@ async def test_repair_then_still_repair_returns_reject():
 
     with patch("nexus.backend.quality.pipeline.save_quality_score"):
         result = await pipeline.run_with_quality(
-            question="q", raw_response="r1",
+            question="请帮我详细分析一下这个方案的可行性", raw_response="r1",
         )
 
     # RepairStrategy(attempt_count=1) 时直接 REJECT（max_repair_attempts=1）
     assert result.verdict == RubricVerdict.REJECT
     assert result.repair_attempted is True
     # fallback 文本（不是 raw_response 也不是重生文本）
-    assert "答得不够好" in result.response_text or "抱歉" in result.response_text
+    assert "我没完全理解" in result.response_text
 
 
 @pytest.mark.asyncio
@@ -199,11 +199,11 @@ async def test_repair_regenerate_llm_failure_falls_back_to_reject():
     pipeline = _make_pipeline(judge, main_llm)
 
     with patch("nexus.backend.quality.pipeline.save_quality_score"):
-        result = await pipeline.run_with_quality(question="q", raw_response="r1")
+        result = await pipeline.run_with_quality(question="请帮我详细分析一下这个方案的可行性", raw_response="r1")
 
     assert result.verdict == RubricVerdict.REJECT
     assert result.repair_attempted is True
-    assert "抱歉" in result.response_text or "答得不够好" in result.response_text
+    assert "我没完全理解" in result.response_text
 
 
 # ==================== REJECT 路径 ====================
@@ -223,13 +223,13 @@ async def test_reject_path_returns_fallback_text():
     pipeline = QualityPipeline(judge=judge, repair_strategy=strategy, main_llm=main_llm, session_id="s")
 
     with patch("nexus.backend.quality.pipeline.save_quality_score"):
-        result = await pipeline.run_with_quality(question="q", raw_response="r")
+        result = await pipeline.run_with_quality(question="请帮我详细分析一下这个方案的可行性", raw_response="r")
 
     assert result.verdict == RubricVerdict.REJECT
     assert result.repair_attempted is False
     # 不应调主 LLM
     assert main_llm.call_count == 0
-    assert "抱歉" in result.response_text or "答得不够好" in result.response_text
+    assert "我没完全理解" in result.response_text
 
 
 # ==================== 异常降级 ====================
@@ -254,7 +254,7 @@ async def test_judge_unavailable_degrades_to_reject():
     pipeline = _make_pipeline(judge, main_llm)
 
     with patch("nexus.backend.quality.pipeline.save_quality_score"):
-        result = await pipeline.run_with_quality(question="q", raw_response="r")
+        result = await pipeline.run_with_quality(question="请帮我详细分析一下这个方案的可行性", raw_response="r")
 
     assert result.verdict == RubricVerdict.REJECT
     assert "评分服务不可用" in result.reasoning
@@ -271,7 +271,7 @@ async def test_quality_scores_written_with_correct_verdict():
     pipeline = _make_pipeline(judge, main_llm, session_id="session-xyz")
 
     with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
-        await pipeline.run_with_quality(question="q", raw_response="r")
+        await pipeline.run_with_quality(question="请帮我详细分析一下这个方案的可行性", raw_response="r")
 
     assert mock_save.call_count == 4
     for call in mock_save.call_args_list:
@@ -293,7 +293,7 @@ async def test_repair_round_persists_with_prefix():
     pipeline = _make_pipeline(judge, main_llm, session_id="s")
 
     with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
-        await pipeline.run_with_quality(question="q", raw_response="r")
+        await pipeline.run_with_quality(question="请帮我详细分析一下这个方案的可行性", raw_response="r")
 
     # 4 + 4 = 8 次 save；后 4 次 reasoning 含 [repair] 前缀
     assert mock_save.call_count == 8
@@ -311,7 +311,7 @@ async def test_no_session_id_skips_persistence():
     pipeline = _make_pipeline(judge, main_llm, session_id="")
 
     with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
-        result = await pipeline.run_with_quality(question="q", raw_response="r")
+        result = await pipeline.run_with_quality(question="请帮我详细分析一下这个方案的可行性", raw_response="r")
 
     assert result.verdict == RubricVerdict.ACCEPT
     assert mock_save.call_count == 0
@@ -361,7 +361,7 @@ async def test_message_id_propagated_to_save_quality_score():
 
     with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
         await pipeline.run_with_quality(
-            question="q", raw_response="r", message_id="msg-abc"
+            question="请帮我详细分析一下这个方案的可行性", raw_response="r", message_id="msg-abc"
         )
 
     assert mock_save.call_count == 4
@@ -383,10 +383,94 @@ async def test_message_id_propagated_through_repair_round():
 
     with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
         await pipeline.run_with_quality(
-            question="q", raw_response="r", message_id="msg-xyz"
+            question="请帮我详细分析一下这个方案的可行性", raw_response="r", message_id="msg-xyz"
         )
 
     # 4 (first round) + 4 (second round) = 8 saves
     assert mock_save.call_count == 8
     for call in mock_save.call_args_list:
         assert call.kwargs["message_id"] == "msg-xyz"
+
+
+# ==================== 短闲聊短路（chitchat short-circuit） ====================
+
+
+@pytest.mark.asyncio
+async def test_chitchat_short_input_skips_quality_gate():
+    """短闲聊（<=12字,无任务关键词）→ 跳过 judge,直接 ACCEPT 原 raw_response。
+
+    设计动机:用户发"我好饿"/"你好"这类短输入,LLM 给的共情回复完全合理;
+    跑完整 quality gate 反而把 relevance / tool_correctness 评得很低,触发 REJECT
+    fallback —— 体验差。所以这类输入走短路,让 LLM 的自然回复直达用户。
+    """
+    judge = _make_judge_with_responses([_default_rubric_responses(0.95)])
+    main_llm = _QueueLLM(responses=["本不该被调用"])
+    pipeline = _make_pipeline(judge, main_llm)
+
+    with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
+        result = await pipeline.run_with_quality(
+            question="我好饿",
+            raw_response="出门左转有家面馆,要不试试?",
+        )
+
+    assert result.verdict == RubricVerdict.ACCEPT
+    assert result.response_text == "出门左转有家面馆,要不试试?"
+    assert result.repair_attempted is False
+    # 短路 → 不评分 → 无 scores
+    assert result.scores == ()
+    # 短路 → 不写库
+    assert mock_save.call_count == 0
+    # 短路 → 不调主 LLM
+    assert main_llm.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_chitchat_with_task_keyword_does_not_short_circuit():
+    """短输入但含任务关键词 → 走完整 quality gate(不被短路)。"""
+    judge = _make_judge_with_responses([_default_rubric_responses(0.95)])
+    main_llm = _QueueLLM(responses=["unused"])
+    pipeline = _make_pipeline(judge, main_llm)
+
+    with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
+        # "帮我" 是任务关键词 → 即使只有 6 字也走完整 gate
+        result = await pipeline.run_with_quality(
+            question="帮我写", raw_response="好,你想写什么?",
+        )
+
+    # 完整 gate 跑过,scores 应有 4 条
+    assert len(result.scores) == 4
+    assert mock_save.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_long_input_does_not_short_circuit():
+    """长输入(>12字)→ 走完整 quality gate,不被短路。"""
+    judge = _make_judge_with_responses([_default_rubric_responses(0.95)])
+    main_llm = _QueueLLM(responses=["unused"])
+    pipeline = _make_pipeline(judge, main_llm)
+
+    with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
+        result = await pipeline.run_with_quality(
+            question="今天天气真好啊我想出去外面走走看看风景",  # 16 字,strip 后 > 12 → 走完整 gate
+            raw_response="出门散步挺好的",
+        )
+
+    assert len(result.scores) == 4
+    assert mock_save.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_chitchat_empty_raw_response_still_runs_gate():
+    """短路要求 raw_response 非空 —— 空 raw_response 仍走完整 gate 兜底。"""
+    judge = _make_judge_with_responses([_default_rubric_responses(0.95)])
+    main_llm = _QueueLLM(responses=["unused"])
+    pipeline = _make_pipeline(judge, main_llm)
+
+    with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
+        result = await pipeline.run_with_quality(
+            question="你好", raw_response="",
+        )
+
+    # raw_response 为空 → 不短路 → 走完整 gate → 4 个 scores
+    assert len(result.scores) == 4
+    assert mock_save.call_count == 4
