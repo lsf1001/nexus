@@ -1,0 +1,192 @@
+# Changelog
+
+Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
+版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
+
+---
+
+## [Unreleased] — 意图识别路由
+
+**分支**：`codex/macos-dmg-app`（6 commits since `362809b`，356 tests，DMG CDP 真实环境 E2E 验证通过）
+
+> 给 Nexus 单 LLM 主对话加 1-shot 意图识别层：每条 user 消息先经 1 次轻量工具调用分类，分类结果落库 `messages.intent`，与现有质量门联动（chitchat 走原短路、knowledge/task 走完整 judge）。
+> 详细计划见 `docs/superpowers/plans/2026-06-19-intent-recognition-routing.md`。
+
+### Added
+- **`nexus/backend/intent/router.py`**：`classify_intent()` 用 LangChain `bind_tools` 1-shot 分类 `chitchat` / `knowledge` / `task`，8s 超时 + 4 条兜底路径（异常 / 超时 / 无 tool_call / 未知 tool 名）一律返回 `chitchat`（最安全：质量门已有 chitchat 短路）
+- **`nexus/backend/intent/__init__.py`**：统一导出 6 个公共符号
+- **DB 迁移**：`messages` 表新增 `intent TEXT` 列，走 `_ensure_column()` 自动 ALTER，老库无感
+- **WS 集成**：`handle_websocket` 收到 user 消息时先调 `_classify_and_record` 分类并把 intent 一并写库；通过 `get_intent_llm` 回调注入 LLM 实例
+- **零新依赖**：复用主 `ChatModel` 实例（与 quality gate 的 `judge_llm` 共用同一对象），不增加 token 配额与网络连接
+
+### Tests
+- `tests/test_intent_router.py`：6 用例（3 类命中 / 无 tool_call / LLM 异常 / 超时 / 未知 tool 名）
+- `tests/test_intent_ws_integration.py`：2 用例（`_classify_and_record` 路径、`get_intent_llm=None` 兼容）
+- `tests/test_db_migrations_intent.py`：3 用例（fresh create、列存在、迁移幂等）
+- `frontend/e2e/dmg-cdp/test-dmg-intent.mjs`：DMG CDP 真实环境 2 用例（闲聊 → chitchat 137 字响应；求和算法 → knowledge 431 字响应），覆盖 WebSocket 流式 + sqlite3 直查 intent 列
+
+### Risk Mitigation
+- 退化构造失败时所有输入判为 chitchat，质量门仍按原路径运行；INFO 日志提示运维
+- `_classify_and_record` 完全运行在事件循环内（`async def`），无子线程桥接风险
+- `models.json` 写入、API key 日志、密钥输出等原有约束未破坏
+
+---
+
+## [Unreleased] — Phase 1+2 容错 + 质量门
+
+**合并提交**：`7ea9cbe`（22 commits, 303 tests, 真环境验收通过）
+
+> 本次发布包含两个大阶段：Phase 1（容错）与 Phase 2（质量门）。
+> 详细计划见 `docs/superpowers/plans/`，进度见 `docs/superpowers/progress.md`。
+
+### Added — Phase 1：容错
+
+#### 断线续传（WebSocket 重连）
+- 新增 `nexus/backend/resume.py`：HMAC-SHA256 + base64url 签名的 resume token
+- 新增 `GET /api/sessions/{session_id}/resume` 端点：客户端用上次收到的最后一个 `event_id` + 收到的 token 续拉事件
+- 新增 `resume_tokens` 表（`token`, `session_id`, `last_event_id`, `expires_at`）
+- WS 断线后重连 → 服务端从 Redis/SQLite 重放未确认事件，不丢消息
+- 端到端测试：`tests/test_resume.py`（含 token 过期、签名验证、event_id 单调性）
+
+#### LLM 错误分类与降级
+- 新增 `nexus/backend/llm/errors.py`：`ClassifiedError` + `LLMErrorKind` 枚举
+  - 错误分类：`AUTH` / `RATE_LIMIT` / `TIMEOUT` / `NETWORK` / `BAD_REQUEST` / `SERVER` / `UNKNOWN`
+  - 每类标记 `retryable` 标志，驱动重试策略
+- 新增 `nexus/backend/llm/wrapper.py`：`ResilientRunnable`（Pydantic v2 `BaseChatModel` 子类）
+  - 内置指数退避重试（最多 N 次）
+  - 失败时打点日志 + 抛 `ClassifiedError` 给上层降级
+  - 已被 `nexus/backend/agent.py` 的 `get_llm()` 工厂使用
+
+#### WS 边界
+- WS 处理器在 judge / 主 LLM 失败时返回结构化 `error` 事件而非断开连接
+- 客户端可重连后用 resume token 续传
+- 测试：`tests/test_ws_fault_tolerance.py`
+
+#### 配套 CLI
+- `scripts/check_lm.py`：诊断 LLM 凭据、连通性、当前激活模型
+
+### Added — Phase 2：质量门（Rubrics）
+
+#### Rubric 数据层
+- 新增 `nexus/backend/rubrics/schemas.py`：
+  - `RubricVerdict` 枚举（`ACCEPT` / `REPAIR` / `REJECT`）
+  - `Rubric` / `Score` / `RubricVerdictResult` 三个 frozen dataclass
+  - 4 个内置维度常量 + `DEFAULT_RUBRICS` 元组
+  - 阈值映射规则：`>=0.8` → ACCEPT，`>=0.6` → REPAIR，否则 REJECT
+  - `safety` 单独更严：`>=0.9` / `>=0.7`
+- 全部不可变（`frozen=True`），符合 CLAUDE.md §11
+
+#### Rubric Judge
+- 新增 `nexus/backend/rubrics/judge.py`：`RubricJudge`
+  - 并发 4 维度评分（`asyncio.gather`）
+  - 单 rubric 超时 30s（`per_rubric_timeout`）
+  - JSON 解析失败时重试 1 次（`max_parse_retries=1`）
+  - 全失败抛 `RubricJudgeError`，由 pipeline 降级 REJECT
+- 新增 `nexus/backend/rubrics/prompts.py`：4 个中文 prompt 模板（200-500 字，含正反例 + 严格 JSON 输出约束）
+- 新增 `nexus/backend/rubrics/tool_evaluator.py`：tool_correctness 维度的工具调用正确性评估
+
+#### Repair 决策
+- 新增 `nexus/backend/rubrics/repair.py`：`RepairStrategy`
+  - `safety_veto=True`（plan 强制）：safety < 0.5 → 一票否决，直接 REJECT
+  - `max_repair_attempts=1`（plan 强制）：首次 REPAIR 触发主 LLM 重生，二次仍 REPAIR → REJECT
+  - 加权聚合：`Σ(score_i × weight_i)`
+- 新增 `nexus/backend/quality/pipeline.py`：`QualityPipeline`
+  - 公开方法 `run_with_quality(question, raw_response, message_id=None) -> FinalResponse`
+  - 三段式：judge → decide → repair → persist
+  - 异常全收口：judge 失败、主 LLM 失败 → 降级 REJECT fallback，不抛
+- 新增 `nexus/backend/quality/__init__.py`
+
+#### DPO / KTO 偏好数据导出
+- 新增 `nexus/backend/rubrics/exporter.py`：`PreferenceExporter`
+  - `export_dpo(records, out_path)`：gap ≥ 0.3 的成对偏好
+  - `export_kto(records, out_path)`：逐条二元偏好
+- 新增 `nexus/backend/rubrics/_cli_helpers.py`：`load_preference_records`
+  - **修复**：从 quality_scores 按 `message_id` 分组 + 求平均，避免同 message 排序错乱
+- 真环境 100 轮对话可导 30+ 条 DPO
+
+#### Meta-eval
+- 新增 `nexus/backend/rubrics/meta_eval.py`
+  - `compute_pearson(xs, ys)`：纯函数，常数方差返回 0
+  - `compute_cohens_kappa(a, b)`：纯函数，单类别返回 0
+  - `KAPPA_ALERT_THRESHOLD = 0.4`（plan 强制报警线）
+  - `MetaEvalSample` / `MetaEvalResult`（frozen）
+  - `run_meta_eval(judge, samples)`：集成 + 算指标
+- 新增 `scripts/eval_rubrics.py` CLI
+  - 退出码：0 = kappa ≥ 0.4，1 = kappa < 0.4
+  - CI 集成入口
+
+#### 配套数据
+- 新增 `data/rubric_eval_samples.jsonl`：12 条人工标注样本（覆盖 4 维度 × accept/repair/reject）
+- 新增 `data/eval_report.json`：当前 meta-eval 结果（Pearson 0.973, kappa 0.591）
+
+### Changed — 集成
+
+- `nexus/backend/main.py`：
+  - 启动期构造 `QualityPipeline(judge=RubricJudge(llm=...), repair_strategy=..., main_llm=...)`
+  - 注入 `app.state.quality_pipeline`
+  - **关键修复**：judge LLM 改用 `get_llm()` + `get_active_model()`，与主 Agent 一致（之前用 `_agent` 报错因 deepagent compiled graph 不是 chat model）
+- `nexus/backend/api/ws.py`：
+  - 在调 pipeline 前生成 `message_id = str(uuid.uuid4())`
+  - 把 `message_id` 同时透传给 `run_with_quality` 和 `add_message`，保证 quality_scores 行可关联到具体 assistant 消息
+- `nexus/backend/quality/pipeline.py`：
+  - `run_with_quality` 新增 `message_id` 参数（默认 `None`）
+  - `_persist_scores` 把 `message_id` 透传给 `save_quality_score`
+
+### Fixed — 真环境验证发现的 3 个 bug
+
+1. **`RubricJudge(llm=_agent)` 误用**
+   - 现象：judge 报 `AttributeError: 'CompiledGraph' object has no attribute 'ainvoke'`（实际能调，但返回的是 LangGraph state dict）
+   - 修复：改用 `get_llm()` 构造的 `ResilientRunnable`（真正的 `BaseChatModel` 子类）
+
+2. **judge LLM 404**
+   - 现象：judge 调 LLM 返回 `404 not_found`
+   - 根因：`CONFIG["model_name"]` / `CONFIG["minimax_api_base"]` 默认值与主 Agent 的 `get_active_model()` 不一致
+   - 修复：`main.py` 和 `scripts/eval_rubrics.py` 都改用 `get_active_model()` 取值
+
+3. **`quality_scores.message_id` 全部为 NULL**
+   - 现象：所有 quality_scores 行的 `message_id` 字段都是 NULL
+   - 根因：pipeline 没接收 message_id
+   - 修复：见 Changed 节
+
+### Tests
+
+- **测试总数**：303 passed（合并时）
+- **新增 / 修改**：
+  - `tests/test_rubric_schemas.py`
+  - `tests/test_rubric_judge.py`
+  - `tests/test_rubric_repair.py`
+  - `tests/test_rubric_meta_eval.py`
+  - `tests/test_quality_pipeline.py`（含 message_id 透传 2 个测试）
+  - `tests/test_resume.py`
+  - `tests/test_ws_fault_tolerance.py`
+  - `tests/test_llm_wrapper.py`
+  - 配套集成测试若干
+
+### Documentation
+
+- 新增 `docs/operations/quality.md`：质量门调优指南（阈值、prompt、meta-eval、故障排查）
+- `docs/superpowers/progress.md`：更新 Phase 1+2 全部完成 + 真环境验收 4 条全过
+
+### Verified — 真环境验收
+
+`.venv/bin/python scripts/verify_phase2.py --all` 全过：
+
+| 步骤 | 验证内容 | 结果 |
+|------|---------|------|
+| 1 | WS 烟测（发 "你好" 收到 done） | ✅ |
+| 2 | 诱导幻觉 → REJECT（3 个不存在的概念） | ✅（8 条 REJECT 记录入库） |
+| 3 | REPAIR 路径触发 | ✅（verdict 分布里有 repair） |
+| 4 | 100 轮对话 + 导出 ≥ 30 DPO | ✅（导出 34 DPO / 68 KTO） |
+| 5 | meta-eval Pearson + kappa | ✅（Pearson 0.973 / kappa 0.591 ≥ 0.4） |
+
+---
+
+## 版本策略
+
+Nexus 仍在 pre-1.0 阶段，版本号在 0.x 区间。本节内容合并到下次正式发版时再切分版本号。
+
+后续每次 phase 合并后追加新节，标题格式：
+
+```
+## [Unreleased] — <阶段名> + <一句话总结>
+```
