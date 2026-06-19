@@ -1,0 +1,26 @@
+{
+  "appId": "com.yexiaobai.nexus",
+  "productName": "Nexus",
+  "directories": {
+    "output": "../release"
+  },
+  "files": [
+    "dist/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../dist/nexus-backend",
+      "to": "nexus-backend"
+    },
+    {
+      "from": "../frontend/dist",
+      "to": "frontend/dist"
+    }
+  ],
+  "mac": {
+    "target": ["dmg"],
+    "category": "public.app-category.productivity",
+    "icon": "assets/icon.icns"
+  }
+}
