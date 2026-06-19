@@ -127,10 +127,6 @@ def _handle_wechat_message(channel_message) -> None:
         logger.error(f"Error in _handle_wechat_message: {e}")
 
 
-# 微信用户 session 映射
-_wechat_sessions: dict[str, str] = {}  # user_id -> session_id
-
-
 def _process_wechat_message_sync(channel_message) -> None:
     """在线程池中调用异步处理函数：将协程提交到主事件循环执行。
 
@@ -373,11 +369,16 @@ def _ensure_agent_ready(app) -> None:
             _model_config = _get_active_model() or {}
             judge_api_key = _model_config.get("api_key") or CONFIG.get("minimax_api_key", "")
             if judge_api_key:
+                # judge LLM 固定 temperature=0:质量门是确定性评估,同样的 raw_response
+                # 应该稳定产出同样的 verdict。沿用主对话 0.7 会让 ACCEPT/REPAIR/REJECT
+                # 在边界态反复横跳,影响 quality gate 稳定性(repair 重生也会跟着抖动)。
+                # 主对话 LLM 是另一个独立实例(new_agent 内部用 get_llm(temperature=0.7)
+                # 构造),互不影响。
                 judge_llm = get_llm(
                     api_key=judge_api_key,
                     api_base=_model_config.get("api_base") or CONFIG.get("minimax_api_base"),
                     model_name=_model_config.get("name", CONFIG.get("model_name", "MiniMax-M3")),
-                    temperature=_model_config.get("temperature", CONFIG.get("temperature", 0.7)),
+                    temperature=0,
                 )
                 app.state.quality_pipeline = QualityPipeline(
                     judge=RubricJudge(llm=judge_llm),
