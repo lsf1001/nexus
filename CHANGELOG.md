@@ -32,6 +32,51 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [Unreleased] — 可观测性子系统（JSONL + 4 产品事件）
+
+**分支**：`codex/macos-dmg-app`（10 commits since `6448722`，378 tests，真实环境 E2E 验证通过）
+
+> 给 Nexus 加 observability 子系统：JSONL 结构化日志 + 4 个产品事件 + LangChain callback 通道复用 + env 三档配置。不造轮子，复用 stdlib `logging.handlers.RotatingFileHandler` + LangChain `BaseCallbackHandler`。
+> 详细计划见 `docs/superpowers/plans/2026-06-20-observability-subsystem.md`，运维文档见 `docs/operations/logging.md`。
+
+### Added
+- **`nexus/backend/observability/events.py`**：4 个产品事件 dataclass（`ChatStart` / `IntentClassified` / `QualityVerdict` / `ChatEnd`），frozen + `to_dict()` 序列化，`EVENT_SCHEMA_VERSION="1.0.0"`
+- **`nexus/backend/observability/sink.py`**：`EventSink` 类，JSONL / text 双格式，10MB × 5 `RotatingFileHandler` 轮转，threading.Lock 并发安全，lazy 父目录创建
+- **`nexus/backend/observability/logger.py`**：`setup_logging()` 幂等入口，env 三档（`NEXUS_LOG_FORMAT` / `NEXUS_LOG_FILE` / `NEXUS_LOG_LEVEL`），stdlib `_JsonFormatter`（无第三方依赖），预设 `deepagents=INFO` / `langchain=WARNING` / `langchain_core=WARNING`
+- **`nexus/backend/observability/handler.py`**：`NexusLogHandler(BaseCallbackHandler)` 6 回调：on_llm_start/end（含 token 统计）/ on_tool_start/end / on_chain_start/end，duration_ms 用 `time.monotonic` 算，sink 写失败吞异常
+- **集成点**：
+  - `nexus/backend/main.py` 启动期调 `setup_logging()` 取代 `logging.basicConfig`
+  - `nexus/backend/agent.py` 总是挂 `NexusLogHandler`（走 EventSink 落盘），仅 `NEXUS_AGENT_VERBOSE=1` 时额外挂 `StdOutCallbackHandler`
+  - `nexus/backend/api/ws.py` 新增 `emit_chat_event()` 公开 API + 4 个 anchor 点（chat.start / intent.classified / quality.verdict / chat.end）
+  - `chat_start_monotonic` 在 ChatStart 之后立即 `time.monotonic()`，ChatEnd 复用算 `duration_ms`
+
+### Tests
+- `tests/test_observability_events.py`：5 用例（round-trip / latency_ms / scores dict / duration+retries / frozen）
+- `tests/test_observability_sink.py`：5 用例（JSONL 追加 / text 格式 / 父目录创建 / 4 线程 × 50 并发 / close 幂等）
+- `tests/test_observability_logger.py`：5 用例（autouse fixture 隔离 root logger，验证 default path / text 格式 / json 格式 / level env / 幂等）
+- `tests/test_observability_handler.py`：4 用例（isinstance BaseCallbackHandler / on_llm_end 写 2 事件 / on_tool_start 含 tool 名 / sink 失败不破 callback）
+- `tests/test_observability_ws_integration.py`：3 用例（emit_chat_event 写 sink / 吞异常 / 4 event round-trip）
+
+### Verification
+- 真实环境 E2E（`NEXUS_LOG_FORMAT=json NEXUS_LOG_FILE=/tmp/e2e-final.log`）：2 次 chat（chitchat + 知识类）触发 4 条 `chat.*` 事件（chat.start + chat.end 各 2），verdict 均为 accept，LLM 调用 2 次，intent 分类正确（chitchat / knowledge 各 1）
+- 端到端验证脚本：`/tmp/ws-verbose-test.py` / `/tmp/ws-knowledge-test.py` / `jq` 查询示例见 `docs/operations/logging.md`
+- pytest：378 passed（原 356 + 新 22）
+
+### Limitations
+- `chunks` 字段当前是 `len(response_text) // 16` 估算值（精确 chunk count 在 `_run_agent_streaming` 内部），后续若需精确值扩展该函数返回 `chunk_count` 即可
+- `chat.end` 当前只在正常完成分支 emit；澄清挂起 / 错误流分支不发，后续若需覆盖补发可扩展 `handle_websocket`
+- `langchain` / `langchain_core` 默认 WARNING 级，避免 stream / token 刷屏；`deepagents=INFO` 是因为它本身日志覆盖少
+- ruff 仍有 9 条 pre-existing 错（`tests/test_config_loading.py` / `tests/test_fixes_round2.py` / `tests/test_wechat_smoke.py` 的未排序 import / 未用导入），与本任务无关，未在本任务中修复
+
+### Files
+- 新增：`nexus/backend/observability/{events,sink,logger,handler,__init__}.py`（5 文件）
+- 新增：`tests/test_observability_{events,sink,logger,handler,ws_integration}.py`（5 文件）
+- 新增：`docs/operations/logging.md`
+- 修改：`nexus/backend/main.py` / `nexus/backend/agent.py` / `nexus/backend/api/ws.py`（3 文件）
+- 顺手：`tests/test_observability_handler.py` 顶部 `import dataclasses` 整理（style）；`handler.py` docstring 与实现对齐
+
+---
+
 ## [Unreleased] — Phase 1+2 容错 + 质量门
 
 **合并提交**：`7ea9cbe`（22 commits, 303 tests, 真环境验收通过）
