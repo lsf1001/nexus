@@ -13,6 +13,7 @@
 """
 
 import logging
+import os as _os
 import re
 from pathlib import Path
 from typing import Any
@@ -97,7 +98,30 @@ def _build_system_prompt() -> str:
 - 不要执行危险命令
 - 不要访问未授权的文件"""
 
-    parts = [identity, capabilities, security]
+    clarification_rule = """【主动澄清规则】
+当用户输入**意图不明确、有多种合理解释、或关键参数缺失**时,
+**必须**调用 ask_user 工具提问(不是用自然语言反问)。
+ask_user 会暂停当前回合,前端弹出结构化澄清表单(候选项 / 自由输入),
+用户体验比自然语言追问更精准。
+
+判断标准(满足任一就调 ask_user):
+- 单字/单动词指令,如"我想吃"、"帮我处理一下"、"做个脚本"
+- 缺少关键参数,如"查一下天气"(哪个城市?)、"写个函数"(做什么?)
+- 任务有多种合理执行路径,如"整理项目"(哪些维度?哪些文件?)
+- 工具失败需要回退决策(让用户二选一)
+
+**候选项(关键)**:
+- 必须传 2-6 个候选项,不要传 None/空
+- 覆盖主要场景 + 留"其他"兜底
+- 把最常见的 1 个放第一个
+- 仅在无法枚举时(开放式问题)才允许 options=None
+
+不要在以下情况调 ask_user:
+- 用户已经说清楚了 → 直接执行
+- 一次性简单事实问答 → 直接回答
+- 闲聊 → 自然对话即可"""
+
+    parts = [identity, capabilities, clarification_rule, security]
     return "\n\n".join(parts)
 
 
@@ -359,7 +383,7 @@ def create_agent(
 
     from deepagents import create_deep_agent
 
-    return create_deep_agent(
+    agent = create_deep_agent(
         model=llm,
         tools=all_tools,
         system_prompt=get_system_prompt(),
@@ -373,6 +397,32 @@ def create_agent(
         if skills_dir.exists()
         else [],
     )
+
+    # 总是挂 NexusLogHandler(走 setup_logging 的 EventSink,JSONL/text 落盘)
+    from .observability import EventSink, NexusLogHandler
+
+    # EventSink 是全局单例,由 setup_logging() 在 main.py 启动期创建并 attach 到
+    # ``logging.getLogger("nexus.observability")`` 的 handler 上。但 callback 需要
+    # 显式 sink 实例,所以从环境变量解析路径重建一个。
+    _sink_path = Path(
+        _os.environ.get("NEXUS_LOG_FILE", str(Path.home() / ".nexus" / "logs" / "nexus.log"))
+    ).expanduser()
+    _sink_fmt = _os.environ.get("NEXUS_LOG_FORMAT", "text")
+    agent._nexus_log_handler = NexusLogHandler(sink=EventSink(path=_sink_path, format=_sink_fmt))
+
+    # 排障模式额外挂 StdOutCallbackHandler(text 调试用,生产不开启)
+    if _os.environ.get("NEXUS_AGENT_VERBOSE") == "1":
+        from langchain_core.callbacks import StdOutCallbackHandler
+
+        # 深 agents / LangGraph 把 callbacks 存在 .config;挂到 agent config 入口
+        # 副作用:每次 astream 时 ws.py 的 RunnableConfig 也得带这个 handler。
+        # 这里只挂在 agent 上,下次 astream 时由 ws.py 注入。
+        agent._nexus_verbose_handler = StdOutCallbackHandler()
+        logger.info("NEXUS_AGENT_VERBOSE=1, 已挂 StdOutCallbackHandler 到 agent(排障模式)")
+    else:
+        agent._nexus_verbose_handler = None
+
+    return agent
 
 
 def is_research_topic(topic: str) -> bool:

@@ -206,8 +206,20 @@ async def _run_agent_streaming(
 
     # StreamGuard 包 astream_events；每次重试会重新调一次 astream_events
     # （幂等重试，由上游 LLM 自行决定是否真幂等）。
+    # 挂 NexusLogHandler(必挂,生产 JSONL 落盘) + StdOutCallbackHandler(仅 verbose 模式)
+    log_handler = getattr(agent, "_nexus_log_handler", None)
+    verbose_handler = getattr(agent, "_nexus_verbose_handler", None)
+    astream_kwargs: dict[str, Any] = {}
+    callbacks: list = []
+    if log_handler is not None:
+        callbacks.append(log_handler)
+    if verbose_handler is not None:
+        callbacks.append(verbose_handler)
+    if callbacks:
+        astream_kwargs["config"] = {"callbacks": callbacks}
+
     guard = StreamGuard(
-        astream_events=lambda input, **kw: agent.astream_events(input, **kw),
+        astream_events=lambda input, **kw: agent.astream_events(input, **{**astream_kwargs, **kw}),
         retry_policy=WS_RETRY_POLICY,
         max_total_retries=2,
     )
@@ -220,7 +232,8 @@ async def _run_agent_streaming(
     # names (on_chat_model_stream / on_tool_start / on_tool_end) and the
     # same data shape (data.chunk / data.output), so the rest of the loop
     # works unchanged.
-    async for event in guard.astream_events({"messages": prompt["messages"]}, version="v2"):
+    astream_kwargs_with_version = {**astream_kwargs, "version": "v2"}
+    async for event in guard.astream_events({"messages": prompt["messages"]}, **astream_kwargs_with_version):
         event_id = int(event.get("event_id", 0))
         event_type = event.get("event")
 
