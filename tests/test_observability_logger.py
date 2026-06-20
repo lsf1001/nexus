@@ -25,6 +25,14 @@ def reset_root_logger():
     saved_attr = getattr(root, "_nexus_observability_configured", None)
     root.handlers = []
     root.setLevel(logging.WARNING)
+    # 必须在 setup 前清掉 marker,否则 main.py 启动期 setup_logging() 留下
+    # 的 _nexus_observability_configured=True 会让下一次 setup_logging() 早退,
+    # 不再写日志文件。fixture 末尾按 saved_attr 恢复。
+    if getattr(root, "_nexus_observability_configured", False):
+        try:
+            delattr(root, "_nexus_observability_configured")
+        except AttributeError:
+            pass
     yield
     # 关闭并清掉本次测试挂上去的 handler,避免 RotatingFileHandler 持有打开的 fd
     for h in list(root.handlers):

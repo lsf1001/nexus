@@ -22,6 +22,7 @@ from .api.ws import (
 from .config import CONFIG
 from .mcp import load_all_mcp_tools
 from .models_config import get_active_model
+from .observability import setup_logging
 from .routes import model_config as model_config_routes
 from .sessions import router as sessions_router
 
@@ -86,7 +87,7 @@ async def _resolve_wechat_session(user_id: str, account_id: str) -> str:
     return session_id
 
 
-logging.basicConfig(level=logging.INFO)
+setup_logging()  # env 驱动:NEXUS_LOG_FORMAT/FILE/LEVEL
 logger = logging.getLogger(__name__)
 
 
