@@ -25,8 +25,10 @@ import json
 import logging
 import re
 import threading
+import time
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -39,6 +41,8 @@ from ..intent.router import (
     classify_intent,
 )
 from ..llm.policies import RetryPolicy
+from ..observability import ChatEnd, ChatStart, IntentClassified, QualityVerdict
+from ..observability.sink import EventSink
 from ..resilience.resume import (
     InvalidResumeToken,
     make_token,
@@ -50,6 +54,116 @@ logger = logging.getLogger(__name__)
 
 # WS 流式响应的默认重试策略（基延迟 0.1s，上限 2s，±20% 抖动）
 WS_RETRY_POLICY = RetryPolicy(max_attempts=3, base_delay=0.1, max_delay=2.0, jitter=0.2)
+
+# 产品级观测事件 sink 单例:首次调用时按 env 重建,后续复用。
+# 重建路径与 setup_logging 一致:env NEXUS_LOG_FILE / NEXUS_LOG_FORMAT 决定落盘位置与格式。
+_observability_sink: EventSink | None = None
+
+
+def _get_observability_sink() -> EventSink:
+    """获取全局 EventSink 单例。
+
+    首次调用时按 env 重建;后续复用。
+    路径 / 格式遵循 :func:`nexus.backend.observability.logger.setup_logging`。
+    """
+    global _observability_sink
+    if _observability_sink is None:
+        import os as _os
+        from pathlib import Path as _Path
+
+        _path = _Path(
+            _os.environ.get("NEXUS_LOG_FILE", str(_Path.home() / ".nexus" / "logs" / "nexus.log"))
+        ).expanduser()
+        _fmt = _os.environ.get("NEXUS_LOG_FORMAT", "text")
+        _observability_sink = EventSink(path=_path, format=_fmt)
+    return _observability_sink
+
+
+def emit_chat_event(event: object) -> None:
+    """公开 API:ws.py 各处 emit 产品事件。
+
+    任何异常吞掉,观测层不能影响主流程。
+    """
+    try:
+        _get_observability_sink().emit(event)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001 — 观测层异常不能影响主流程
+        logger.exception("emit_chat_event 失败,已吞掉")
+
+
+def _emit_quality_verdict(final_response: Any, session_id: str, message_id: str) -> None:
+    """把 FinalResponse 序列化成 QualityVerdict 事件并 emit。
+
+    Score 是 :class:`~nexus.backend.rubrics.schemas.Score` dataclass,
+    转成 ``{rubric_name: score}`` 字典便于 JSON 落盘。
+    verdict 是 :class:`~nexus.backend.rubrics.schemas.RubricVerdict` 枚举,
+    取 ``.value`` 拿到 "ACCEPT" / "REPAIR" / "REJECT" 字符串。
+    """
+    if final_response is None:
+        return
+    scores_dict: dict[str, float] = {}
+    for s in getattr(final_response, "scores", ()) or ():
+        name = getattr(s, "rubric_name", None)
+        val = getattr(s, "score", None)
+        if name and val is not None:
+            scores_dict[str(name)] = float(val)
+    verdict_obj = getattr(final_response, "verdict", None)
+    verdict_str = getattr(verdict_obj, "value", str(verdict_obj) if verdict_obj else "")
+    emit_chat_event(
+        QualityVerdict(
+            timestamp=datetime.now(tz=UTC).isoformat(),
+            event="quality.verdict",
+            session_id=session_id,
+            message_id=message_id,
+            verdict=verdict_str,
+            scores=scores_dict,
+            repair_attempted=bool(getattr(final_response, "repair_attempted", False)),
+        )
+    )
+
+
+# _run_agent_streaming 内部 16 字符分块大小(与 ws.py line 390 一致),用于
+# ChatEnd 的 chunks 字段估算。
+_STREAM_CHUNK_SIZE = 16
+
+
+def _emit_chat_end(
+    *,
+    session_id: str,
+    message_id: str,
+    response_text: str,
+    chat_start_monotonic: float,
+    intent_result: Any,
+    final_response: Any,
+) -> None:
+    """emit ChatEnd 事件:聚合本次 chat 的关键指标。
+
+    字段映射:
+      - chunks: response_text 长度按 16 字符分块数
+      - duration_ms: 从 ChatStart 的 monotonic 起点到现在的差
+      - retry_count / error_code: 来自 _run_agent_streaming 内部,
+        handle_websocket 不可见,这里用 0 / None 占位
+        (后续如需精确值,可扩展 _run_agent_streaming 返回值)
+      - intent / verdict: 与前面 emit 的事件关联,便于聚合查询
+    """
+    chunks_count = (len(response_text) + _STREAM_CHUNK_SIZE - 1) // _STREAM_CHUNK_SIZE
+    duration_ms = int((time.monotonic() - chat_start_monotonic) * 1000)
+    verdict_obj = getattr(final_response, "verdict", None) if final_response else None
+    verdict_str = getattr(verdict_obj, "value", str(verdict_obj)) if verdict_obj else None
+    emit_chat_event(
+        ChatEnd(
+            timestamp=datetime.now(tz=UTC).isoformat(),
+            event="chat.end",
+            session_id=session_id,
+            message_id=message_id,
+            chunks=chunks_count,
+            duration_ms=duration_ms,
+            retry_count=0,
+            intent=intent_result,
+            verdict=verdict_str,
+            error_code=None,
+        )
+    )
+
 
 # 当前已注册的 WebSocket 客户端列表（供微信等外部通道在主循环中广播）
 _ws_clients: list[WebSocket] = []
@@ -576,8 +690,36 @@ async def handle_websocket(
                     }
                 )
 
+            # 提前生成 message_id,统一一处:让 ChatStart / IntentClassified /
+            # QualityVerdict / ChatEnd / 入库 都用同一份。
+            # ChatStart 必须紧跟消息接收发出,作为本次 chat 的起点标记。
+            message_id = str(uuid.uuid4())
+            chat_start_monotonic = time.monotonic()
+            emit_chat_event(
+                ChatStart(
+                    timestamp=datetime.now(tz=UTC).isoformat(),
+                    event="chat.start",
+                    session_id=session_id,
+                    message_id=message_id,
+                    content_len=len(user_content),
+                )
+            )
+
             # 添加用户消息到历史(intent 由意图识别层落库)
-            await _classify_and_record(get_intent_llm, session_id, user_content)
+            intent_classified_at = time.monotonic()
+            intent_result = await _classify_and_record(get_intent_llm, session_id, user_content)
+            intent_latency_ms = int((time.monotonic() - intent_classified_at) * 1000)
+            emit_chat_event(
+                IntentClassified(
+                    timestamp=datetime.now(tz=UTC).isoformat(),
+                    event="intent.classified",
+                    session_id=session_id,
+                    message_id=message_id,
+                    intent=intent_result,
+                    latency_ms=intent_latency_ms,
+                    fallback=False,
+                )
+            )
 
             # 使用 SessionManager 构建带记忆的 prompt
             prompt = session_manager.build_prompt(session_id, user_content)
@@ -621,13 +763,13 @@ async def handle_websocket(
             # Phase 2 Task 2.5：质量门。对 raw_response 跑 RubricJudge + Repair；
             # verdict 决定入库文本（ACCEPT→raw / REPAIR→重生 / REJECT→fallback）。
             # pipeline 失败/未配置时降级用原 response_text。
-            # 提前生成 message_id，让 pipeline 写 quality_scores 时能关联到本条消息
-            message_id = str(uuid.uuid4())
+            # message_id 已在 chat 帧解析时统一生成,此处不再重复。
             pipeline = get_quality_pipeline() if get_quality_pipeline else None
+            final_response: Any = None
             if pipeline is not None and response_text:
                 try:
                     pipeline.set_session_id(session_id)
-                    final = await pipeline.run_with_quality(
+                    final_response = await pipeline.run_with_quality(
                         question=user_content,
                         raw_response=response_text,
                         message_id=message_id,
@@ -648,7 +790,8 @@ async def handle_websocket(
                     #     (用于 quality_scores 留痕),不污染用户视图。
                     #
                     # 不补发 final 帧;response_text 保持原值,后续 add_message 用它。
-                    _ = final  # noqa: F841 — 暂不消费;后续可基于 verdict 改入库文本
+                    # emit QualityVerdict:把 4 维度评分 + verdict 落观测层。
+                    _emit_quality_verdict(final_response, session_id, message_id)
                 except Exception as exc:  # noqa: BLE001 — 质量门异常不污染主流程
                     logger.warning("QualityPipeline 失败，使用原回复: %s", exc)
 
@@ -680,6 +823,15 @@ async def handle_websocket(
                         "content": "",
                         "event_id": done_event_id,
                     }
+                )
+                # emit ChatEnd:聚合本次 chat 的关键指标
+                _emit_chat_end(
+                    session_id=session_id,
+                    message_id=message_id,
+                    response_text=response_text,
+                    chat_start_monotonic=chat_start_monotonic,
+                    intent_result=intent_result,
+                    final_response=final_response,
                 )
 
     except WebSocketDisconnect:
