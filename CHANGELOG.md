@@ -34,7 +34,7 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ## [Unreleased] — 可观测性子系统（JSONL + 4 产品事件）
 
-**分支**：`codex/macos-dmg-app`（10 commits since `6448722`，378 tests，真实环境 E2E 验证通过）
+**分支**：`codex/macos-dmg-app`（11 commits since `6448722`，378 tests，真实环境 E2E 验证通过）
 
 > 给 Nexus 加 observability 子系统：JSONL 结构化日志 + 4 个产品事件 + LangChain callback 通道复用 + env 三档配置。不造轮子，复用 stdlib `logging.handlers.RotatingFileHandler` + LangChain `BaseCallbackHandler`。
 > 详细计划见 `docs/superpowers/plans/2026-06-20-observability-subsystem.md`，运维文档见 `docs/operations/logging.md`。

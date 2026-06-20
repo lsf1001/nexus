@@ -25,6 +25,8 @@ from typing import Final
 __all__ = ["setup_logging", "ENV_LOG_FORMAT", "ENV_LOG_LEVEL", "ENV_LOG_FILE"]
 
 
+_logger = logging.getLogger(__name__)
+
 ENV_LOG_FORMAT: Final = "NEXUS_LOG_FORMAT"
 ENV_LOG_LEVEL: Final = "NEXUS_LOG_LEVEL"
 ENV_LOG_FILE: Final = "NEXUS_LOG_FILE"
@@ -111,7 +113,7 @@ def setup_logging() -> logging.Logger:
             try:
                 h.close()
             except Exception:  # noqa: BLE001 — 关闭失败不阻断重新初始化
-                pass
+                _logger.debug("关闭旧 handler 失败,已忽略: %s", h)
 
     setattr(handler, _HANDLER_OWNED_ATTR, True)
     root.addHandler(handler)

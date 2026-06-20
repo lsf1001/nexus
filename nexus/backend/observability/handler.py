@@ -2,7 +2,8 @@
 
 事件映射(start 带标识符 + 输入,end 带 duration + token 统计):
   - ``on_llm_start``   → ``{"event": "llm.start", "model": ..., "prompt_chars": N, "run_id": ...}``
-  - ``on_llm_end``     → ``{"event": "llm.end", "run_id": ..., "duration_ms": N, "prompt_tokens": ..., "completion_tokens": ..., "total_tokens": ...}``
+  - ``on_llm_end``     → ``{"event": "llm.end", "run_id": ..., "duration_ms": N,``
+    ``prompt_tokens``/``completion_tokens``/``total_tokens``
   - ``on_tool_start``  → ``{"event": "tool.start", "tool": name, "input_chars": N, "run_id": ...}``
   - ``on_tool_end``    → ``{"event": "tool.end", "run_id": ..., "duration_ms": N}``
   - ``on_chain_start`` → ``{"event": "chain.start", "chain": name, "run_id": ...}``

@@ -86,8 +86,8 @@ def emit_chat_event(event: object) -> None:
     """
     try:
         _get_observability_sink().emit(event)  # type: ignore[arg-type]
-    except Exception:  # noqa: BLE001 — 观测层异常不能影响主流程
-        logger.exception("emit_chat_event 失败,已吞掉")
+    except Exception as e:  # noqa: BLE001 — 观测层异常不能影响主流程
+        logger.warning("emit_chat_event 失败,已吞掉: %s", e)
 
 
 def _emit_quality_verdict(final_response: Any, session_id: str, message_id: str) -> None:
