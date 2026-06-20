@@ -5,6 +5,7 @@
     :class:`QualityVerdict` / :class:`ChatEnd`
   - 持久化 sink: :class:`EventSink`
   - 配置: :func:`setup_logging`
+  - 回调: :class:`NexusLogHandler`
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from .events import (
     IntentClassified,
     QualityVerdict,
 )
+from .handler import NexusLogHandler
 from .logger import setup_logging
 from .sink import EventSink
 
@@ -25,6 +27,7 @@ __all__ = [
     "ChatStart",
     "EventSink",
     "IntentClassified",
+    "NexusLogHandler",
     "QualityVerdict",
     "setup_logging",
 ]
