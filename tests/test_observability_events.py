@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 from nexus.backend.observability.events import (
@@ -73,8 +74,6 @@ def test_chat_end_includes_duration_and_retries():
 
 
 def test_events_are_frozen():
-    import dataclasses
-
     e = ChatStart(timestamp="t", event="chat.start", session_id="s", message_id="m", content_len=1)
     try:
         e.session_id = "tamper"  # type: ignore[misc]
