@@ -1,9 +1,10 @@
 """Nexus observability 子系统。
 
-公开 API(逐步扩展,后续 Tasks 还会加 setup_logging / NexusLogHandler):
+公开 API:
   - 事件 schema: :class:`ChatStart` / :class:`IntentClassified` /
     :class:`QualityVerdict` / :class:`ChatEnd`
   - 持久化 sink: :class:`EventSink`
+  - 配置: :func:`setup_logging`
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from .events import (
     IntentClassified,
     QualityVerdict,
 )
+from .logger import setup_logging
 from .sink import EventSink
 
 __all__ = [
@@ -24,4 +26,5 @@ __all__ = [
     "EventSink",
     "IntentClassified",
     "QualityVerdict",
+    "setup_logging",
 ]
