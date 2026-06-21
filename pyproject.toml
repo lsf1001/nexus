@@ -35,7 +35,6 @@ dependencies = [
     "typer[all]>=0.9.0",
     "rich>=13.0.0",
     "rank-bm25>=0.2.0",
-    "ppt-master @ git+https://github.com/hugohe3/ppt-master.git",
 ]
 
 [project.optional-dependencies]
