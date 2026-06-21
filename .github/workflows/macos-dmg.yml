@@ -1,0 +1,63 @@
+name: macOS DMG
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  build-dmg:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m venv .venv
+          ./.venv/bin/python -m pip install --upgrade pip
+          ./.venv/bin/python -m pip install -e .
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Install desktop dependencies
+        run: npm ci --prefix desktop
+
+      - name: Build frontend
+        run: npm run build --prefix frontend
+
+      - name: Build desktop TypeScript
+        run: npm run build --prefix desktop
+
+      - name: Build backend executable
+        run: bash scripts/build_backend_app.sh
+
+      - name: Package DMG
+        run: npm run pack --prefix desktop
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-macos-dmg
+          path: release/*.dmg
+
+      - name: Attach DMG to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.dmg
