@@ -1,23 +1,23 @@
-# Nexus Phase 1+2 进度交接
+# Nexus 阶段 1+2 进度交接
 
 > **目的**：上下文爆了（~257k/200k）。下次新开会话从本文件 + git log + 文件系统继续，不依赖历史。
 
 ## 当前状态
 
 - **分支**：`feat/agent-reliability-quality`
-- **基线测试**：303 passed（基线 153 + 41 Phase 1 + 14 Phase 2.1-2.2 + 16 Phase 2.3 + 19 Phase 2.4 + 12 Phase 2.5 + 13 Phase 2.6 + 11 Phase 2.7 + 15 Phase 2.8 + 23 Phase 2.9 + 2 message_id + 微调）
-- **Phase 1**：✅ 全部 10 task + 5 cleanup 已合并到 `main`（merge commit `6515bb5`）
-- **Phase 2**：✅ 全部 9 task + 真环境验收已通过（在分支上，未合并 main）
-  - ✅ Task 2.1 Rubric 数据结构（`a0e8dc5`，+20 测试）
-  - ✅ Task 2.2 中文 Prompt（`3c1afac`，+8 测试）
-  - ✅ Task 2.3 RubricJudge（`d6d31ff`，+16 测试）
-  - ✅ Task 2.4 Repair 决策策略（`763fc84`，+19 测试）
-  - ✅ Task 2.5 Quality Pipeline（`7d02ecc`，+12 测试）
-  - ✅ Task 2.6 工具结果自评（`544ac5b`，+13 测试）
-  - ✅ Task 2.7 记忆去噪（`df85757`，+11 测试）
-  - ✅ Task 2.8 偏好数据导出（`9a4ecbf`，+15 测试）
-  - ✅ Task 2.9 Rubric 自身质量评估（`ef5c0bc`，+23 测试）
-  - ✅ 真环境验收 + 3 个 bug 修复（最新 commit，+2 message_id 测试）
+- **基线测试**：303 passed（基线 153 + 41 阶段 1 + 14 阶段 2.1-2.2 + 16 阶段 2.3 + 19 阶段 2.4 + 12 阶段 2.5 + 13 阶段 2.6 + 11 阶段 2.7 + 15 阶段 2.8 + 23 阶段 2.9 + 2 message_id + 微调）
+- **阶段 1**：✅ 全部 10 个任务 + 5 项清理已合并到 `main`（merge commit `6515bb5`）
+- **阶段 2**：✅ 全部 9 个任务 + 真环境验收已通过（在分支上，未合并 main）
+  - ✅ 任务 2.1 Rubric 数据结构（`a0e8dc5`，+20 测试）
+  - ✅ 任务 2.2 中文 Prompt（`3c1afac`，+8 测试）
+  - ✅ 任务 2.3 RubricJudge（`d6d31ff`，+16 测试）
+  - ✅ 任务 2.4 Repair 决策策略（`763fc84`，+19 测试）
+  - ✅ 任务 2.5 Quality Pipeline（`7d02ecc`，+12 测试）
+  - ✅ 任务 2.6 工具结果自评（`544ac5b`，+13 测试）
+  - ✅ 任务 2.7 记忆去噪（`df85757`，+11 测试）
+  - ✅ 任务 2.8 偏好数据导出（`9a4ecbf`，+15 测试）
+  - ✅ 任务 2.9 Rubric 自身质量评估（`ef5c0bc`，+23 测试）
+  - ✅ 真环境验收 + 3 个 bug 修复（最新提交，+2 message_id 测试）
 - **真环境验收（plan §四末尾 4 条）全部通过**：
   - WS 烟测 ✓
   - 诱导幻觉 → REJECT ✓（8 条 REJECT 记录）
@@ -25,21 +25,21 @@
   - 100 轮对话 + ≥ 30 preference 配对 ✓（34 DPO / 68 KTO 行）
   - meta-eval kappa ≥ 0.5 ✓（**Pearson 0.973, kappa 0.591**）
 
-## 重要 commit 列表
+## 重要提交列表
 
 ```
 <latest>  fix(quality): 真环境验证发现 3 个 bug + 加 message_id 关联
-18b912c  docs(progress): Phase 2 全部 9 task 完成 (301 passed)
+18b912c  文档：阶段 2 全部 9 个任务完成（301 passed）
 ef5c0bc  feat(rubrics): add meta-evaluation for RubricJudge quality
 9a4ecbf  feat(rubrics): export preference data for DPO/KTO training
 df85757  feat(quality): filter memory writes through faithfulness rubric judge
 544ac5b  feat(rubrics): add tool-result self-evaluation (ok/retry/fallback 3-tier)
 7d02ecc  feat(quality): integrate rubric pipeline into WebSocket flow
 763fc84  feat(rubrics): add repair decision strategy with safety veto and weighted aggregation
-6810822  docs(progress): Task 2.3 完成 + 下次从 2.4 继续
+6810822  文档：任务 2.3 完成，下次从 2.4 继续
 d6d31ff  feat(rubrics): add RubricJudge with concurrent multi-rubric evaluation
-fdf80ea  docs(progress): 上下文交接文档（Phase 1+2 进度 + 下次继续指南）
-6515bb5  merge: Phase 1 容错 (10 tasks) + 4 项 cleanup
+fdf80ea  文档：上下文交接文档（阶段 1+2 进度 + 下次继续指南）
+6515bb5  合并：阶段 1 容错（10 个任务）+ 4 项清理
 ```
 
 ## 关键设计决定（已落地，勿改）
@@ -73,13 +73,13 @@ fdf80ea  docs(progress): 上下文交接文档（Phase 1+2 进度 + 下次继续
 
 1. **拉取最新**：`git checkout feat/agent-reliability-quality && git pull`
 2. **跑测试基线**：`./.venv/bin/pytest tests/ -q` → 期望 303 passed
-3. **Phase 2 全部完成 + 真环境验收通过**——可以合并到 main
+3. **阶段 2 全部完成 + 真环境验收通过**——可以合并到 main
 4. **下一步候选**：
-   - 把 `feat/agent-reliability-quality` 合并到 `main`（Phase 1+2 一起 release，建议用 merge commit 保留分支历史）
+   - 把 `feat/agent-reliability-quality` 合并到 `main`（阶段 1+2 一起发布，建议用 merge commit 保留分支历史）
    - 写 `docs/operations/quality.md` rubric 调优指南（plan §5.2 提到）
    - 加 `.codegraph/` 和 `experiments/` 到 `.gitignore`（未问过用户）
    - 配 `NEXUS_RUBRIC_ENABLED=true` 在生产里做小流量验证
-   - 启动 Phase 3（如有 plan）
+   - 启动阶段 3（如有计划）
 
 ## 已知非阻塞问题
 
@@ -104,7 +104,7 @@ fdf80ea  docs(progress): 上下文交接文档（Phase 1+2 进度 + 下次继续
 
 ## 关键文件路径速查
 
-- Plan：`docs/superpowers/plans/2026-06-05-agent-reliability-and-quality.md`
+- 计划：`docs/superpowers/plans/2026-06-05-agent-reliability-and-quality.md`
 - LLM 韧性：`nexus/backend/llm/{errors,policies,wrapper}.py`
 - 容错/续传：`nexus/backend/resilience/{resume,stream_guard}.py`
 - WS handler：`nexus/backend/api/ws.py`（main.py:736 装饰）
@@ -114,7 +114,7 @@ fdf80ea  docs(progress): 上下文交接文档（Phase 1+2 进度 + 下次继续
 - Meta-eval CLI：`scripts/eval_rubrics.py`
 - 验收脚本：`scripts/verify_phase2.py`
 - 样本数据：`data/rubric_eval_samples.jsonl` + `data/eval_report.json`
-- 真实 API Key：env `ANTHROPIC_AUTH_TOKEN`（config.py 走 fallback 链）
+- 真实 API 密钥：env `ANTHROPIC_AUTH_TOKEN`（config.py 走 fallback 链）
 
 ## 验证命令速查
 
@@ -133,7 +133,7 @@ cd frontend && npx tsc -b --noEmit
   --samples ./data/rubric_eval_samples.jsonl \
   --output ./data/eval_report.json
 
-# 真环境验收（4 条 plan 验收项）
+# 真环境验收（4 条计划验收项）
 .venv/bin/python scripts/verify_phase2.py --all
 
 # 单步验收
@@ -157,4 +157,4 @@ PreferenceExporter().export_kto(records, Path('/tmp/kto.jsonl'))
 
 ---
 
-**下次新会话：先 cat 这个文件 + git log --oneline -10，然后问用户下一步（合并 / 文档 / gitignore / Phase 3）。Phase 1+2 已全部完成并通过真环境验证。**
+**下次新会话：先 cat 这个文件 + git log --oneline -10，然后问用户下一步（合并 / 文档 / gitignore / 阶段 3）。阶段 1+2 已全部完成并通过真环境验证。**

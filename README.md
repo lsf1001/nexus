@@ -96,7 +96,8 @@ ws.send(JSON.stringify({ content: '你好' }));
 
 - `MINIMAX_API_KEY` / `MINIMAX_API_BASE`（首选）
 - `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL`（兼容 Anthropic 风格）
-- `NEXUS_WS_TOKEN`（默认 `nexus-default-token`）
+- `NEXUS_WS_TOKEN`（默认 `nexus-default-token`，后端 WebSocket 鉴权）
+- `VITE_NEXUS_WS_TOKEN`（前端编译期 env，Vite 只暴露 `VITE_*` 给客户端；**必须**与 `NEXUS_WS_TOKEN` 一致，否则 WS 鉴权失败）
 - `NEXUS_PORT`（默认 `30000`）
 - `NEXUS_ALLOWED_ORIGINS`（CORS 白名单，逗号分隔；dev 默认通配）
 
