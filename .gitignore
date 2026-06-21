@@ -72,3 +72,6 @@ release/builder-debug.yml
 # Electron / DMG build 输出
 release/
 desktop/dist/
+
+# Full-stack verify scripts 截图产物(verify-full.js 用)
+.verify-shots/
