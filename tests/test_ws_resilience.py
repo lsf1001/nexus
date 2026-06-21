@@ -218,7 +218,7 @@ def test_ws_unauthorized_token_rejected(monkeypatch) -> None:
 
 
 def test_ws_emits_resume_token_after_stream(monkeypatch) -> None:
-    """流正常结束后，服务端发一个 resume_token 帧（带新 last_event_id）。"""
+    """流正常结束时，服务端在 done 前发 resume_token 帧。"""
     _authed_token(monkeypatch)
 
     async def astream_factory(input, **kwargs):  # noqa: ARG001
@@ -231,20 +231,13 @@ def test_ws_emits_resume_token_after_stream(monkeypatch) -> None:
             with client.websocket_connect("/api/ws?token=test-token") as ws:
                 ws.send_json({"content": "hello", "title": "token-emit-test"})
 
-                # 注意：resume_token 帧在 done 之后才发，所以不能 break 在 done
                 events = _collect_until_done(ws, max_events=200)
-                # 再多收一条，确保 resume_token 帧到
-                try:
-                    for _ in range(5):
-                        msg = ws.receive_json()
-                        events.append(msg)
-                        if msg.get("type") == "resume_token":
-                            break
-                except Exception:
-                    pass
 
                 token_frames = [e for e in events if e.get("type") == "resume_token"]
                 assert len(token_frames) == 1
+                event_types = [e.get("type") for e in events]
+                assert event_types[-1] == "done"
+                assert event_types.index("resume_token") < event_types.index("done")
                 token = token_frames[0]["resume_token"]
                 # 校验 token 合法
                 from nexus.backend.resilience.resume import verify_token
@@ -303,15 +296,6 @@ def test_ws_emits_token_usage_event(monkeypatch) -> None:
                 ws.send_json({"content": "hello", "title": "token-usage-test"})
 
                 events = _collect_until_done(ws, max_events=200)
-                # 把 resume_token 帧也消化掉（如果有）
-                for _ in range(5):
-                    try:
-                        msg = ws.receive_json()
-                        events.append(msg)
-                    except Exception:
-                        break
-                    if msg.get("type") == "resume_token":
-                        break
 
                 token_usage_events = [e for e in events if e.get("type") == "token_usage"]
                 assert len(token_usage_events) == 1
@@ -349,14 +333,6 @@ def test_ws_strips_thinking_tags(monkeypatch) -> None:
                 ws.send_json({"content": "hello", "title": "thinking-strip-test"})
 
                 events = _collect_until_done(ws, max_events=200)
-                for _ in range(5):
-                    try:
-                        msg = ws.receive_json()
-                        events.append(msg)
-                    except Exception:
-                        break
-                    if msg.get("type") == "resume_token":
-                        break
 
                 # 至少 1 条 thinking 事件，且 content 是纯思考内容
                 thinking_events = [
@@ -402,14 +378,6 @@ def test_ws_chunks_response_in_16_char_groups(monkeypatch) -> None:
                 ws.send_json({"content": "hello", "title": "chunk-test"})
 
                 events = _collect_until_done(ws, max_events=200)
-                for _ in range(5):
-                    try:
-                        msg = ws.receive_json()
-                        events.append(msg)
-                    except Exception:
-                        break
-                    if msg.get("type") == "resume_token":
-                        break
 
                 chunks = [e for e in events if e.get("type") == "chunk"]
                 assert len(chunks) == 2
@@ -442,14 +410,6 @@ def test_ws_final_content_excludes_thinking(monkeypatch) -> None:
                 ws.send_json({"content": "hello", "title": "final-test"})
 
                 events = _collect_until_done(ws, max_events=200)
-                for _ in range(5):
-                    try:
-                        msg = ws.receive_json()
-                        events.append(msg)
-                    except Exception:
-                        break
-                    if msg.get("type") == "resume_token":
-                        break
 
                 final_events = [e for e in events if e.get("type") == "final"]
                 assert len(final_events) == 1
