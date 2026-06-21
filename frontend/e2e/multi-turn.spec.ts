@@ -29,7 +29,9 @@ test('多轮会话：3 条消息连发，按序追加并滚到底', async ({ pag
   // 最后一条 user 消息应是"最后说说 Go"
   expect(await lastUserBubbleText(page)).toBe('最后说说 Go');
 
-  // 验证滚到底：最后一个 assistant 气泡在 viewport 内
-  const lastAssistant = page.locator('.message-row.is-assistant p').last();
+  // 验证滚到底：最后一个真实 assistant 气泡(markdown 内容)在 viewport 内
+  // 注意:不能用 '.message-row.is-assistant p',因为 isLoading=true 时 loading bubble
+  // 也是 .message-row.is-assistant 但没有 <p> 子元素,会撞空。改选 markdown 容器。
+  const lastAssistant = page.locator('.message-row.is-assistant .message-markdown').last();
   await expect(lastAssistant).toBeInViewport();
 });
