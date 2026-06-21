@@ -68,3 +68,7 @@ nexus-backend.spec
 release/*.dmg
 release/*.dmg.blockmap
 release/builder-debug.yml
+
+# Electron / DMG build 输出
+release/
+desktop/dist/
