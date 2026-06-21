@@ -14,10 +14,12 @@ import logging
 import os as _os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from langgraph.store.base import BaseStore
+# 运行时 import:函数签名注解需要 BaseStore 这个名字在运行时可见
+# (TYPE_CHECKING 只在静态分析时为 True,运行 uvicorn 时为 False)。
+# 延后到运行时而不是函数内:避免每调一次都重新 import。
+from langgraph.store.base import BaseStore
 
 # 关键：langchain_openai / deepagents / llm.wrapper 都延后到函数内 import。
 # 原因：PyInstaller frozen 模式下从 PYZ-00.pyz 解压 40+ 隐藏模块非常慢（10-20s）。
