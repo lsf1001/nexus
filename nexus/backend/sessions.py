@@ -22,7 +22,6 @@ from .db import (
     restore_session,
     update_session,
 )
-from .memory import MemoryService
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"], dependencies=[Depends(require_token)])
 
@@ -37,23 +36,18 @@ class SessionManager:
 
     职责：
     - 管理会话生命周期
-    - 构建带记忆的 prompt
+    - 构建带对话历史的 prompt（身份/记忆由 deepagents MemoryMiddleware 注入）
     - 提供流式响应接口
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化会话管理器。"""
-        self._memory_service: MemoryService | None = None
-
-    @property
-    def memory_service(self) -> MemoryService:
-        """延迟加载记忆服务。"""
-        if self._memory_service is None:
-            self._memory_service = MemoryService()
-        return self._memory_service
 
     def build_prompt(self, session_id: str, user_message: str) -> dict:
-        """构建带记忆的 prompt。
+        """构建带对话历史的 prompt。
+
+        身份 / 规则 / 长期记忆由 deepagents :class:`MemoryMiddleware` 从
+        AGENTS.md 注入 system prompt;本方法只组装历史 + 当前 user 消息。
 
         Args:
             session_id: 会话 ID
@@ -64,23 +58,13 @@ class SessionManager:
         """
         from .db import get_conversation_history
 
-        # 1. 获取记忆上下文
-        memory_context = self.memory_service.build_context(session_id)
-
-        # 2. 获取对话历史
-        #    若最后一条就是当前 user 消息（调用方先入库再调本方法），去掉以免重复
+        # 若最后一条就是当前 user 消息（调用方先入库再调本方法），去掉以免重复
         history = get_conversation_history(session_id)
         if history and history[-1].get("role") == "user" and history[-1].get("content") == user_message:
             history = history[:-1]
 
-        # 3. 构建 system prompt
-        system_content = ""
-        if memory_context:
-            system_content = f"【记忆上下文】\n{memory_context}\n\n"
-        system_content += "你是 Nexus，夜小白科技有限公司开发的 AI 助手。"
-
-        # 4. 组装消息
-        messages = [{"role": "system", "content": system_content}]
+        # 组装消息：身份由 AGENTS.md 注入,这里 system 段留空
+        messages: list[dict] = [{"role": "system", "content": ""}]
         messages.extend(history)
         messages.append({"role": "user", "content": user_message})
 
@@ -88,17 +72,6 @@ class SessionManager:
             "session_id": session_id,
             "messages": messages,
         }
-
-    def build_context(self, session_id: str) -> str:
-        """构建记忆上下文（供外部调用）。
-
-        Args:
-            session_id: 会话 ID
-
-        Returns:
-            格式化的记忆上下文字符串
-        """
-        return self.memory_service.build_context(session_id)
 
 
 # 全局单例
