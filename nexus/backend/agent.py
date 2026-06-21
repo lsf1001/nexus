@@ -224,13 +224,21 @@ def _create_backend(project_root: Path, *, store: BaseStore | None = None):
     Args:
         project_root: 项目根目录。
         store: 持久化 store;非空时挂到 ``/memories/`` 路由供 LLM 跨会话读写。
+
+    Note:
+        ``virtual_mode=False`` 是必需的 — ``virtual_mode=True`` 会把绝对路径
+        当作虚拟路径锚定到 ``project_root``,导致 ``~/.deepagents/AGENTS.md``
+        这种深 agents 约定的用户级记忆路径解析失败、MemoryMiddleware 静默
+        跳过 → LLM 失去身份感。
+        安全由 :class:`FilesystemPermission` + :class:`QualityGateMiddleware`
+        在更上层兜底,此处不重复沙箱。
     """
     from deepagents.backends.composite import CompositeBackend
     from deepagents.backends.filesystem import FilesystemBackend
     from deepagents.backends.state import StateBackend
     from deepagents.backends.store import StoreBackend
 
-    fs_backend = FilesystemBackend(root_dir=project_root, virtual_mode=True)
+    fs_backend = FilesystemBackend(root_dir=project_root, virtual_mode=False)
 
     routes: dict[str, Any] = {
         ".nexus/state/": StateBackend(),

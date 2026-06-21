@@ -5,6 +5,44 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [Unreleased] — 记忆子系统重构(对齐 deepagents 框架)
+
+### Changed
+
+- **记忆机制**: 完全对齐 deepagents 0.6.8 原生框架,删除自定义 `MemoryService` / `EvolutionService` 整层(548 行死代码 + 4 个旧 `@langchain_tool`)
+  - 长期记忆由 deepagents `MemoryMiddleware` 自动加载 `~/.deepagents/AGENTS.md`(用户级)+ `nexus/.deepagents/AGENTS.md`(项目级),以 `<agent_memory>...</agent_memory>` 段注入 system prompt
+  - LLM 通过内置 `edit_file` / `write_file` 自更新 AGENTS.md;`QualityGateMiddleware` 在 `wrap_tool_call` 阶段拦截写入并跑 `MemoryFilter` 忠实度评估,拒绝幻觉/低价值记忆写入
+  - 持久化层: `langgraph.store.memory.InMemoryStore`(重启丢 session 临时数据)+ AGENTS.md(跨重启持久化)
+- **`nexus/SOUL.md`** 迁至 `nexus/.deepagents/AGENTS.md`(身份/规则保留)
+- **`nexus.db` schema**:
+  - `memory` → `memory_legacy`(改名,数据保留可查,只读)
+  - `tool_stats` / `session_stats` 表删除(深 agents 框架不需要)
+- **新增脚本**:
+  - `scripts/migrate_legacy_memory.py` — 一次性迁移旧 `memory` 表 explicit 偏好 → `~/.deepagents/AGENTS.md` `## Migrated Preferences` 段,幂等,支持 `--dry-run`
+  - `scripts/seed_user_agents_md.py` — 首次启动初始化 `~/.deepagents/AGENTS.md` 空模板,幂等
+- **Bug 修复**: `FilesystemBackend(virtual_mode=True)` 拒绝绝对路径,导致 `~/.deepagents/AGENTS.md` 被 `MemoryMiddleware` 静默跳过 → LLM 失去身份感;改 `virtual_mode=False`,由 `FilesystemPermission` + `QualityGateMiddleware` 在更上层兜底安全
+- **测试**: 390 passed(9 个新增 `test_migrate_legacy_memory.py`)
+
+### Migration Guide
+
+升级到本版本后,执行一次:
+
+```bash
+# 1. 备份 db(脚本内部也会跳过已迁移的 db,但先备份更稳)
+cp ~/.nexus/nexus.db ~/.nexus/nexus.db.bak.$(date +%s)
+
+# 2. 跑迁移(explicit → ~/.deepagents/AGENTS.md,改 memory 表名 → memory_legacy)
+python scripts/migrate_legacy_memory.py
+
+# 3. 验证
+sqlite3 ~/.nexus/nexus.db ".tables"  # 应见 memory_legacy, 不见 memory
+cat ~/.deepagents/AGENTS.md           # 应见 ## Migrated Preferences 段含你的旧偏好
+```
+
+无 explicit 偏好 → 脚本无 op,安全跳过。
+
+---
+
 ## [v0.1.0] — 2026-06-21 — 首次内测交付
 
 **核心**: 把 Nexus 从「能跑」推进到「能装能用」。AI Gateway 全栈接通(后端 + 前端 + **桌面端 DMG 安装包**)、质量门上线、可观测性落地、意图识别路由、CI/CD 双线。

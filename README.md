@@ -20,7 +20,7 @@ nexus start
 
 - **智能对话** - MiniMax / DeepSeek / Qwen 多模型支持
 - **会话管理** - 支持软删除和恢复
-- **记忆系统** - BM25 关键词检索
+- **记忆系统** - deepagents `MemoryMiddleware` 自动加载 `AGENTS.md`（用户级 `~/.deepagents/AGENTS.md` + 项目级 `nexus/.deepagents/AGENTS.md`），LLM 通过内置 `edit_file` 自更新；`QualityGateMiddleware` 拦截写入做忠实度评分
 - **上下文压缩** - 85% 阈值自动触发
 - **WebSocket** - 实时流式响应
 - **微信通道** - 二维码登录集成
