@@ -1,8 +1,13 @@
-"""记忆去噪：在 ``save_memory`` 之前用 RubricJudge 评估是否值得持久化。
+"""记忆去噪：拦截 ``edit_file`` / ``write_file`` 写入 AGENTS.md 之前用 RubricJudge 评估是否值得持久化。
 
-本模块是 Phase 2 (Rubrics) Task 2.7 的实现——给 subagent / 助手的
-``save_memory(key, value)`` 调用做"质量门"，过滤掉幻觉、临时上下文、
-单次对话残留等"低价值"内容。
+本模块是 Phase 2 (Rubrics) Task 2.7 的实现——在 deepagents LLM 调用
+``edit_file`` / ``write_file`` 写 ``~/.deepagents/AGENTS.md`` 前做
+"质量门"，过滤掉幻觉、临时上下文、单次对话残留等"低价值"内容。
+
+WHY: v0.1.0 自定义 ``save_memory`` 工具已删除(deepagents 重构后改用内置
+``edit_file``)。但记忆写入仍需质量门:由 :class:`QualityGateMiddleware`
+在 :meth:`awrap_tool_call` 里调 :meth:`MemoryFilter.check`,不再走旧工具。
+本模块保持纯函数语义(只评估 value,不直接操作 backend),可单测。
 
 设计要点：
   - **专用 faithfulness 维度**：用 :data:`FAITHFULNESS_RUBRIC` 单独
@@ -58,7 +63,7 @@ class FilterDecision:
 
 @dataclass(frozen=True)
 class MemoryFilter:
-    """记忆去噪器：在 save_memory 之前评估 value 是否值得持久化。
+    """记忆去噪器:在 edit_file / write_file 写 AGENTS.md 之前评估 value 是否值得持久化。
 
     Attributes:
         judge: 已构造的 :class:`RubricJudge`（用 faithfulness 维度）。

@@ -1,9 +1,10 @@
 """会话数据库管理。
 
-使用 SQLite 存储会话、消息和记忆。
+使用 SQLite 存储会话、消息。长期记忆已迁出至
+``~/.deepagents/AGENTS.md``(由 deepagents ``MemoryMiddleware`` 自动加载),
+旧 ``memory`` 表迁移后改名为 ``memory_legacy``(只读,供回查)。
 """
 
-import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -79,7 +80,7 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "messages", "intent", "TEXT")
 
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS memory (
+        CREATE TABLE IF NOT EXISTS memory_legacy (
             id TEXT PRIMARY KEY,
             memory_type TEXT NOT NULL CHECK (memory_type IN ('explicit', 'evolved', 'session')),
             category TEXT NOT NULL,
@@ -92,33 +93,11 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             is_active INTEGER DEFAULT 1
         )
     """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_type ON memory(memory_type)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_category ON memory(category)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_key ON memory(key)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_updated ON memory(updated_at DESC)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_active ON memory(is_active)")
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tool_stats (
-            tool_name TEXT PRIMARY KEY,
-            success_count INTEGER DEFAULT 0,
-            failure_count INTEGER DEFAULT 0,
-            total_latency REAL DEFAULT 0,
-            last_used TEXT
-        )
-    """)
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS session_stats (
-            session_id TEXT PRIMARY KEY,
-            message_count INTEGER DEFAULT 0,
-            tool_call_count INTEGER DEFAULT 0,
-            success_outcomes INTEGER DEFAULT 0,
-            failure_outcomes INTEGER DEFAULT 0,
-            created_at TEXT NOT NULL,
-            ended_at TEXT
-        )
-    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_legacy(memory_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_category ON memory_legacy(category)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_key ON memory_legacy(key)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_updated ON memory_legacy(updated_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_active ON memory_legacy(is_active)")
 
     # Phase 1 容错:质量评分表(rubric LLM 对回复打分,用于 accept/repair/reject)
     conn.execute("""
@@ -227,8 +206,7 @@ def create_session(session_id: str, title: str | None = None, channel: str = "ma
             "INSERT INTO sessions (id, title, created_at, updated_at, channel) VALUES (?, ?, ?, ?, ?)",
             (session_id, title, now, now, channel),
         )
-        # 初始化会话统计
-        conn.execute("INSERT INTO session_stats (session_id, created_at) VALUES (?, ?)", (session_id, now))
+        # 初始化会话统计(session_stats 表已删,2026-06 迁移到 deepagents AGENTS.md)
         return {
             "id": session_id,
             "title": title,
@@ -394,8 +372,6 @@ def add_message(
         )
         # 更新会话的更新时间
         conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
-        # 更新会话统计
-        conn.execute("UPDATE session_stats SET message_count = message_count + 1 WHERE session_id = ?", (session_id,))
         return {
             "id": message_id,
             "session_id": session_id,
@@ -420,325 +396,3 @@ def get_conversation_history(session_id: str) -> list[dict]:
     """获取会话的历史消息，用于 AI 对话。"""
     messages = get_messages(session_id)
     return [{"role": msg["role"], "content": msg["content"]} for msg in messages]
-
-
-# ============================================================================
-# 记忆管理
-# ============================================================================
-
-
-def save_memory(
-    memory_id: str,
-    memory_type: str,
-    category: str,
-    key: str,
-    value: str,
-    metadata: dict | None = None,
-    expires_at: str | None = None,
-) -> dict:
-    """保存记忆。
-
-    Args:
-        memory_id: 记忆 ID
-        memory_type: 记忆类型 ('explicit', 'evolved', 'session')
-        category: 分类
-        key: 记忆键
-        value: 记忆值
-        metadata: 元数据
-        expires_at: 过期时间
-    """
-    now = datetime.now().isoformat()
-
-    # 处理 key 冲突（同类型同 key 的旧记忆软删除）
-    with get_db() as conn:
-        conn.execute(
-            "UPDATE memory SET is_active = 0 WHERE memory_type = ? AND key = ? AND is_active = 1", (memory_type, key)
-        )
-
-        conn.execute(
-            """INSERT INTO memory (id, memory_type, category, key, value, metadata, created_at, updated_at, expires_at, is_active)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
-            (
-                memory_id,
-                memory_type,
-                category,
-                key,
-                value,
-                json.dumps(metadata) if metadata else None,
-                now,
-                now,
-                expires_at,
-            ),
-        )
-
-        return {
-            "id": memory_id,
-            "memory_type": memory_type,
-            "category": category,
-            "key": key,
-            "value": value,
-            "metadata": metadata,
-            "created_at": now,
-            "updated_at": now,
-        }
-
-
-def get_memory(
-    session_id: str | None = None,
-    memory_type: str | None = None,
-    category: str | None = None,
-    key: str | None = None,
-    include_inactive: bool = False,
-) -> list[dict]:
-    """获取记忆列表。
-
-    Args:
-        session_id: 会话 ID（用于 session 类型记忆）
-        memory_type: 记忆类型过滤
-        category: 分类过滤
-        key: 记忆键精确匹配
-        include_inactive: 是否包含已删除的
-    """
-    conditions = ["is_active = 1"]
-    params = []
-
-    if memory_type:
-        conditions.append("memory_type = ?")
-        params.append(memory_type)
-
-    if category:
-        conditions.append("category = ?")
-        params.append(category)
-
-    if key:
-        conditions.append("key = ?")
-        params.append(key)
-
-    if session_id and memory_type == "session":
-        # session 类型记忆需要关联会话
-        conditions.append("""
-            id IN (SELECT id FROM memory WHERE memory_type = 'session' AND key = ?)
-        """)
-        params.append(session_id)
-
-    where = " AND ".join(conditions) if conditions else "1=1"
-
-    with get_db() as conn:
-        rows = conn.execute(f"SELECT * FROM memory WHERE {where} ORDER BY updated_at DESC", params).fetchall()
-        return [dict(row) for row in rows]
-
-
-def search_memory(keyword: str, memory_type: str | None = None, limit: int = 10) -> list[dict]:
-    """搜索记忆（全文搜索）。
-
-    Args:
-        keyword: 搜索关键词
-        memory_type: 记忆类型过滤
-        limit: 返回数量限制
-    """
-    conditions = ["is_active = 1"]
-    params = []
-
-    if keyword:
-        conditions.append("(key LIKE ? OR value LIKE ?)")
-        params.extend([f"%{keyword}%", f"%{keyword}%"])
-
-    if memory_type:
-        conditions.append("memory_type = ?")
-        params.append(memory_type)
-
-    where = " AND ".join(conditions) if conditions else "1=1"
-
-    with get_db() as conn:
-        rows = conn.execute(
-            f"SELECT * FROM memory WHERE {where} ORDER BY updated_at DESC LIMIT ?", params + [limit]
-        ).fetchall()
-        return [dict(row) for row in rows]
-
-
-def delete_memory(memory_id: str, hard: bool = False) -> bool:
-    """删除记忆。
-
-    Args:
-        memory_id: 记忆 ID
-        hard: 是否硬删除
-    """
-    with get_db() as conn:
-        if hard:
-            cursor = conn.execute("DELETE FROM memory WHERE id = ?", (memory_id,))
-        else:
-            cursor = conn.execute("UPDATE memory SET is_active = 0 WHERE id = ?", (memory_id,))
-        return cursor.rowcount > 0
-
-
-def list_user_memory(category: str | None = None, memory_types: list | None = None) -> list[dict]:
-    """列出所有记忆。
-
-    Args:
-        category: 分类过滤
-        memory_types: 记忆类型列表
-    """
-    conditions = ["is_active = 1"]
-    params = []
-
-    # 排除 session 类型（需要 session_id）
-    conditions.append("(memory_type = 'explicit' OR memory_type = 'evolved')")
-
-    if category:
-        conditions.append("category = ?")
-        params.append(category)
-
-    if memory_types:
-        placeholders = ",".join(["?" for _ in memory_types])
-        conditions.append(f"memory_type IN ({placeholders})")
-        params.extend(memory_types)
-
-    where = " AND ".join(conditions)
-
-    with get_db() as conn:
-        rows = conn.execute(f"SELECT * FROM memory WHERE {where} ORDER BY updated_at DESC", params).fetchall()
-        return [dict(row) for row in rows]
-
-
-def get_session_memory(session_id: str, category: str | None = None) -> list[dict]:
-    """获取会话的所有记忆。"""
-    conditions = ["is_active = 1", "memory_type = 'session'", "key LIKE ?"]
-    params = [f"{session_id}:%"]
-
-    if category:
-        conditions.append("category = ?")
-        params.append(category)
-
-    where = " AND ".join(conditions)
-
-    with get_db() as conn:
-        rows = conn.execute(f"SELECT * FROM memory WHERE {where} ORDER BY created_at DESC", params).fetchall()
-        return [dict(row) for row in rows]
-
-
-# ============================================================================
-# 工具统计
-# ============================================================================
-
-
-def update_tool_stats(tool_name: str, success: bool, latency: float) -> None:
-    """更新工具统计。"""
-    now = datetime.now().isoformat()
-    with get_db() as conn:
-        if success:
-            conn.execute(
-                """INSERT INTO tool_stats (tool_name, success_count, total_latency, last_used)
-                   VALUES (?, 1, ?, ?) ON CONFLICT(tool_name) DO UPDATE SET
-                   success_count = success_count + 1,
-                   total_latency = total_latency + ?,
-                   last_used = ?""",
-                (tool_name, latency, now, latency, now),
-            )
-        else:
-            conn.execute(
-                """INSERT INTO tool_stats (tool_name, failure_count, last_used)
-                   VALUES (?, 1, ?) ON CONFLICT(tool_name) DO UPDATE SET
-                   failure_count = failure_count + 1,
-                   last_used = ?""",
-                (tool_name, now, now),
-            )
-
-
-def get_tool_stats(tool_name: str) -> dict | None:
-    """获取工具统计。"""
-    with get_db() as conn:
-        row = conn.execute("SELECT * FROM tool_stats WHERE tool_name = ?", (tool_name,)).fetchone()
-        return dict(row) if row else None
-
-
-def get_all_tool_stats() -> list[dict]:
-    """获取所有工具统计。"""
-    with get_db() as conn:
-        rows = conn.execute("SELECT * FROM tool_stats ORDER BY last_used DESC").fetchall()
-        return [dict(row) for row in rows]
-
-
-# ============================================================================
-# 会话统计
-# ============================================================================
-
-
-def update_session_stats(
-    session_id: str,
-    message_count: int | None = None,
-    tool_call_count: int | None = None,
-    success_outcomes: int | None = None,
-    failure_outcomes: int | None = None,
-) -> None:
-    """更新会话统计。"""
-    with get_db() as conn:
-        updates = []
-        params = []
-
-        if message_count is not None:
-            updates.append("message_count = ?")
-            params.append(message_count)
-        if tool_call_count is not None:
-            updates.append("tool_call_count = ?")
-            params.append(tool_call_count)
-        if success_outcomes is not None:
-            updates.append("success_outcomes = ?")
-            params.append(success_outcomes)
-        if failure_outcomes is not None:
-            updates.append("failure_outcomes = ?")
-            params.append(failure_outcomes)
-
-        if updates:
-            params.append(session_id)
-            conn.execute(f"UPDATE session_stats SET {', '.join(updates)} WHERE session_id = ?", params)
-
-
-def get_session_stats(session_id: str) -> dict | None:
-    """获取会话统计。"""
-    with get_db() as conn:
-        row = conn.execute("SELECT * FROM session_stats WHERE session_id = ?", (session_id,)).fetchone()
-        return dict(row) if row else None
-
-
-def end_session(session_id: str) -> None:
-    """结束会话。"""
-    now = datetime.now().isoformat()
-    with get_db() as conn:
-        conn.execute("UPDATE session_stats SET ended_at = ? WHERE session_id = ?", (now, session_id))
-
-
-# ============================================================================
-# 清理任务
-# ============================================================================
-
-
-def cleanup_expired_memory() -> int:
-    """清理过期记忆。返回删除数量。"""
-    now = datetime.now().isoformat()
-    with get_db() as conn:
-        cursor = conn.execute(
-            "DELETE FROM memory WHERE expires_at IS NOT NULL AND expires_at < ? AND is_active = 1", (now,)
-        )
-        return cursor.rowcount
-
-
-def cleanup_low_confidence_memory(threshold: float = 0.3) -> int:
-    """清理低置信度知识。返回更新数量。"""
-    with get_db() as conn:
-        cursor = conn.execute(
-            "UPDATE memory SET is_active = 0 WHERE memory_type = 'evolved' AND is_active = 1 AND JSON_EXTRACT(metadata, '$.confidence') < ?",
-            (threshold,),
-        )
-        return cursor.rowcount
-
-
-def cleanup_low_access_memory(days: int = 90) -> int:
-    """清理低访问记忆。返回删除数量。"""
-    from datetime import timedelta
-
-    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    with get_db() as conn:
-        cursor = conn.execute(
-            "DELETE FROM memory WHERE memory_type = 'evolved' AND is_active = 1 AND updated_at < ?", (cutoff,)
-        )
-        return cursor.rowcount

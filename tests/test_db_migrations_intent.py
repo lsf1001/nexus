@@ -34,10 +34,6 @@ def _seed_session(db_path) -> None:
         "INSERT INTO sessions (id, title, created_at, updated_at, channel) VALUES (?, ?, ?, ?, ?)",
         ("s1", None, now, now, "main"),
     )
-    conn.execute(
-        "INSERT INTO session_stats (session_id, created_at) VALUES (?, ?)",
-        ("s1", now),
-    )
     conn.commit()
     conn.close()
 

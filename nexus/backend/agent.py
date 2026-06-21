@@ -1,15 +1,13 @@
 """Nexus Agent 核心模块。
 
-集成 DeepAgents SDK 完整模块：
+集成 DeepAgents SDK 完整模块:
 - FilesystemBackend + FilesystemMiddleware: 文件系统访问
-- MemoryMiddleware: 记忆系统
+- MemoryMiddleware: AGENTS.md 长期记忆自动加载(写入受 QualityGateMiddleware 拦截)
 - SummarizationMiddleware: 对话摘要压缩
 - SubAgent/AsyncSubAgentMiddleware: 子代理协作
 - CompositeBackend: 多 backend 组合
 - StateBackend: 状态管理
-- StoreBackend: 持久化存储
-- MemoryService: 记忆服务
-- EvolutionService: 进化服务
+- StoreBackend: 持久化存储(挂到 /memories/ 路由)
 """
 
 import logging

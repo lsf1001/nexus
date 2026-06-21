@@ -42,9 +42,7 @@ def test_fresh_db_creates_all_tables(temp_db):
     expected = {
         "sessions",
         "messages",
-        "memory",
-        "tool_stats",
-        "session_stats",
+        "memory_legacy",
         "quality_scores",
         "resume_tokens",
     }
