@@ -1,0 +1,126 @@
+/* ===== 响应式 ===== */
+
+@media (max-width: 1180px) {
+  .window {
+    grid-template-columns: 230px minmax(0, 1fr);
+    width: calc(100vw - 24px);
+  }
+
+  /* prompt grid 在更窄的断点(<=900px)才变 1 列 —— 1180 仍保留 2x2,
+     因为 1180-230(sidebar) ≈ 950px main 足够 2 列卡片。 */
+}
+
+@media (max-width: 900px) {
+  .window {
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    border-radius: 0;
+    border: 0;
+    grid-template-columns: 1fr;
+  }
+
+  /* 移动端 sidebar 改成横向紧凑布局(brand + 对话列表 + 微信入口 一行)。
+     关键:sidebar 高度要 < 90px,不能挤占 main 区空间。 */
+  .sidebar {
+    grid-template-rows: auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "brand section footer";
+    border-right: 0;
+    border-bottom: 1px solid rgba(91, 65, 34, 0.28);
+    padding: 10px 14px;
+    gap: 14px;
+    align-items: center;
+    overflow-x: auto;
+  }
+
+  .sidebar-brand { grid-area: brand; }
+  .sidebar .sidebar-section { grid-area: section; flex-direction: row; align-items: center; }
+  .sidebar .sidebar-section-title { display: none; }
+  .sidebar-footer { grid-area: footer; flex-direction: row; padding-top: 0; border-top: 0; }
+
+  /* 移动端隐藏长列表(用户从顶部入口点开抽屉更好,这里先简单 display:none) */
+  .sidebar .recent-panel,
+  .sidebar .btn-new-task {
+    display: none;
+  }
+
+  .sidebar .footer-link {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .main {
+    grid-template-rows: 52px minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .topbar {
+    padding: 0 18px;
+  }
+
+  .main-scroll {
+    padding: 28px 18px 18px;
+  }
+
+  .setup-view,
+  .wechat-view,
+  .settings-view {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .setup-copy,
+  .wechat-copy,
+  .settings-copy {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 28px 20px;
+  }
+
+  .setup-copy h1,
+  .wechat-copy h1,
+  .settings-copy h1 {
+    font-size: 28px;
+  }
+
+  .settings-list {
+    padding: 22px 18px;
+  }
+
+  .setting-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .chat-scroll {
+    padding: 18px 14px 12px;
+  }
+
+  .composer-wrap {
+    padding: 12px 14px 18px;
+  }
+
+  .empty-state h1,
+  .hero h1 {
+    font-size: 30px;
+  }
+
+  /* 移动端 prompt grid 变 1 列 */
+  .prompt-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* 移动端隐藏装饰 */
+  .sketch-line {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-pill .dot,
+  .loading-dot {
+    animation: none;
+  }
+}

@@ -1,5 +1,6 @@
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '../types';
+import { useContextMenuTrigger } from '../lib/useContextMenuTrigger';
 
 interface ChatBubbleProps {
   message: Message;
@@ -9,42 +10,63 @@ interface ChatBubbleProps {
 
 function ChatBubble({ message, showThinking = true, onCopy }: ChatBubbleProps) {
   const isUser = message.role === 'user';
+  const roleClass = isUser ? 'is-user' : 'is-assistant';
 
   const handleCopy = () => {
     const text = message.content || message.thinking || '';
     onCopy?.(text);
   };
 
+  // 右击消息任意位置 → 弹"复制 消息"菜单（user / assistant 都支持）
+  const handleContextMenu = useContextMenuTrigger(
+    () => {
+      const parts: string[] = [];
+      if (message.thinking) parts.push(`[思考] ${message.thinking}`);
+      if (message.content) parts.push(message.content);
+      return parts.join('\n\n');
+    },
+    { label: isUser ? '消息' : '回复' }
+  );
+
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <div className={`message-row ${roleClass}`}>
       <div
-        className={`relative max-w-[75%] px-4 py-3 break-words ${
-          isUser
-            ? 'bg-[#4a7c59] text-white rounded-2xl rounded-br-sm'
-            : 'bg-[#1a1a1a] border border-[#2a2a2a] text-gray-200 rounded-2xl rounded-bl-sm'
-        }`}
-        style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}
+        className={`message-bubble ${isUser ? 'message-user' : 'message-assistant'}`}
+        onContextMenu={handleContextMenu}
       >
         {!isUser && onCopy && (
           <button
             onClick={handleCopy}
-            className="absolute top-2 right-2 p-1 rounded hover:bg-[#2a2a2a] text-gray-500 hover:text-gray-300 transition-colors"
+            className="copy-button"
+            type="button"
             title="复制内容"
+            aria-label="复制消息"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
             </svg>
           </button>
         )}
         {showThinking && message.thinking && (
-          <div className="mb-3 p-3 bg-[#252525] rounded-xl border-l-2 border-[#4a7c59]">
-            <div className="text-xs text-[#4a7c59] font-medium mb-2 flex items-center gap-1">
-              <span>🌿</span> 思考过程
+          <div className="thinking-card">
+            <div className="thinking-title">
+              <span aria-hidden="true">🌿</span> 思考过程
             </div>
-            <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono overflow-x-auto" style={{ wordBreak: 'break-word' }}>{message.thinking}</pre>
+            <pre className="thinking-content">{message.thinking}</pre>
           </div>
         )}
-        <div className={`prose prose-sm max-w-none ${isUser ? 'text-white' : 'text-gray-200'} prose-p:my-1`} style={{ wordBreak: 'break-word' }}>
+        <div className={`message-markdown ${isUser ? 'user' : 'assistant'}`}>
           <ReactMarkdown>{message.content}</ReactMarkdown>
         </div>
       </div>

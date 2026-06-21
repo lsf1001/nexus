@@ -1,0 +1,172 @@
+/* ===== 设计 Token：颜色、字体、间距 ===== */
+/* 调色板对齐原型 nexus-handdrawn-assistant-ui-v2.html */
+
+.nexus-desktop {
+  /* 暖色主调 */
+  --ink: #27231d;
+  --muted: #766d60;
+  --faint: #9c907d;
+
+  /* 纸面与画布 */
+  --canvas: #f1dfbf;
+  --paper: #fff8ec;
+  --paper-soft: #f8eedc;
+  --paper-tint: #fbf5e8;
+
+  /* 描边 */
+  --line: #dcc7a8;
+  --line-strong: #b89d72;
+
+  /* 森林绿（侧边栏主色） */
+  --forest: #314f38;
+  --forest-2: #3d6245;
+  --forest-soft: #edf4e8;
+
+  /* 鼠尾草、茶叶 */
+  --sage: #849a72;
+  --tea: #d7a766;
+
+  /* 微信绿 */
+  --wechat: #07c160;
+
+  /* 阴影 */
+  --shadow-lg: 0 32px 80px rgba(64, 48, 27, 0.18);
+  --shadow-md: 0 16px 42px rgba(64, 48, 27, 0.10);
+  --shadow-sm: 0 10px 26px rgba(71, 52, 25, 0.06);
+
+  /* 字体 stack：原型指定的人文衬线 + 系统 fallback */
+  --font-sans: "Avenir Next", "Gill Sans", "Trebuchet MS",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* 圆角 */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+  --r-2xl: 32px;
+}
+
+/* dark mode 覆盖（由 documentElement data-theme="dark" 触发） */
+.nexus-desktop[data-theme="dark"] {
+  --ink: #f4ead8;
+  --muted: #b3a48b;
+  --faint: #8a7d65;
+  --canvas: #1c1a16;
+  --paper: #25221c;
+  --paper-soft: #2b2721;
+  --paper-tint: #312d26;
+  --line: #3a352c;
+  --line-strong: #5a5040;
+  --forest: #4f6f54;
+  --forest-2: #6c8a72;
+  --forest-soft: #2a3526;
+  --shadow-lg: 0 32px 80px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 16px 42px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 10px 26px rgba(0, 0, 0, 0.25);
+}
+
+/* ===== Reset ===== */
+.nexus-desktop *,
+.nexus-desktop *::before,
+.nexus-desktop *::after {
+  box-sizing: border-box;
+}
+
+.nexus-desktop {
+  min-height: 100vh;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  background:
+    radial-gradient(circle at 16% 16%, rgba(132, 154, 114, 0.28), transparent 26%),
+    radial-gradient(circle at 78% 3%, rgba(215, 167, 102, 0.24), transparent 24%),
+    linear-gradient(135deg, #ead8b6 0%, #f4e8d0 52%, #e3cfaa 100%);
+}
+
+.nexus-desktop[data-theme="dark"] {
+  background:
+    radial-gradient(circle at 16% 16%, rgba(70, 100, 80, 0.22), transparent 26%),
+    radial-gradient(circle at 78% 3%, rgba(120, 95, 60, 0.18), transparent 24%),
+    linear-gradient(135deg, #1f1c17 0%, #2a261e 52%, #211d16 100%);
+}
+
+/* 网格纸纹理：与原型同款 42px + multiply */
+.nexus-desktop::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.18;
+  background:
+    linear-gradient(90deg, rgba(86, 67, 40, 0.10) 1px, transparent 1px),
+    linear-gradient(rgba(86, 67, 40, 0.09) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mix-blend-mode: multiply;
+  z-index: 0;
+}
+
+.nexus-desktop[data-theme="dark"]::before {
+  opacity: 0.10;
+  mix-blend-mode: screen;
+}
+
+/* 噪点叠加：原型用 17/29px 双层 radial */
+.nexus-desktop::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.24;
+  background-image:
+    radial-gradient(circle, rgba(77, 57, 31, 0.16) 0 1px, transparent 1px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.34) 0 1px, transparent 1px);
+  background-size: 17px 19px, 29px 31px;
+  z-index: 0;
+}
+
+.nexus-desktop[data-theme="dark"]::after {
+  opacity: 0.12;
+}
+
+/* 表单元素继承字体 */
+.nexus-desktop button,
+.nexus-desktop input,
+.nexus-desktop textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.nexus-desktop button {
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+}
+
+/* ===== 手绘装饰定位 ===== */
+.sketch-line {
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.sketch-line--top-right {
+  right: 70px;
+  top: 110px;
+}
+
+.sketch-line--bottom-left {
+  right: 124px;
+  bottom: 128px;
+  left: auto;
+}
+
+/* dark 主题下手绘装饰用更柔的笔触,避免在深色背景上像黑洞/疤痕 */
+.nexus-desktop[data-theme="dark"] .sketch-line ellipse[fill="none"] {
+  stroke-opacity: 0.18;
+}
+.nexus-desktop[data-theme="dark"] .sketch-line ellipse[fill="var(--sage)"],
+.nexus-desktop[data-theme="dark"] .sketch-line ellipse[fill="var(--tea)"] {
+  fill-opacity: 0.06;
+}

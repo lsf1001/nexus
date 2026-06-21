@@ -24,7 +24,7 @@ export interface SessionResponse {
 }
 
 export interface StreamEvent {
-  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage' | 'wechat_message' | 'session_created' | 'resume_token' | 'resume_ack' | 'invalid_resume_token' | 'stats';
+  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage' | 'wechat_message' | 'session_created' | 'resume_token' | 'resume_ack' | 'invalid_resume_token' | 'stats' | 'clarification_request';
   content?: string;
   token_count?: number;
   context_usage?: number;
@@ -40,6 +40,8 @@ export interface StreamEvent {
   retries?: number;        // StreamGuard 重试次数
   fallbacks?: number;      // ResilientRunnable 降级次数
   events_emitted?: number; // StreamGuard 已发出事件总数
+  // 澄清请求(type='clarification_request')
+  options?: string[];      // 候选项 0-6 个;空时让用户自由输入
 }
 
 export interface WSMessage {

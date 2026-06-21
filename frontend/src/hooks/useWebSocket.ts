@@ -20,7 +20,11 @@ export function useWebSocket<T = unknown>({
   maxDelay = 30000,
   heartbeatInterval = 25000,
   reconnect = true,
-}: UseWebSocketOptions<T>): { connected: boolean; send: (data: unknown) => void } {
+}: UseWebSocketOptions<T>): {
+  connected: boolean;
+  send: (data: unknown) => void;
+  getReadyState: () => number;
+} {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
@@ -102,5 +106,12 @@ export function useWebSocket<T = unknown>({
     }
   };
 
-  return { connected, send };
+  // 暴露 readyState 查询：避免在 ws 抖动期间发"鬼影消息"。
+  // 返回值对应 WebSocket 的 4 个 readyState 之一（CONNECTING/OPEN/CLOSING/CLOSED）。
+  const getReadyState = (): number => {
+    const ws = wsRef.current;
+    return ws ? ws.readyState : WebSocket.CLOSED;
+  };
+
+  return { connected, send, getReadyState };
 }

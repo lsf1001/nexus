@@ -1,6 +1,6 @@
-# Nexus Frontend
+# Nexus 前端
 
-Nexus AI Gateway 的 Web 前端 (React + TypeScript + Vite + Tailwind CSS + Zustand)。
+Nexus 个人 AI 助手的前端界面，技术栈为 React + TypeScript + Vite + Tailwind CSS + Zustand。
 
 ## 启动
 
@@ -32,7 +32,7 @@ npm run lint
 frontend/
 ├── src/
 │   ├── components/   # 视图组件
-│   │   ├── ChatArea.tsx         # 主对话区 + 输入
+│   │   ├── ChatArea.tsx         # 主任务区 + 输入
 │   │   ├── ChatBubble.tsx       # 单条消息渲染
 │   │   ├── SessionList.tsx      # 侧边栏会话列表
 │   │   ├── Sidebar.tsx          # 侧边栏壳
@@ -56,7 +56,7 @@ frontend/
 # 后端 REST + WS 鉴权 (不依赖 LLM)
 npm run e2e:backend
 
-# 真实 LLM 流式响应 (需后端配置 API Key)
+# 真实 LLM 流式响应（需后端配置 API 密钥）
 npm run e2e:llm
 
 # UI 全流程 (需前后端均启动)

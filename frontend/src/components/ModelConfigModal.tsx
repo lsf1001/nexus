@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import type { Model } from '../types';
+import { apiFetch } from '../lib/api';
+import { openContextMenuAt } from '../lib/useContextMenuTrigger';
 
 interface ModelConfigModalProps {
   isOpen: boolean;
@@ -42,7 +44,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
 
   const loadModels = async () => {
     try {
-      const res = await fetch(`${apiUrl}/models`);
+      const res = await apiFetch(`${apiUrl}/models`);
       const data = await res.json();
       setModels(data);
     } catch {
@@ -96,7 +98,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
     if (!confirm('确定要删除这个模型吗？')) return;
     setLoading(true);
     try {
-      const res = await fetch(`${apiUrl}/models/${modelId}`, { method: 'DELETE' });
+      const res = await apiFetch(`${apiUrl}/models/${modelId}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         await loadModels();
@@ -113,7 +115,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
   const handleSwitch = async (modelId: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`${apiUrl}/models/switch`, {
+      const res = await apiFetch(`${apiUrl}/models/switch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: modelId }),
@@ -143,7 +145,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
 
     try {
       if (isCreating) {
-        const res = await fetch(`${apiUrl}/models`, {
+        const res = await apiFetch(`${apiUrl}/models`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(formData),
@@ -156,7 +158,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
           setError(data.error || '创建失败');
         }
       } else if (editingModel) {
-        const res = await fetch(`${apiUrl}/models/${editingModel.id}`, {
+        const res = await apiFetch(`${apiUrl}/models/${editingModel.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(formData),
@@ -205,6 +207,13 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
                       ? 'border-[#4a7c59] bg-[#f0f7f1]'
                       : 'border-[#e0dcd4] hover:border-[#8fbc8f]'
                   }`}
+                  onContextMenu={(e) =>
+                    openContextMenuAt(
+                      e,
+                      `模型: ${model.name}\n${model.api_base}\n温度: ${model.temperature}\n${model.is_active ? '当前使用中' : '备用'}`,
+                      '模型'
+                    )
+                  }
                 >
                   <div className="flex items-start justify-between">
                     <div>
@@ -218,7 +227,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
                       </div>
                       <p className="text-xs text-[#6b7c6b] mt-1">{model.api_base}</p>
                       <p className="text-xs text-[#6b7c6b]">
-                        Temperature: {model.temperature}
+                        温度参数：{model.temperature}
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -272,13 +281,13 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="例如: MiniMax-M2.7"
+                  placeholder="例如: MiniMax-M3"
                   className="w-full px-3 py-2 rounded-xl border border-[#e0dcd4] focus:border-[#4a7c59] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[#2d4a3a] mb-1">API Base</label>
+                <label className="block text-sm font-medium text-[#2d4a3a] mb-1">API 地址</label>
                 <input
                   type="text"
                   value={formData.api_base}
@@ -288,19 +297,19 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[#2d4a3a] mb-1">API Key</label>
+                <label className="block text-sm font-medium text-[#2d4a3a] mb-1">API 密钥</label>
                 <input
                   type="password"
                   value={formData.api_key}
                   onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                  placeholder="输入 API Key"
+                  placeholder="输入 API 密钥"
                   className="w-full px-3 py-2 rounded-xl border border-[#e0dcd4] focus:border-[#4a7c59] focus:outline-none"
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-[#2d4a3a] mb-1">
-                  Temperature: {formData.temperature}
+                  温度参数：{formData.temperature}
                 </label>
                 <input
                   type="range"

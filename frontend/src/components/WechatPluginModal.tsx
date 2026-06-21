@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { apiFetch } from '../lib/api';
 
 interface WechatPluginModalProps {
   isOpen: boolean;
@@ -47,7 +48,7 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
 
     // 检查绑定状态
     setStep('loading');
-    fetch(`${apiUrl}/channels/wechat/bind`)
+    apiFetch(`${apiUrl}/channels/wechat/bind`)
       .then(res => res.json())
       .then((data: BindStatus) => {
         setBindStatus(data);
@@ -70,7 +71,7 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
     const sessionKey = qrData.session_key;
     const timer = window.setInterval(async () => {
       try {
-        const res = await fetch(`${apiUrl}/channels/wechat/status/${sessionKey}?timeout_ms=5000`);
+        const res = await apiFetch(`${apiUrl}/channels/wechat/status/${sessionKey}?timeout_ms=5000`);
         const status = await res.json();
         if (status.connected) {
           setStatusMessage('绑定成功！');
@@ -108,7 +109,7 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
     setStep('qr');
     setError('');
     try {
-      const res = await fetch(`${apiUrl}/channels/wechat/qr`, { method: 'POST' });
+      const res = await apiFetch(`${apiUrl}/channels/wechat/qr`, { method: 'POST' });
       const data = await res.json();
 
       if (data.error) {

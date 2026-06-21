@@ -1,0 +1,14 @@
+{
+  "scripts": {
+    "desktop:install": "npm install --prefix desktop",
+    "desktop:build": "npm run build --prefix desktop",
+    "desktop:dev": "npm run dev --prefix desktop",
+    "desktop:test": "npm run test --prefix desktop",
+    "desktop:pack": "npm run pack --prefix desktop",
+    "verify:full": "node verify-full.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "puppeteer": "^25.1.0"
+  }
+}

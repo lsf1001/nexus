@@ -15,6 +15,12 @@ dist-ssr
 # E2E 测试产物（截图 + JSON 报告）
 tests/**/artifacts/
 
+# Playwright 产物（test-results、playwright-report、blob-report）
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -25,3 +31,12 @@ tests/**/artifacts/
 *.njsproj
 *.sln
 *.sw?
+
+# 调试 / 排障一次性脚本(不入仓)
+check*.mjs
+debug*.mjs
+repro-*.mjs
+sweep-*.mjs
+test-cdp-*.mjs
+test-clarify-ui.mjs
+test-loading-watch.mjs

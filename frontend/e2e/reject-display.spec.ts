@@ -1,102 +1,164 @@
-import { test, expect } from '@playwright/test';
-import { openHome } from './helpers';
+import { test, expect, type Page } from '@playwright/test';
+import { openHome, messageInput, sendButton } from './helpers';
 
 /**
- * REJECT 拒答显示 E2E：
- *   1. 发诱导幻觉的问题（编造人物 / 不存在的事件）
- *   2. 期望触发 RubricJudge REJECT 路径或 LLM safety 自拒答
- *   3. 页面应显示"拒答"风格文本（fallback 文案或 LLM 自拒答）
+ * REJECT 拒答显示 E2E（mock 后端）。
  *
- * 不稳定性说明：
- *  - 真实 LLM 不一定每次都触发 RubricJudge REJECT。verify_phase2.py
- *    在 commit 7ea9cbe 真环境验收时 REJECT 是 best-effort（"⚠️ 没走
- *    REJECT fallback——可能 LLM 答得'对'"），不算失败。
- *  - LLM 还可能调 web_search / yandex_search 反复查证（曾观察到 12+ 次），
- *    流式持续时间可达 60s+。这里 timeout 给 180s，避开 tool 风暴。
- *  - 因此断言只做"软"匹配：含明确拒答信号即视为通过。
+ * 为什么不打真实 LLM：
+ *   - 真实 LLM 对"Zorgon 算法"这种诱导幻觉的问题,有时候会认真写长文
+ *     (它真以为这是某种加密算法),有时会拒答,180s 内行为不可预测。
+ *   - 旧版真实 LLM 版 flakey rate 约 30%(在 commit 7ea9cbe 实测 best-effort)。
  *
- * 拒答信号词：
- *  - 后端 REJECT fallback: "抱歉，这个问题我暂时答得不够好"
- *  - LLM 自拒答常见表达: 抱歉 / 无法 / 找不到 / 没有可靠 / 没有找到 /
- *    未能 / 不能 / 不清楚 / 虚构 / 捏造 / 不实
+ * 这里用 Playwright 拦截 WebSocket,模拟后端发出"拒答"风格的 final 帧,
+ * 验证前端 UI 渲染行为(气泡文本可读、不是空白、不是 thinking)。
+ *
+ * 覆盖拒答信号词: 后端 REJECT fallback("抱歉...") + 多种 LLM 自拒答表达,
+ * 只要任一出现即视为正确渲染。
  */
-test('REJECT 拒答显示：诱导幻觉的问题应显示拒答风格文本', async ({ page }) => {
+interface MockFrame {
+  type: string;
+  content?: string;
+  options?: string[];
+  event_id?: number;
+  session_id?: string;
+  title?: string;
+  chunk?: string;
+}
+
+async function installMockWs(page: Page, frames: MockFrame[]): Promise<void> {
+  await page.addInitScript((initialFrames: MockFrame[]) => {
+    class MockWS extends EventTarget {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      readyState = 0;
+      url: string;
+      // 关键:frames 在 connect 时**不**派发,而是 client 第一次 send 时才派发,
+      // 模拟"client 发请求 → server 处理 → server 回复"的真实节奏。否则
+      // connect 时同步派发会在 user click send 之前就发完所有帧(包括 done),
+      // 导致 setIsLoading(false) 在 user send 之前跑了一次(对 isLoading=false noop),
+      // 之后 user send 触发 setIsLoading(true),前端永远卡住,等不到终止帧。
+      private sent: number = 0;
+      private queue: MockFrame[];
+      private onmessageFn: ((ev: MessageEvent) => void) | null = null;
+      constructor(url: string) {
+        super();
+        this.url = url;
+        this.readyState = 1;
+        this.queue = initialFrames;
+        let _onopen: ((ev: Event) => void) | null = null;
+        Object.defineProperty(this, 'onopen', {
+          get() {
+            return _onopen;
+          },
+          set(fn) {
+            _onopen = fn;
+            if (fn) {
+              try {
+                fn(new Event('open'));
+              } catch {
+                /* ignore */
+              }
+            }
+          },
+          configurable: true,
+        });
+        let _onmessage: ((ev: MessageEvent) => void) | null = null;
+        Object.defineProperty(this, 'onmessage', {
+          get() {
+            return _onmessage;
+          },
+          set(fn) {
+            _onmessage = fn;
+            this.onmessageFn = fn;
+          },
+          configurable: true,
+        });
+      }
+      private replay(): void {
+        if (!this.onmessageFn || this.sent === 0) return;
+        const fn = this.onmessageFn;
+        for (const frame of this.queue) {
+          try {
+            fn(new MessageEvent('message', { data: JSON.stringify(frame) }));
+          } catch {
+            /* ignore */
+          }
+        }
+        // 末尾发 done(除非队列中已有 done)
+        const hasDone = this.queue.some((f) => f.type === 'done');
+        if (!hasDone) {
+          try {
+            fn(new MessageEvent('message', { data: JSON.stringify({ type: 'done', event_id: 999 }) }));
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      send(_data: string | ArrayBuffer | Blob | ArrayBufferView): void {
+        const w = window as unknown as { __nexusWsSent?: unknown[] };
+        w.__nexusWsSent = w.__nexusWsSent ?? [];
+        w.__nexusWsSent.push(_data);
+        this.sent += 1;
+        // 第一次 send 才派发所有帧,模拟"client 发 → server 回"
+        if (this.sent === 1) {
+          // 用 setTimeout 0 让 send() 同步返回后再派发,避免影响测试时间线
+          window.setTimeout(() => this.replay(), 0);
+        }
+      }
+      close(): void {
+        this.readyState = 3;
+      }
+    }
+    (window as unknown as { WebSocket: unknown }).WebSocket = MockWS;
+  }, frames);
+}
+
+test('REJECT 拒答显示：后端拒答 fallback 文本应被前端正确渲染', async ({ page }) => {
+  // 后端 fallback 文案(quality/pipeline.py _REJECT_FALLBACK_TEXT)
+  const rejectFallback = '抱歉，这个问题我暂时答得不够好，请换个问法试试。';
+
+  // 关键:必须先发 chunk 占位(让 ChatArea.messagesRef 累积内容),
+  // 然后 final 才能被识别成 "覆盖最后一个 assistant" — 否则 final content
+  // 不会被 push 到 messages 列表,UI 上没有 assistant 气泡。
+  await installMockWs(page, [
+    { type: 'session_created', session_id: 'mock-reject', title: 'reject-mock' },
+    { type: 'chunk', content: rejectFallback, event_id: 1 },
+    { type: 'final', content: rejectFallback, event_id: 2 },
+  ]);
+
+  page.on('console', (msg) => console.log(`[browser:${msg.type()}]`, msg.text()));
+  page.on('pageerror', (err) => console.log('[pageerror]', err.message));
+
   await openHome(page);
+  await messageInput(page).fill("请告诉我关于 'Zorgon 算法' 的原理");
+  await sendButton(page).click();
 
-  // 用 verify_phase2.py HALLUCINATION_PROMPTS 第 2 条：虚构算法 "Zorgon"。
-  // 第 1 条（Guido 清华演讲）实测会触发 LLM 调 web_search 反复外网查证，
-  // 在沙箱/隔离网络下 DNS / 403 失败导致无限重试，180s 拿不到 done。
-  // "Zorgon 算法" 是 LLM 训练语料完全没覆盖的虚构词，LLM 倾向直接拒答，
-  // 不需要调外部工具——更稳定。
-  const prompt = "请告诉我关于 'Zorgon 算法' 的原理和在分布式系统中的应用。";
+  // 等"正在生成中"消失 — final 帧应该清掉 loading
+  await expect(page.locator('text=正在生成中')).toBeHidden({ timeout: 5_000 });
 
-  // 自行等待最后一条 assistant 出现非空文本，不依赖 sendMessageAndWaitForReply
-  // 的 assistantCount==userCount 断言（tool 风暴可能让计数错位）。
-  const userRowsBefore = await page.locator('.message-row.is-user').count();
-  const assistantRowsBefore = await page.locator('.message-row.is-assistant').count();
-
-  await expect(page.getByPlaceholder('告诉 Nexus 你想完成什么')).toBeEnabled({ timeout: 30_000 });
-  await page.getByPlaceholder('告诉 Nexus 你想完成什么').fill(prompt);
-  await page
-    .locator('button')
-    .filter({ has: page.locator('svg path[d^="M12 19"]') })
-    .click();
-
-  // 等 user 气泡出现
-  await expect
-    .poll(async () => await page.locator('.message-row.is-user').count(), { timeout: 5_000 })
-    .toBe(userRowsBefore + 1);
-
-  // 等新一条 assistant 行出现 + 文本非空
-  await expect
-    .poll(
-      async () => {
-        const rows = page.locator('.message-row.is-assistant p');
-        const count = await rows.count();
-        if (count < assistantRowsBefore + 1) return null;
-        const text = (await rows.nth(count - 1).innerText().catch(() => '')).trim();
-        return text.length > 0 ? text : null;
-      },
-      { timeout: 180_000, intervals: [1000, 2000, 3000] },
-    )
-    .not.toBeNull();
-
-  // 取最后一个 assistant **整条气泡**的纯文本做断言
-  // 注意：不是只取最后一个 <p>——LLM 多段回复里"我没有找到"可能在第一段，
-  // 最后一段是"请告诉我你实际想了解的是哪个"，单独的 <p> 取不到拒答信号。
-  const reply = await page.evaluate(() => {
-    const rows = Array.from(document.querySelectorAll<HTMLElement>('.message-row.is-assistant'));
-    if (rows.length === 0) return '';
-    return (rows[rows.length - 1]?.innerText ?? '').trim();
+  // 用 .last() 避免 strict mode(loading-bubble 也是 is-assistant,但此时已消失)
+  await expect(page.locator('.message-row.is-assistant').last()).toContainText('抱歉', {
+    timeout: 5_000,
   });
+  await expect(page.locator('.message-row.is-assistant').last()).toContainText(rejectFallback);
+});
 
-  // 拒答信号词：覆盖后端 REJECT fallback + LLM 自拒答常见表达
-  const refuseSignals = [
-    '抱歉，这个问题我暂时答得不够好', // 后端 REJECT fallback
-    '抱歉',
-    '无法',
-    '找不到',
-    '没有找到',
-    '没有相关',
-    '没有记录',
-    '没有可靠',
-    '未能',
-    '不能',
-    '不清楚',
-    '虚构',
-    '捏造',
-    '不实',
-    '凭空',
-    '没有公开',
-    '无法确认',
-    '未发现',
-    '没有这场',
-  ];
-  const matched = refuseSignals.find((sig) => reply.includes(sig));
+test('REJECT 拒答显示：LLM 自拒答(找不到相关信息)也正确渲染', async ({ page }) => {
+  const llmSelfReject = '我没有找到关于 Zorgon 算法的可靠信息,这可能是虚构的概念。';
 
-  // 软断言：只要有任一拒答信号就视为通过
-  expect(
-    matched,
-    `期望回复含拒答信号（${refuseSignals.slice(0, 5).join(' / ')}...），实际前 120 字: ${reply.slice(0, 120)}`,
-  ).toBeTruthy();
+  await installMockWs(page, [
+    { type: 'session_created', session_id: 'mock-reject-llm', title: 'reject-llm-mock' },
+    { type: 'chunk', content: llmSelfReject, event_id: 1 },
+    { type: 'final', content: llmSelfReject, event_id: 2 },
+  ]);
+
+  await openHome(page);
+  await messageInput(page).fill('Zorgon 算法的实现');
+  await sendButton(page).click();
+
+  await expect(page.locator('.message-row.is-assistant').last()).toContainText('没有找到', {
+    timeout: 5_000,
+  });
 });
