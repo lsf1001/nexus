@@ -293,14 +293,21 @@ def list_deleted_sessions(limit: int = 50) -> list[dict]:
 
 
 def update_session(session_id: str, title: str | None = None) -> dict | None:
-    """更新会话标题和更新时间。"""
+    """更新会话标题和更新时间。
+
+    注意:返回最新行必须用**同一连接** SELECT,不能用 ``get_session``
+    重新打开连接 —— ``get_db()`` 的 commit 在 ``with`` 退出时才执行,
+    同一 ``with`` 块里嵌套 ``get_session`` 会读到 UPDATE 之前的旧数据
+    (Bug #1,2026-06 E2E 矩阵发现)。
+    """
     now = datetime.now().isoformat()
     with get_db() as conn:
         if title is not None:
             conn.execute("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?", (title, now, session_id))
         else:
             conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
-        return get_session(session_id)
+        row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        return dict(row) if row else None
 
 
 def delete_session(session_id: str) -> bool:
