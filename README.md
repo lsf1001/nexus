@@ -14,6 +14,8 @@ nexus start
 
 访问 http://localhost:30077/
 
+> **macOS 用户**：可直接下载 [DMG 安装包](https://github.com/lsf1001/nexus/releases/tag/v0.1.0)（`Nexus-1.0.0-arm64.dmg`），拖入 Applications 即用，详见下方 [macOS 桌面端（DMG）](#macos-桌面端dmg)。
+
 ## 功能
 
 - **智能对话** - MiniMax / DeepSeek / Qwen 多模型支持
@@ -23,6 +25,8 @@ nexus start
 - **WebSocket** - 实时流式响应
 - **微信通道** - 二维码登录集成
 - **MCP 插件** - 动态加载扩展
+- **质量门** - 4 维度 rubric judge（safety / accuracy / completeness / tool_correctness），REPAIR/REJECT 自动降级
+- **macOS 桌面端** - Electron 打包的 `.dmg`，双击安装即用
 
 ## 安装
 
@@ -56,6 +60,40 @@ nexus install && nexus start
 
 ```bash
 pip install nexus && nexus install && nexus start
+```
+
+### macOS 桌面端（DMG）
+
+```bash
+# 下载安装包（v0.1.0）
+open release/Nexus-1.0.0-arm64.dmg
+# 把 Nexus.app 拖入 Applications
+# 启动即可（首次启动需右键 → 打开，绕过 Gatekeeper，见下方说明）
+```
+
+| 项 | 值 |
+| --- | --- |
+| 产物 | `release/Nexus-1.0.0-arm64.dmg`（175 MB，arm64） |
+| 架构 | macOS Apple Silicon（Intel 暂未出包） |
+| 签名 | **未签名**（内测版，无 Apple Developer ID） |
+| 端口 | 后端 30000 / 前端 30077（启动时自动拉起） |
+
+> **首次启动绕过 Gatekeeper**（仅一次）：
+>
+> 1. Finder → Applications → 右键 `Nexus.app` → 打开
+> 2. 弹出确认框 → 点「打开」
+> 3. 之后双击即可正常启动
+>
+> **命令行方式**（等价）：
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/Nexus.app
+> ```
+
+源码构建桌面端：
+
+```bash
+cd desktop && npm install && npm run pack
+# 产物输出到 desktop/dist/ 或 release/
 ```
 
 ## CLI
@@ -120,6 +158,9 @@ ws.send(JSON.stringify({ content: '你好' }));
 
 - [SPEC.md](./SPEC.md) - 技术规格
 - [CLAUDE.md](./CLAUDE.md) - 开发规范
+- [CHANGELOG.md](./CHANGELOG.md) - 版本变更
+- [docs/RELEASE_NOTES_v0.1.0.md](./docs/RELEASE_NOTES_v0.1.0.md) - v0.1.0 发布说明
+- [desktop/](./desktop/) - 桌面端源码
 
 ---
 
