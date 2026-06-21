@@ -5,6 +5,17 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [v0.1.0] — 2026-06-21 — 首次内测交付
+
+**核心**: 把 Nexus 从「能跑」推进到「能装能用」。AI Gateway 全栈接通(后端 + 前端 + **桌面端 DMG 安装包**)、质量门上线、可观测性落地、意图识别路由、CI/CD 双线。
+**详情**: 见 `docs/RELEASE_NOTES_v0.1.0.md`
+**测试**: 378 backend tests pass + Playwright DMG CDP 真环境 E2E
+**产物**: `release/Nexus-1.0.0-arm64.dmg`(175 MB,macOS arm64,未签名)
+
+本节合并自以下 3 段历史 Unreleased 内容:
+
+---
+
 ## [Unreleased] — 意图识别路由
 
 **分支**：`codex/macos-dmg-app`（6 commits since `362809b`，356 tests，DMG CDP 真实环境 E2E 验证通过）
@@ -235,3 +246,25 @@ Nexus 仍在 pre-1.0 阶段，版本号在 0.x 区间。本节内容合并到下
 ```
 ## [Unreleased] — <阶段名> + <一句话总结>
 ```
+
+---
+
+## [Unreleased] — 下一阶段占位
+
+下一阶段(预计 v0.2.0)重点：
+
+- macOS 代码签名(接入 Apple Developer ID,DMG 自动签名)
+- `chunks` 字段精确化(扩展 `_run_agent_streaming` 返回 `chunk_count`)
+- `chat.end` 在澄清挂起 / 错误流分支补发
+- 澄清交互(ask_user 工具)端到端接入前端 UI
+- 偏好数据导出(DPO/KTO)接入训练流程(暂不训练,只导出)
+
+---
+
+## 链接
+
+- [v0.1.0 release notes](./RELEASE_NOTES_v0.1.0.md)
+- [可观测性计划归档](./superpowers/plans/2026-06-20-observability-subsystem.md)
+- [意图识别路由计划归档](./superpowers/plans/2026-06-19-intent-recognition-routing.md)
+- [质量门调优指南](./operations/quality.md)
+- [日志查询指南](./operations/logging.md)
