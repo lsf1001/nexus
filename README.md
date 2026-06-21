@@ -14,7 +14,7 @@ nexus start
 
 访问 http://localhost:30077/
 
-> **macOS 用户**：可直接下载 [DMG 安装包](https://github.com/lsf1001/nexus/releases/tag/v0.1.0)（`Nexus-1.0.0-arm64.dmg`），拖入 Applications 即用，详见下方 [macOS 桌面端（DMG）](#macos-桌面端dmg)。
+> **macOS 用户**：v0.1.0 release 暂未挂 DMG 安装包（网络上传限制），可在本地构建：`cd desktop && npm install && npm run pack`，产物在 `desktop/dist/`。详见下方 [macOS 桌面端（DMG）](#macos-桌面端dmg)。
 
 ## 功能
 
@@ -64,16 +64,17 @@ pip install nexus && nexus install && nexus start
 
 ### macOS 桌面端（DMG）
 
+> v0.1.0 release 暂未挂预构建 DMG（网络上传限制）。本地构建：
+
 ```bash
-# 下载安装包（v0.1.0）
-open release/Nexus-1.0.0-arm64.dmg
-# 把 Nexus.app 拖入 Applications
-# 启动即可（首次启动需右键 → 打开，绕过 Gatekeeper，见下方说明）
+cd desktop && npm install && npm run pack
+# 产物输出到 desktop/dist/ 或 release/
+# 产物：Nexus-1.0.0-arm64.dmg（约 167 MB，arm64，未签名）
 ```
 
 | 项 | 值 |
 | --- | --- |
-| 产物 | `release/Nexus-1.0.0-arm64.dmg`（175 MB，arm64） |
+| 产物 | `desktop/dist/Nexus-1.0.0-arm64.dmg`（本地构建约 167 MB，arm64） |
 | 架构 | macOS Apple Silicon（Intel 暂未出包） |
 | 签名 | **未签名**（内测版，无 Apple Developer ID） |
 | 端口 | 后端 30000 / 前端 30077（启动时自动拉起） |
@@ -88,12 +89,6 @@ open release/Nexus-1.0.0-arm64.dmg
 > ```bash
 > xattr -dr com.apple.quarantine /Applications/Nexus.app
 > ```
-
-源码构建桌面端：
-
-```bash
-cd desktop && npm install && npm run pack
-# 产物输出到 desktop/dist/ 或 release/
 ```
 
 ## CLI
