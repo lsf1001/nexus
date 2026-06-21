@@ -251,6 +251,18 @@ Nexus 仍在 pre-1.0 阶段，版本号在 0.x 区间。本节内容合并到下
 
 ## [Unreleased] — 下一阶段占位
 
+### Changed — 依赖清理(2026-06-21)
+
+- **卸 `ppt-master` 依赖**:
+  - 原 `pyproject.toml` 用 `ppt-master @ git+https://github.com/hugohe3/ppt-master.git`,该仓库 main 分支不再包含 Python 包配置,导致 CI `pip install -e ".[dev]"` 阶段失败(`does not appear to be a Python project`)
+  - 改成不通过 pip 装,文档说明按需安装(`pip install ppt-master`,需 Python 3.12+)
+  - runner.py 子进程调用代码完全不动,真要用 PPT 生成的用户单独装就行
+  - 提交:`58a1b4d fix(deps): 卸 ppt-master 依赖`
+
+---
+
+## [Unreleased] — 下一阶段占位
+
 下一阶段(预计 v0.2.0)重点：
 
 - macOS 代码签名(接入 Apple Developer ID,DMG 自动签名)
