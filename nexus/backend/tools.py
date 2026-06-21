@@ -244,6 +244,56 @@ def delete_memory(memory_id: str, hard: bool = False) -> str:
     return "记忆不存在或已删除"
 
 
+# === 澄清工具 ===
+# 关键设计：ask_user 是一个"被拦截"的工具 —— LLM 调用它的时候,ws.py 会
+# 检测到 on_tool_start 事件,把工具入参(问题/候选项)作为 clarification_request
+# 帧发给客户端,然后**终止本轮流**(不发送 final / done)。客户端用户在 UI
+# 选完答案后,通过 WebSocket 发新消息,LLM 在新的 turn 看到历史里这条 ask_user
+# 调用 + 用户回答,继续原任务。
+# 因此工具的真实返回值基本不会被消费,这里返回占位说明文本。
+_MAX_CLARIFY_OPTIONS = 6
+
+
+@langchain_tool
+def ask_user(question: str, options: list[str] | None = None) -> str:
+    """向用户提出澄清问题 —— 当你**对用户意图不明确、有多种合理解释、
+    关键参数缺失**时调用。调用的瞬间会中断当前回复,前端弹出澄清表单,
+    等用户选完再继续任务。
+
+    Args:
+        question: 简洁明确的问题(中文 1-2 句话即可)。
+        options: **必须传 2-6 个候选项**(给用户点选)。**不要传 None/空** —
+            候选项让用户 1 秒点完,自由输入要打字体验差得多。仅在无法枚举时
+            (如开放式问题"你想做什么?")才允许 options=None 让用户自由输入。
+
+    适用场景:
+        - 任务有多种合理解释(如"帮我整理项目"→哪种项目?哪些维度?)
+        - 关键参数未指定(如"订明早的闹钟"→几点?工作日还是周末?)
+        - 用户输入模糊(无主语、无目标、无约束)
+        - 工具失败需要回退方案时(让用户二选一)
+
+    候选项生成原则:
+        - 数量:2-6 个(覆盖主要场景 + 留"其他"兜底)
+        - 长度:每个 2-8 字,简洁明了
+        - 互斥:候选项之间不要重叠
+        - 默认选项:把最常见的 1 个放第一个
+
+    不适用:
+        - 闲聊/打招呼(直接用自然回复)
+        - 信息已经充分(直接执行)
+        - 用户已经给了完整指令(直接执行)
+    """
+    # 真正的返回值由 ws.py 拦截后注入,这里只是占位,让 langchain 在
+    # tool 异常或流意外结束时不抛错。
+    normalized: list[str] = []
+    if options:
+        normalized = [str(opt).strip() for opt in options if str(opt).strip()][:_MAX_CLARIFY_OPTIONS]
+    summary = f"[ask_user] {question}"
+    if normalized:
+        summary += f" | options={normalized}"
+    return summary
+
+
 TOOLS = [
     get_current_date,
     write_file,  # 自定义的写文件工具
@@ -261,5 +311,6 @@ TOOLS = [
     read_memory,
     search_memory,
     delete_memory,
+    ask_user,
 ]
 TOOLS = [t for t in TOOLS if t is not None]

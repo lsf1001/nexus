@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -73,8 +74,14 @@ class FinalResponse:
 # ==================== 主类 ====================
 
 
-# 当 verdict=REJECT 时给用户的占位文本（避免响应空白）
-_REJECT_FALLBACK_TEXT: str = "抱歉，这个问题我暂时答得不够好，请换个问法试试。"
+# 当 verdict=REJECT 时给用户的占位文本（避免响应空白）。
+# 文案原则:
+#   1. 不说"抱歉",用户不需要道歉;改成"我没把握" —— 把责任归在 AI,
+#      不是用户问得不好。
+#   2. 给用户继续的方向,不要把球踢回"换个问法"(原版隐含"你问得不对")。
+#      改成"再说具体点",既表达 AI 没理解,又引导用户补充上下文。
+#   3. 短句、口语化,跟主 UI 风格一致。
+_REJECT_FALLBACK_TEXT: str = "我没完全理解你想要什么,能再具体点说说吗?"
 
 
 class QualityPipeline:
@@ -164,6 +171,51 @@ class QualityPipeline:
         Returns:
             :class:`FinalResponse`，含最终文本、verdict、reasoning、scores。
         """
+        # === 短闲聊类输入短路 ===
+        # 现象:user 发"我饿了"/"你好"这类短输入(< 20 字、无明确任务),
+        # LLM 给个共情回应完全合理,但 quality gate 把 relevance/tool_correctness
+        # 评得很低(relevance="回复跟问题关系弱"、tool_correctness="应调工具但没调"),
+        # 触发 REPAIR 后仍 REJECT,用户看到 fallback"抱歉..." —— 体验差。
+        # 判定:question 去标点/空格后 <= 12 字 且 不含任务关键词(写/做/查/搜/
+        # 改/算/翻译/解释/分析/推荐/怎么/如何/帮我) → 直接 ACCEPT。
+        # 这样短闲聊不浪费 judge + repair 的两次 LLM 调用,体验上 LLM 共情回复
+        # 就能直接给用户。任务类输入(代码、查询、翻译等)仍走完整质量门。
+        cleaned = re.sub(r"[\s\W]+", "", question, flags=re.UNICODE)
+        task_keywords = (
+            "写",
+            "做",
+            "查",
+            "搜",
+            "改",
+            "算",
+            "翻译",
+            "解释",
+            "分析",
+            "推荐",
+            "怎么",
+            "如何",
+            "帮我",
+            "代码",
+            "code",
+            "脚本",
+            "修复",
+            "bug",
+        )
+        is_chitchat = len(cleaned) <= 12 and not any(kw in question.lower() for kw in task_keywords)
+        if is_chitchat and raw_response:
+            logger.info(
+                "QualityPipeline 短路: 短闲聊类输入 (%d 字),跳过 judge,直接 ACCEPT。q=%s",
+                len(cleaned),
+                question[:30],
+            )
+            return FinalResponse(
+                response_text=raw_response,
+                verdict=RubricVerdict.ACCEPT,
+                reasoning="短闲聊类输入(<=12字且无任务关键词),跳过质量门,直接放行。",
+                scores=(),
+                repair_attempted=False,
+            )
+
         rubrics = self._judge.rubrics
         try:
             initial_scores = await self._judge.judge(question, raw_response, tool_calls)

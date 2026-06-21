@@ -13,7 +13,11 @@
     nexus gateway    # 网关子命令（向后兼容）
 """
 
+from pathlib import Path
+
 import typer
+
+from nexus.pptmaster import generate_pptx
 
 from .config_cmd import config_app
 from .gateway import gateway_app
@@ -213,6 +217,31 @@ def doctor(
     from .doctor import run_doctor
 
     run_doctor(fix=fix)
+
+
+@app.command()
+def ppt(
+    input_path: Path = typer.Argument(..., help="输入文件路径 (PDF/DOCX/MD) 或 URL"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="输出 .pptx 路径,默认同目录同名 .pptx"),
+    template: Path | None = typer.Option(None, "--template", "-t", help="可选模板路径"),
+) -> None:
+    """把 PDF / DOCX / MD / URL 转成原生可编辑 .pptx(由 ppt-master 后端执行)。"""
+    import asyncio
+
+    from rich.console import Console
+
+    console = Console()
+    output_path: Path = output if output is not None else input_path.with_suffix(".pptx")
+
+    console.print(f"[cyan]生成 PPT:[/cyan] {input_path} -> {output_path}")
+
+    try:
+        asyncio.run(generate_pptx(input_path, output_path, template))
+    except Exception as e:
+        console.print(f"[red]生成失败:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    console.print(f"[green]✔ 已生成:[/green] {output_path}")
 
 
 @app.callback(invoke_without_command=True)
