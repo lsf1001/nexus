@@ -98,7 +98,7 @@ def test_export_dpo_writes_jsonl_with_prompt_chosen_rejected(tmp_path: Path):
     for i, line in enumerate(lines):
         data = json.loads(line)
         assert "prompt" in data and "chosen" in data and "rejected" in data
-        assert data["prompt"] == f"q{i+1}"
+        assert data["prompt"] == f"q{i + 1}"
 
 
 def test_export_dpo_filters_low_gap(tmp_path: Path):

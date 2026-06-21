@@ -322,7 +322,10 @@ def test_ws_strips_thinking_tags(monkeypatch) -> None:
     async def astream_factory(input, **kwargs):  # noqa: ARG001
         # 模拟上游分块：先 <think> 标签（归一化前用 <think>），后正文
         yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="<think>")}}
-        yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="step 1: analyze\nstep 2: solve</think>")}}
+        yield {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": MagicMock(content="step 1: analyze\nstep 2: solve</think>")},
+        }
         yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="The answer is 42.")}}
 
     with TestClient(app) as client:
@@ -336,8 +339,7 @@ def test_ws_strips_thinking_tags(monkeypatch) -> None:
 
                 # 至少 1 条 thinking 事件，且 content 是纯思考内容
                 thinking_events = [
-                    e for e in events
-                    if e.get("type") == "thinking" and "调用工具" not in (e.get("content") or "")
+                    e for e in events if e.get("type") == "thinking" and "调用工具" not in (e.get("content") or "")
                 ]
                 assert len(thinking_events) >= 1
                 thinking_content = thinking_events[-1]["content"]
@@ -397,7 +399,10 @@ def test_ws_final_content_excludes_thinking(monkeypatch) -> None:
     _authed_token(monkeypatch)
 
     async def astream_factory(input, **kwargs):  # noqa: ARG001
-        yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="<think>internal</think>Final answer")}}
+        yield {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": MagicMock(content="<think>internal</think>Final answer")},
+        }
 
     with TestClient(app) as client:
         with patch("nexus.backend.main._agent") as mock_agent:

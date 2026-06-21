@@ -205,6 +205,7 @@ async def test_run_meta_eval_perfect_agreement():
         # 用 expected_score 查表
         expected = next(s.expected_score for s in samples if s.prompt == prompt)
         from nexus.backend.rubrics.schemas import Score
+
         return [Score(rubric_name="faithfulness", score=expected, reasoning="ok")]
 
     judge.judge = AsyncMock(side_effect=fake_judge)  # type: ignore[method-assign]
@@ -249,10 +250,9 @@ async def test_run_meta_eval_perfect_disagreement():
         #   q1, q2 (Human: accept) → Judge: 0.1 (reject)
         #   q3, q4 (Human: reject) → Judge: 0.95 (accept)
         from nexus.backend.rubrics.schemas import Score
+
         score_map = {"q1": 0.1, "q2": 0.1, "q3": 0.95, "q4": 0.95}
-        return [
-            Score(rubric_name="faithfulness", score=score_map[prompt], reasoning="opposite")
-        ]
+        return [Score(rubric_name="faithfulness", score=score_map[prompt], reasoning="opposite")]
 
     judge.judge = AsyncMock(side_effect=fake_judge)  # type: ignore[method-assign]
     result = await run_meta_eval(judge, samples)
@@ -277,7 +277,10 @@ async def test_run_meta_eval_judge_exception_does_not_break():
     judge = RubricJudge(llm=_AlwaysFailLLM(), rubrics=DEFAULT_RUBRICS)
     samples = [
         MetaEvalSample(
-            prompt="q", response="r", expected_score=0.5, expected_verdict=RubricVerdict.REPAIR,
+            prompt="q",
+            response="r",
+            expected_score=0.5,
+            expected_verdict=RubricVerdict.REPAIR,
         ),
     ]
     result = await run_meta_eval(judge, samples)
@@ -292,7 +295,10 @@ async def test_run_meta_eval_judge_exception_does_not_break():
 def test_meta_eval_sample_is_frozen():
     """MetaEvalSample 是 frozen=True，构造后不能改。"""
     sample = MetaEvalSample(
-        prompt="q", response="r", expected_score=0.5, expected_verdict=RubricVerdict.ACCEPT,
+        prompt="q",
+        response="r",
+        expected_score=0.5,
+        expected_verdict=RubricVerdict.ACCEPT,
     )
     with pytest.raises((AttributeError, Exception)):
         sample.expected_score = 0.9  # type: ignore[misc]

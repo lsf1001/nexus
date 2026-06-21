@@ -200,10 +200,7 @@ def test_aggregate_uses_rubric_weights():
     from dataclasses import replace
 
     # 4 个 rubric 都用，threshold 降到 0.5 便于 accept
-    rubrics = tuple(
-        replace(r, accept_threshold=0.5, repair_threshold=0.3)
-        for r in DEFAULT_RUBRICS
-    )
+    rubrics = tuple(replace(r, accept_threshold=0.5, repair_threshold=0.3) for r in DEFAULT_RUBRICS)
     strategy = RepairStrategy(safety_veto=False)
     scores = _scores_for_default(0.9, 0.9, 0.7, 0.9)  # 顺序: faithful/relevance/safety/tool
     verdict, reason = strategy.decide(scores, rubrics)

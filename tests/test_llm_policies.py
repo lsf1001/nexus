@@ -36,7 +36,8 @@ def _classified_kind(kind: LLMErrorKind) -> ClassifiedError:
     """根据指定 kind 构造一个 ClassifiedError，使用 Mock 作为原始异常。"""
     return ClassifiedError(
         kind=kind,
-        retryable=kind in {
+        retryable=kind
+        in {
             LLMErrorKind.RATE_LIMIT,
             LLMErrorKind.TIMEOUT,
             LLMErrorKind.CONTENT_FILTER,
@@ -133,7 +134,7 @@ class TestRetryPolicyComputeDelay:
         random.seed(42)
         # 不上 max_delay 时的期望延迟 = 1.0 * 2^attempt
         for attempt in range(3):
-            base = 1.0 * (2 ** attempt)
+            base = 1.0 * (2**attempt)
             for _ in range(50):
                 d = policy.compute_delay(attempt)
                 # 抖动比例最多 ±0.2，再加上 clamp 不会更小

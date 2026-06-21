@@ -215,9 +215,7 @@ async def test_fallback_to_secondary_model_e2e(monkeypatch) -> None:
     result = await resilient.ainvoke({"input": "test"})
     assert result == "fallback_response"
     # 关键断言：stats['fallbacks'] 被累加 >= 1
-    assert resilient.stats["fallbacks"] >= 1, (
-        f"fallbacks 应 >= 1，实际: {resilient.stats['fallbacks']}"
-    )
+    assert resilient.stats["fallbacks"] >= 1, f"fallbacks 应 >= 1，实际: {resilient.stats['fallbacks']}"
 
     # (b) WS 集成层验证 stats 事件透传 fallbacks 字段
     async def astream_events_factory(input, **kwargs):  # noqa: ARG001
@@ -240,9 +238,7 @@ async def test_fallback_to_secondary_model_e2e(monkeypatch) -> None:
                 assert len(stats_events) == 1
                 stats = stats_events[0]
                 # fallbacks 字段应 >= 1（来自 (a) 的统计）
-                assert stats.get("fallbacks", 0) >= 1, (
-                    f"stats 事件 fallbacks 应 >= 1，实际: {stats}"
-                )
+                assert stats.get("fallbacks", 0) >= 1, f"stats 事件 fallbacks 应 >= 1，实际: {stats}"
 
 
 # ============================================================

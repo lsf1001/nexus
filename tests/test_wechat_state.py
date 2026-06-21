@@ -3,6 +3,7 @@
 get_active_wechat_channel / _set_active_channel / _clear_active_channel
 从原 wechat.py 迁到 wechat_state.py，行为等价：模块级单例 + 显式 setter/clear。
 """
+
 from __future__ import annotations
 
 

@@ -10,7 +10,6 @@ from nexus.backend import config as config_module
 from nexus.backend import db, models_config
 from nexus.cli.config_store import get_default_config
 
-
 _MODEL_ENV_KEYS = (
     "MINIMAX_API_KEY",
     "MiniMax_API_KEY",

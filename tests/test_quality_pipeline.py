@@ -142,10 +142,12 @@ async def test_accept_path_returns_raw_response_directly():
 async def test_repair_path_regenerates_and_returns_new_text():
     """首次评分失败 → REPAIR → 调主 LLM → 二次评分通过 → 返回重生文本。"""
     # 第 1 轮：分数低（触发 repair），第 2 轮：高分（accept）
-    judge = _make_judge_with_responses([
-        _default_rubric_responses(0.5, "不太好"),  # 触发 repair
-        _default_rubric_responses(0.95, "改进后"),  # 通过
-    ])
+    judge = _make_judge_with_responses(
+        [
+            _default_rubric_responses(0.5, "不太好"),  # 触发 repair
+            _default_rubric_responses(0.95, "改进后"),  # 通过
+        ]
+    )
     main_llm = _QueueLLM(responses=["重生后的高质量回答"])
     pipeline = _make_pipeline(judge, main_llm)
 
@@ -167,16 +169,19 @@ async def test_repair_path_regenerates_and_returns_new_text():
 @pytest.mark.asyncio
 async def test_repair_then_still_repair_returns_reject():
     """repair 后二次评分仍 REPAIR（attempt 已用尽）→ REJECT fallback。"""
-    judge = _make_judge_with_responses([
-        _default_rubric_responses(0.5, "差"),   # 首次 → REPAIR
-        _default_rubric_responses(0.7, "还行"),  # 二次 → 介于 repair/accept，仍 REPAIR
-    ])
+    judge = _make_judge_with_responses(
+        [
+            _default_rubric_responses(0.5, "差"),  # 首次 → REPAIR
+            _default_rubric_responses(0.7, "还行"),  # 二次 → 介于 repair/accept，仍 REPAIR
+        ]
+    )
     main_llm = _QueueLLM(responses=["重生后还行"])
     pipeline = _make_pipeline(judge, main_llm)
 
     with patch("nexus.backend.quality.pipeline.save_quality_score"):
         result = await pipeline.run_with_quality(
-            question="请帮我详细分析一下这个方案的可行性", raw_response="r1",
+            question="请帮我详细分析一下这个方案的可行性",
+            raw_response="r1",
         )
 
     # RepairStrategy(attempt_count=1) 时直接 REJECT（max_repair_attempts=1）
@@ -214,7 +219,9 @@ async def test_reject_path_returns_fallback_text():
     """REJECT → 返回 fallback 文本 + verdict=REJECT + repair_attempted=False。"""
     # 用 safety veto：safety < 0.5 触发 REJECT
     safety_low = {
-        "score": 0.3, "reasoning": "有害内容", "evidence": ["危险建议"],
+        "score": 0.3,
+        "reasoning": "有害内容",
+        "evidence": ["危险建议"],
     }
     judge = _make_judge_with_responses([safety_low])
     main_llm = _QueueLLM(responses=["unused"])
@@ -285,10 +292,12 @@ async def test_quality_scores_written_with_correct_verdict():
 @pytest.mark.asyncio
 async def test_repair_round_persists_with_prefix():
     """REPAIR 重生轮的 score 用 [repair] 前缀标识（区分两轮）。"""
-    judge = _make_judge_with_responses([
-        _default_rubric_responses(0.5, "差"),
-        _default_rubric_responses(0.9, "好"),
-    ])
+    judge = _make_judge_with_responses(
+        [
+            _default_rubric_responses(0.5, "差"),
+            _default_rubric_responses(0.9, "好"),
+        ]
+    )
     main_llm = _QueueLLM(responses=["重生"])
     pipeline = _make_pipeline(judge, main_llm, session_id="s")
 
@@ -374,10 +383,12 @@ async def test_message_id_propagated_to_save_quality_score():
 async def test_message_id_propagated_through_repair_round():
     """REPAIR 路径下 message_id 同样透传到第二轮 save_quality_score。"""
     # 第一次评分低（触发 REPAIR），第二次高（通过）
-    judge = _make_judge_with_responses([
-        _default_rubric_responses(0.5),  # REPAIR
-        _default_rubric_responses(0.9),  # 重生后 ACCEPT
-    ])
+    judge = _make_judge_with_responses(
+        [
+            _default_rubric_responses(0.5),  # REPAIR
+            _default_rubric_responses(0.9),  # 重生后 ACCEPT
+        ]
+    )
     main_llm = _QueueLLM(responses=["improved answer"])
     pipeline = _make_pipeline(judge, main_llm, session_id="s2")
 
@@ -434,7 +445,8 @@ async def test_chitchat_with_task_keyword_does_not_short_circuit():
     with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
         # "帮我" 是任务关键词 → 即使只有 6 字也走完整 gate
         result = await pipeline.run_with_quality(
-            question="帮我写", raw_response="好,你想写什么?",
+            question="帮我写",
+            raw_response="好,你想写什么?",
         )
 
     # 完整 gate 跑过,scores 应有 4 条
@@ -468,7 +480,8 @@ async def test_chitchat_empty_raw_response_still_runs_gate():
 
     with patch("nexus.backend.quality.pipeline.save_quality_score") as mock_save:
         result = await pipeline.run_with_quality(
-            question="你好", raw_response="",
+            question="你好",
+            raw_response="",
         )
 
     # raw_response 为空 → 不短路 → 走完整 gate → 4 个 scores

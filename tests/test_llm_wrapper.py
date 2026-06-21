@@ -115,10 +115,12 @@ class TestAinvokeRetry:
 
     async def test_rate_limit_retries_then_succeeds(self) -> None:
         """首次 RateLimitError → 重试 → 第二次成功。"""
-        primary = _make_fake_llm([
-            _rate_limit_error(),
-            "success_response",
-        ])
+        primary = _make_fake_llm(
+            [
+                _rate_limit_error(),
+                "success_response",
+            ]
+        )
         resilient = build_resilient_llm(
             primary=primary,
             retry=RetryPolicy(max_attempts=3, base_delay=0.001),
@@ -129,11 +131,13 @@ class TestAinvokeRetry:
 
     async def test_retry_exhausted_falls_back_to_secondary(self) -> None:
         """重试 3 次 RateLimit + 有 fallback → 切到 fallback。"""
-        primary = _make_fake_llm([
-            _rate_limit_error(),
-            _rate_limit_error(),
-            _rate_limit_error(),
-        ])
+        primary = _make_fake_llm(
+            [
+                _rate_limit_error(),
+                _rate_limit_error(),
+                _rate_limit_error(),
+            ]
+        )
         fallback = _make_fake_llm(["fallback_response"])
         resilient = build_resilient_llm(
             primary=primary,
@@ -147,11 +151,13 @@ class TestAinvokeRetry:
 
     async def test_retry_exhausted_no_fallback_raises_classified(self) -> None:
         """重试 3 次 RateLimit + 无 fallback → 抛 ClassifiedError(RATE_LIMIT, retryable=True)。"""
-        primary = _make_fake_llm([
-            _rate_limit_error(),
-            _rate_limit_error(),
-            _rate_limit_error(),
-        ])
+        primary = _make_fake_llm(
+            [
+                _rate_limit_error(),
+                _rate_limit_error(),
+                _rate_limit_error(),
+            ]
+        )
         resilient = build_resilient_llm(
             primary=primary,
             retry=RetryPolicy(max_attempts=3, base_delay=0.001),
@@ -230,6 +236,7 @@ class TestTimeout:
 
     async def test_three_timeouts_raises_classified_timeout(self) -> None:
         """3 次 ainvoke 都超时时 → 抛 ClassifiedError(TIMEOUT, retryable=True)。"""
+
         # 让 fake ainvoke 永远 sleep 到被 wait_for 砍掉
         async def _slow(_: Any) -> Any:
             await asyncio.sleep(5.0)
@@ -306,10 +313,12 @@ class TestClassifyBoundary:
 
     async def test_unexpected_exception_is_classified_as_unknown(self) -> None:
         """非 OpenAI 异常 → 分类为 UNKNOWN，默认重试一次。"""
-        primary = _make_fake_llm([
-            RuntimeError("unexpected boom"),
-            "recovered",
-        ])
+        primary = _make_fake_llm(
+            [
+                RuntimeError("unexpected boom"),
+                "recovered",
+            ]
+        )
         resilient = build_resilient_llm(
             primary=primary,
             retry=RetryPolicy(max_attempts=3, base_delay=0.001),
@@ -342,13 +351,15 @@ class TestFallbackPolicy:
 
     async def test_non_fallback_kind_raises_even_with_fallback(self) -> None:
         """BAD_REQUEST 不在 fallback_kinds 内 → 不降级，直接抛。"""
-        primary = _make_fake_llm([
-            BadRequestError(
-                "bad",
-                response=Mock(status_code=400),
-                body={"error": {"message": "bad"}},
-            )
-        ])
+        primary = _make_fake_llm(
+            [
+                BadRequestError(
+                    "bad",
+                    response=Mock(status_code=400),
+                    body={"error": {"message": "bad"}},
+                )
+            ]
+        )
         fallback = _make_fake_llm(["should_not_reach"])
         resilient = build_resilient_llm(
             primary=primary,
@@ -386,9 +397,7 @@ class TestFallbackPolicy:
         resilient = build_resilient_llm(primary=primary)
         assert isinstance(resilient.fallback_policy, FallbackPolicy)
         # 默认应包含 RATE_LIMIT / TIMEOUT / UNKNOWN。
-        assert resilient.fallback_policy.should_fallback(
-            classify(_rate_limit_error())
-        )
+        assert resilient.fallback_policy.should_fallback(classify(_rate_limit_error()))
 
 
 # ----------------------------------------------------------------------
@@ -487,6 +496,5 @@ class TestAstream:
         assert 0 < len(received) < 20
         # 进一步：在合理调度抖动下应收到 4-6 个 chunk。
         assert 3 <= len(received) <= 6, (
-            f"unexpected chunk count: {len(received)}, "
-            f"expected stream-level cumulative timeout to cut it off"
+            f"unexpected chunk count: {len(received)}, expected stream-level cumulative timeout to cut it off"
         )

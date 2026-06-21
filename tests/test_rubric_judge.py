@@ -81,10 +81,7 @@ def _make_rubrics() -> tuple:
     """构造 4 个轻量 rubric 用于测试（用 dataclass replace 不可变）"""
     from dataclasses import replace
 
-    return tuple(
-        replace(r, prompt=f"[test prompt] {r.name}")
-        for r in rubric_schemas.DEFAULT_RUBRICS
-    )
+    return tuple(replace(r, prompt=f"[test prompt] {r.name}") for r in rubric_schemas.DEFAULT_RUBRICS)
 
 
 def _make_judge(llm, rubrics=None, **kwargs) -> RubricJudge:
@@ -97,13 +94,9 @@ def _make_judge(llm, rubrics=None, **kwargs) -> RubricJudge:
 
 def test_happy_path_all_4_rubrics():
     """4 个 rubric 全部返回合法 JSON → 4 个 Score，顺序与 rubrics 一致。"""
-    llm = _FakeLLM(
-        response={"score": 0.8, "reasoning": "看起来不错", "evidence": ["证据1"]}
-    )
+    llm = _FakeLLM(response={"score": 0.8, "reasoning": "看起来不错", "evidence": ["证据1"]})
     judge = _make_judge(llm)
-    scores = asyncio.run(
-        judge.judge(question="什么是 Python？", response="Python 是一种解释型语言。")
-    )
+    scores = asyncio.run(judge.judge(question="什么是 Python？", response="Python 是一种解释型语言。"))
     assert len(scores) == 4
     assert [s.rubric_name for s in scores] == [
         "faithfulness",
@@ -211,9 +204,7 @@ def test_classified_error_on_one_rubric_does_not_block_others():
             # 找到当前 rubric name（在 system message 里）
             # 注：ainvoke 不传 messages，要从 input 拿。input 是消息列表
             for m in getattr(self, "_current_messages", []):
-                if hasattr(m, "content") and "[test prompt] safety" in str(
-                    getattr(m, "content", "")
-                ):
+                if hasattr(m, "content") and "[test prompt] safety" in str(getattr(m, "content", "")):
                     raise ClassifiedError(
                         kind=LLMErrorKind.RATE_LIMIT,
                         retryable=True,
@@ -292,6 +283,7 @@ def test_per_rubric_timeout_yields_fallback_score():
 
 def test_timeout_on_some_rubrics_yields_partial_fallback():
     """3 个 rubric 超时，1 个正常 → 返回 4 个 Score（3 fallback + 1 正常），不抛。"""
+
     # 构造一个对 relevance 正常、对其他超时的 LLM
     class _SelectiveTimeoutLLM(_FakeLLM):
         async def _respond(self) -> str:
@@ -325,9 +317,7 @@ def test_custom_rubrics_respected_not_overridden():
     """传自定义 rubrics → 评估用传入的列表，不依赖 DEFAULT_RUBRICS。"""
     from dataclasses import replace
 
-    custom = (
-        replace(rubric_schemas.FAITHFULNESS_RUBRIC, name="custom_a", prompt="[custom_a]"),
-    )
+    custom = (replace(rubric_schemas.FAITHFULNESS_RUBRIC, name="custom_a", prompt="[custom_a]"),)
     llm = _FakeLLM(response={"score": 0.6, "reasoning": "ok", "evidence": []})
     judge = _make_judge(llm, rubrics=custom)
     assert judge.rubrics == custom
@@ -341,9 +331,7 @@ def test_apply_prompts_called_on_init():
     # 故意清空 prompt，验证构造时被重新注入
     from dataclasses import replace
 
-    empty_rubrics = tuple(
-        replace(r, prompt="") for r in rubric_schemas.DEFAULT_RUBRICS
-    )
+    empty_rubrics = tuple(replace(r, prompt="") for r in rubric_schemas.DEFAULT_RUBRICS)
     # 用 monkeypatch：直接覆盖模块的 DEFAULT_RUBRICS 引用
     original = rubric_schemas.DEFAULT_RUBRICS
     try:
@@ -353,9 +341,7 @@ def test_apply_prompts_called_on_init():
         # 构造后 judge.rubrics 里每个 prompt 都已注入中文
         assert all(r.prompt != "" for r in judge.rubrics)
         # 且与 prompts 模块里的 prompt 一致
-        assert judge.rubrics[0].prompt == rubric_prompts.RUBRIC_PROMPTS[
-            judge.rubrics[0].name
-        ]
+        assert judge.rubrics[0].prompt == rubric_prompts.RUBRIC_PROMPTS[judge.rubrics[0].name]
     finally:
         rubric_schemas.DEFAULT_RUBRICS = original  # type: ignore[misc]
 
@@ -404,9 +390,7 @@ def test_tool_calls_formatted_in_prompt():
     judge = _make_judge(llm, rubrics=_make_rubrics()[:1])
     asyncio.run(judge.judge(question="北京天气", response="晴天", tool_calls=tool_calls))
     # captured[0] 的 user 消息里应包含工具名 + 参数 + 结果
-    all_content = " ".join(
-        str(getattr(m, "content", "")) for m in captured[0]
-    )
+    all_content = " ".join(str(getattr(m, "content", "")) for m in captured[0])
     assert "web_search" in all_content
     assert "天气" in all_content
     assert "晴天 25度" in all_content

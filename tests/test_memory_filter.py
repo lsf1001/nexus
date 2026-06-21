@@ -52,9 +52,7 @@ class _FakeLLM(BaseChatModel):
 
 def _make_filter(score: float, reasoning: str = "测试") -> MemoryFilter:
     """构造 MemoryFilter，judge 用单 rubric + fake LLM 返指定 score。"""
-    llm = _FakeLLM(
-        response={"score": score, "reasoning": reasoning, "evidence": ["片段"]}
-    )
+    llm = _FakeLLM(response={"score": score, "reasoning": reasoning, "evidence": ["片段"]})
     judge = RubricJudge(llm=llm, rubrics=(FAITHFULNESS_RUBRIC,))
     return MemoryFilter(judge=judge)
 
@@ -174,9 +172,7 @@ async def test_custom_rubric_name_used_in_lookup():
 
     # 构造一个自定义 rubric（name 不同）
     custom_rubric = replace(FAITHFULNESS_RUBRIC, name="memory_quality")
-    llm = _FakeLLM(
-        response={"score": 0.8, "reasoning": "记忆质量好", "evidence": []}
-    )
+    llm = _FakeLLM(response={"score": 0.8, "reasoning": "记忆质量好", "evidence": []})
     judge = RubricJudge(llm=llm, rubrics=(custom_rubric,))
     filter_obj = MemoryFilter(judge=judge, rubric=custom_rubric)
     decision = await filter_obj.check(value="test")

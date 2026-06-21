@@ -139,9 +139,7 @@ class TestGetLlmWithCustomPolicies:
     def test_fallback_secondary_llm_attached(self) -> None:
         """显式传入 ``fallback`` 时，wrapper 持有该备用 LLM 的引用。"""
         # 先用 get_llm 构造一个 ChatOpenAI（取 _primary 拿到原生对象）
-        fallback_wrapped = get_llm(
-            model_name="backup", api_key="k2", api_base="https://y"
-        )
+        fallback_wrapped = get_llm(model_name="backup", api_key="k2", api_base="https://y")
         fallback_chat = fallback_wrapped._primary
         llm = get_llm(
             model_name="primary",
@@ -200,9 +198,7 @@ class TestCreateSubagentsPolicies:
         r = next(sa for sa in subs if sa["name"] == "researcher")
         prompt = r.get("system_prompt") or ""
         assert "120" in prompt, f"expect '120' (timeout) in prompt: {prompt!r}"
-        assert "2 次重试" in prompt or "2次重试" in prompt, (
-            f"expect explicit two-retries hint in prompt: {prompt!r}"
-        )
+        assert "2 次重试" in prompt or "2次重试" in prompt, f"expect explicit two-retries hint in prompt: {prompt!r}"
 
 
 # ----------------------------------------------------------------------
@@ -227,9 +223,7 @@ class TestCreateAgentIntegration:
         # 才解析符号；patch 源模块 deepagents.create_deep_agent 即可拦截。
         with patch("deepagents.create_deep_agent") as mock_create:
             mock_create.return_value = MagicMock()
-            create_agent(
-                model_name="m", api_key="k", api_base="https://x"
-            )
+            create_agent(model_name="m", api_key="k", api_base="https://x")
             called_kwargs = mock_create.call_args.kwargs
             model = called_kwargs["model"]
             # 必须是 ResilientRunnable（保留韧性）

@@ -45,9 +45,7 @@ def _auth_error() -> AuthenticationError:
     )
 
 
-def _bad_request_error(
-    code: str = "invalid_value", message: str = "bad request"
-) -> BadRequestError:
+def _bad_request_error(code: str = "invalid_value", message: str = "bad request") -> BadRequestError:
     """构造一个 OpenAI BadRequestError（400）。"""
     return BadRequestError(
         message,
@@ -163,6 +161,7 @@ async def test_retry_exhausted_yields_error_event() -> None:
 
 async def test_zero_retries_yields_error_after_first_failure() -> None:
     """max_total_retries=0 时不重试，直接 yield error。"""
+
     async def fails_after_2(input, **kwargs):  # noqa: ARG001
         yield {"type": "chunk", "content": "a"}
         yield {"type": "chunk", "content": "b"}
@@ -254,6 +253,7 @@ async def test_context_length_error_does_not_retry() -> None:
 
 async def test_replay_from_event_id_after_one_chunk() -> None:
     """只发了 1 个 chunk 后失败 → replay_from_event_id=1。"""
+
     async def fails_after_1(input, **kwargs):  # noqa: ARG001
         yield {"type": "chunk", "content": "a"}
         raise _rate_limit_error()
@@ -297,6 +297,7 @@ async def test_stats_track_retries_and_events() -> None:
 
 async def test_stats_events_includes_error_event() -> None:
     """error 事件也计入 events_emitted。"""
+
     async def fails_immediately(input, **kwargs):  # noqa: ARG001
         raise _auth_error()
 
@@ -381,6 +382,7 @@ async def test_api_timeout_error_is_classified_and_retried() -> None:
 
 async def test_timeout_exhausted_yields_timeout_exhausted_error() -> None:
     """TIMEOUT 用尽 → yield error_code=timeout_exhausted。"""
+
     async def always_timeout(input, **kwargs):  # noqa: ARG001
         raise TimeoutError()
 
@@ -407,9 +409,7 @@ async def test_passes_through_kwargs() -> None:
         yield {"type": "chunk", "content": "ok"}
 
     guard = StreamGuard(capture)
-    async for _ in guard.astream_events(
-        {"x": 1}, stream_mode="updates", config={"a": 1}
-    ):
+    async for _ in guard.astream_events({"x": 1}, stream_mode="updates", config={"a": 1}):
         pass
 
     assert received.get("input") == {"x": 1}
@@ -436,6 +436,7 @@ async def test_input_passed_through() -> None:
 
 async def test_preserves_upstream_event_fields() -> None:
     """事件原 dict 字段全部保留，event_id 是新增字段，不修改其他字段。"""
+
     async def astream(input, **kwargs):  # noqa: ARG001
         yield {
             "type": "chunk",

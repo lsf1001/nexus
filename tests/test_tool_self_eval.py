@@ -113,9 +113,7 @@ async def test_score_below_fallback_threshold_returns_fallback():
 async def test_score_equal_to_retry_threshold_returns_ok():
     """score=0.6 == retry_threshold → "ok"（>= 阈值）。"""
     evaluator = _make_evaluator(0.6)
-    result = await evaluator.evaluate(
-        tool_name="web_search", query="q", results=["r"]
-    )
+    result = await evaluator.evaluate(tool_name="web_search", query="q", results=["r"])
     assert result.verdict == "ok"
 
 
@@ -123,9 +121,7 @@ async def test_score_equal_to_retry_threshold_returns_ok():
 async def test_score_equal_to_fallback_threshold_returns_retry():
     """score=0.3 == fallback_threshold → "retry"（>= fallback）。"""
     evaluator = _make_evaluator(0.3)
-    result = await evaluator.evaluate(
-        tool_name="web_search", query="q", results=["r"]
-    )
+    result = await evaluator.evaluate(tool_name="web_search", query="q", results=["r"])
     assert result.verdict == "retry"
 
 
@@ -136,9 +132,7 @@ async def test_score_equal_to_fallback_threshold_returns_retry():
 async def test_results_accepts_single_string():
     """results 可以是单字符串（单条结果）。"""
     evaluator = _make_evaluator(0.9)
-    result = await evaluator.evaluate(
-        tool_name="wikipedia", query="q", results="单条结果"
-    )
+    result = await evaluator.evaluate(tool_name="wikipedia", query="q", results="单条结果")
     assert result.verdict == "ok"
     # judge LLM 被调 1 次（rubric 1 个）
     assert evaluator.judge.rubrics[0].name == "tool_correctness"
@@ -177,9 +171,7 @@ async def test_evaluator_exception_falls_back_to_ok():
 
     judge = RubricJudge(llm=_AlwaysFailLLM(), rubrics=(TOOL_CORRECTNESS_RUBRIC,))
     evaluator = ToolSelfEvaluator(judge=judge)
-    result = await evaluator.evaluate(
-        tool_name="web_search", query="q", results=["r"]
-    )
+    result = await evaluator.evaluate(tool_name="web_search", query="q", results=["r"])
     # 异常被降级为 ok
     assert result.verdict == "ok"
     assert "评估异常" in result.reasoning
@@ -226,9 +218,7 @@ async def test_tool_self_evaluate_invocation_returns_json():
     evaluator = _make_evaluator(0.9, "完全充分")
     tool_obj = build_tool_self_eval_tool(evaluator)
     # LangChain tool 的 ainvoke 接 dict
-    raw = await tool_obj.ainvoke(
-        {"tool_name": "web_search", "query": "q", "results": "r"}
-    )
+    raw = await tool_obj.ainvoke({"tool_name": "web_search", "query": "q", "results": "r"})
     data = json.loads(raw) if isinstance(raw, str) else raw
     assert data["verdict"] == "ok"
     assert data["score"] == 0.9

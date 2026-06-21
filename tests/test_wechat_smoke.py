@@ -3,11 +3,11 @@
 注意：wechat_qr_login / wait_qr_scan 等会真连微信服务器（FIXED_BASE_URL=https://ilinkai.weixin.qq.com），
       本文件用 monkeypatch 拦截网络调用，不发起真请求。
 """
+
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -23,7 +23,6 @@ from nexus.backend.channels.wechat import (
     _save_account,
     wechat_qr_login,
 )
-
 
 # ---------- 纯函数测试 ----------
 

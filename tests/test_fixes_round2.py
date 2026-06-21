@@ -5,13 +5,12 @@
 3. _resolve_wechat_session 走完 lock-in-lock 路径
 4. setup: ensure find_latest returns None for unknown user
 """
+
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
 import uuid
-from pathlib import Path
 
 # 强制使用临时 DB，避免污染 ~/.nexus
 os.environ.setdefault("NEXUS_HOME", tempfile.mkdtemp(prefix="nexus-test-"))
@@ -22,17 +21,17 @@ from nexus.backend.db import (
     add_message,
     create_session,
     find_latest_session_by_user,
-    init_db,
     get_session,
+    init_db,
 )
-from nexus.backend.main import _resolve_wechat_session, _wechat_sessions_lock
+from nexus.backend.main import _resolve_wechat_session
 from nexus.backend.routes.model_config import init_router
 
 
 def _client_with_models(models: list[dict]) -> TestClient:
     """构造一个临时 client，注入指定 models.json 内容。"""
-    from nexus.backend.main import app
     from nexus.backend.config import CONFIG
+    from nexus.backend.main import app
     from nexus.backend.models_config import save_models
 
     init_db()
@@ -110,12 +109,8 @@ def test_resolve_wechat_session_creates_and_reuses():
     """修复 #5: 同一 user_id 两次走 _resolve_wechat_session 拿到同一个 session。"""
     init_db()
     # 第一次 → 新建
-    sid_a = __import__("asyncio").run(
-        _resolve_wechat_session("user_xyz", "acc1")
-    )
+    sid_a = __import__("asyncio").run(_resolve_wechat_session("user_xyz", "acc1"))
     # 第二次 → 复用
-    sid_b = __import__("asyncio").run(
-        _resolve_wechat_session("user_xyz", "acc1")
-    )
+    sid_b = __import__("asyncio").run(_resolve_wechat_session("user_xyz", "acc1"))
     assert sid_a == sid_b
     assert get_session(sid_a) is not None

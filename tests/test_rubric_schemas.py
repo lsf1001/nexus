@@ -31,6 +31,7 @@ from nexus.backend.rubrics.schemas import (
 
 # ====== RubricVerdict.from_score ======
 
+
 def test_verdict_from_score_accept():
     """score >= accept_threshold -> ACCEPT（含边界）。"""
     assert RubricVerdict.from_score(0.95) == RubricVerdict.ACCEPT
@@ -40,26 +41,14 @@ def test_verdict_from_score_accept():
 
 def test_verdict_from_score_repair():
     """repair_threshold <= score < accept_threshold -> REPAIR（含边界）。"""
-    assert (
-        RubricVerdict.from_score(0.7, threshold_accept=0.8, threshold_repair=0.6)
-        == RubricVerdict.REPAIR
-    )
-    assert (
-        RubricVerdict.from_score(0.6, threshold_accept=0.8, threshold_repair=0.6)
-        == RubricVerdict.REPAIR
-    )
+    assert RubricVerdict.from_score(0.7, threshold_accept=0.8, threshold_repair=0.6) == RubricVerdict.REPAIR
+    assert RubricVerdict.from_score(0.6, threshold_accept=0.8, threshold_repair=0.6) == RubricVerdict.REPAIR
 
 
 def test_verdict_from_score_reject():
     """score < repair_threshold -> REJECT。"""
-    assert (
-        RubricVerdict.from_score(0.5, threshold_accept=0.8, threshold_repair=0.6)
-        == RubricVerdict.REJECT
-    )
-    assert (
-        RubricVerdict.from_score(0.0, threshold_accept=0.8, threshold_repair=0.6)
-        == RubricVerdict.REJECT
-    )
+    assert RubricVerdict.from_score(0.5, threshold_accept=0.8, threshold_repair=0.6) == RubricVerdict.REJECT
+    assert RubricVerdict.from_score(0.0, threshold_accept=0.8, threshold_repair=0.6) == RubricVerdict.REJECT
 
 
 def test_verdict_from_score_custom_thresholds():
@@ -71,6 +60,7 @@ def test_verdict_from_score_custom_thresholds():
 
 
 # ====== Rubric dataclass ======
+
 
 def test_rubric_valid_creation():
     """合法参数下能成功构造，并保留所有字段。"""
@@ -147,6 +137,7 @@ def test_rubric_rejects_threshold_inversion():
 
 # ====== Score dataclass ======
 
+
 def test_score_valid_creation():
     """合法参数下能成功构造，evidence 自动转 tuple。"""
     s = Score(
@@ -177,6 +168,7 @@ def test_score_rejects_out_of_range():
 
 # ====== 内置 4 个 Rubric ======
 
+
 def test_default_rubrics_has_four():
     """DEFAULT_RUBRICS 恰好 4 个，且名字集合匹配。"""
     assert len(DEFAULT_RUBRICS) == 4
@@ -203,6 +195,7 @@ def test_default_rubric_prompts_empty_for_task22():
 
 
 # ====== RubricVerdictResult 聚合 ======
+
 
 def test_verdict_result_aggregate_score():
     """aggregate_score 是各 Score 的算术平均（权重聚合留给上层）。"""
@@ -233,6 +226,7 @@ def test_verdict_result_preserves_verdict_and_reasoning():
 
 
 # ====== 交叉引用一致性 ======
+
 
 def test_builtin_ruoric_aliases_match_default_list():
     """FAITHFULNESS_RUBRIC / RELEVANCE_RUBRIC / SAFETY_RUBRIC / TOOL_CORRECTNESS_RUBRIC
