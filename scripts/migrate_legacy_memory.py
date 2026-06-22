@@ -1,4 +1,4 @@
-"""一次性把 nexus.db ``memory`` 表的 explicit 记录迁到 ``~/.deepagents/AGENTS.md``。
+"""一次性把 nexus.db ``memory`` 表的 explicit 记录迁到 ``~/.nexus/AGENTS.md``。
 
 WHY: nexus v0.1.0 自定义 ``MemoryService`` 已被 deepagents 框架替代;
 旧 ``memory`` 表里的 explicit 偏好是用户的真实数据,不能丢。session/
@@ -6,7 +6,7 @@ evolved 类型是会话残留 / 自动蒸馏产物,丢弃无所谓。
 
 迁移步骤:
   1. 读 ``memory`` 表 ``is_active=1 AND memory_type='explicit'`` 的所有行
-  2. 追加到 ``~/.deepagents/AGENTS.md`` 的 ``## Migrated Preferences`` 段
+  2. 追加到 ``~/.nexus/AGENTS.md`` 的 ``## Migrated Preferences`` 段
   3. ``ALTER TABLE memory RENAME TO memory_legacy``(数据保留,可 grep 历史)
   4. ``VACUUM`` 回收空间
 
@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 DEFAULT_DB_PATH = Path.home() / ".nexus" / "nexus.db"
-USER_AGENTS_MD = Path.home() / ".deepagents" / "AGENTS.md"
+USER_AGENTS_MD = Path.home() / ".nexus" / "AGENTS.md"
 MIGRATED_HEADING = "## Migrated Preferences"
 
 
@@ -117,7 +117,7 @@ def run(db_path: Path, *, dry_run: bool) -> int:
         if dry_run:
             print(f"[migrate --dry-run] 将迁移 {len(rows)} 条 explicit,跳过 {skipped} 条")
             if block:
-                print("--- 写入 ~/.deepagents/AGENTS.md ---")
+                print("--- 写入 ~/.nexus/AGENTS.md ---")
                 print(block)
             return 0
 

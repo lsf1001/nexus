@@ -9,7 +9,7 @@
   4. Models CRUD(list / default / switch)
   5. WS 基础对话(身份注入 / 流式 chunk / done 事件)
   6. 多轮对话上下文累积
-  7. 长期记忆写入(LLM 调 edit_file 写 ~/.deepagents/AGENTS.md)
+  7. 长期记忆写入(LLM 调 edit_file 写 ~/.nexus/AGENTS.md)
   8. 长期记忆读回(同 session 新提问,LLM 应引用之前存的偏好)
   9. Intent 路由(chitchat 短路 vs knowledge 走完整)
  10. read_file 工具调用(LLM 主动读 nexus/.deepagents/AGENTS.md)
@@ -39,7 +39,7 @@ BASE_URL = "http://localhost:30000"
 WS_URL = "ws://localhost:30000/api/ws?token=nexus-default-token"
 AUTH_HEADERS = {"Authorization": "Bearer nexus-default-token"}
 TIMEOUT_S = 90
-USER_AGENTS_MD = Path.home() / ".deepagents" / "AGENTS.md"
+USER_AGENTS_MD = Path.home() / ".nexus" / "AGENTS.md"
 PROJECT_AGENTS_MD = Path("/Users/yxb/projects/nexus/nexus/.deepagents/AGENTS.md")
 
 
@@ -301,13 +301,13 @@ async def test_e2e_06_multi_turn_context():
 
 
 # ============================================================================
-# 7. 长期记忆写入(LLM 调 edit_file 写 ~/.deepagents/AGENTS.md)
+# 7. 长期记忆写入(LLM 调 edit_file 写 ~/.nexus/AGENTS.md)
 # ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_e2e_07_memory_write_to_agents_md():
-    """指示 LLM 把唯一偏好写入 ~/.deepagents/AGENTS.md,验证文件真落盘。
+    """指示 LLM 把唯一偏好写入 ~/.nexus/AGENTS.md,验证文件真落盘。
 
     重要:deepagents 的工具调用是 LLM 内部决策,WS 协议**不发 tool_call 事件**
     (只有 thinking / chunk / final / done)。验证必须走**行为侧**(文件内容)
@@ -315,7 +315,7 @@ async def test_e2e_07_memory_write_to_agents_md():
     """
     unique = f"e2e_pref_{uuid.uuid4().hex[:8]}"  # 避开 "token"(LLM 安全策略会拒)
     prompt = (
-        f"请帮我记住这个个人偏好(用 edit_file 写入 ~/.deepagents/AGENTS.md):\n\n"
+        f"请帮我记住这个个人偏好(用 edit_file 写入 ~/.nexus/AGENTS.md):\n\n"
         f"我最喜欢的食物是广式早茶,而且每次点单必点虾饺。\n"
         f"(本次会话专用编号:{unique})\n\n"
         f"调用 edit_file 时 target_file 传 {USER_AGENTS_MD}。"

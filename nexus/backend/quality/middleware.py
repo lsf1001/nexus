@@ -3,7 +3,7 @@
 deepagents 0.6.8 的 :class:`MemoryMiddleware` 自动加载 ``AGENTS.md``
 内容并注入 system prompt,LLM 用内置 ``edit_file`` / ``write_file``
 自更新。本中间件在每次 ``edit_file`` / ``write_file`` 命中受保护路径
-（即 ``~/.deepagents/AGENTS.md`` 或项目级 ``AGENTS.md``）时,先用
+（即 ``~/.nexus/AGENTS.md`` 或项目级 ``AGENTS.md``）时,先用
 :class:`MemoryFilter` 的 faithfulness rubric 评估新内容,通过则放行,
 未通过则阻断并把原因回传 LLM 触发自我修正。
 """

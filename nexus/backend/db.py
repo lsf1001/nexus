@@ -1,7 +1,7 @@
 """会话数据库管理。
 
 使用 SQLite 存储会话、消息。长期记忆已迁出至
-``~/.deepagents/AGENTS.md``(由 deepagents ``MemoryMiddleware`` 自动加载),
+``~/.nexus/AGENTS.md``(由 deepagents ``MemoryMiddleware`` 自动加载),
 旧 ``memory`` 表迁移后改名为 ``memory_legacy``(只读,供回查)。
 """
 

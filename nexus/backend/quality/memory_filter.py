@@ -1,7 +1,7 @@
 """记忆去噪：拦截 ``edit_file`` / ``write_file`` 写入 AGENTS.md 之前用 RubricJudge 评估是否值得持久化。
 
 本模块是 Phase 2 (Rubrics) Task 2.7 的实现——在 deepagents LLM 调用
-``edit_file`` / ``write_file`` 写 ``~/.deepagents/AGENTS.md`` 前做
+``edit_file`` / ``write_file`` 写 ``~/.nexus/AGENTS.md`` 前做
 "质量门"，过滤掉幻觉、临时上下文、单次对话残留等"低价值"内容。
 
 WHY: v0.1.0 自定义 ``save_memory`` 工具已删除(deepagents 重构后改用内置

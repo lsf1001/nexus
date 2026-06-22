@@ -88,7 +88,7 @@ API Key 解析顺序：`MINIMAX_API_KEY` → `MiniMax_API_KEY` → `ANTHROPIC_AU
 `sessions` / `messages` / `memory_legacy` / `quality_scores` / `resume_tokens`。
 
 - **记忆机制（v0.2+）**：长期记忆完全迁出 SQLite，改由 deepagents `MemoryMiddleware` 自动加载两份 `AGENTS.md` 并以 `<agent_memory>...</agent_memory>` 段注入 system prompt：
-  - 用户级：`~/.deepagents/AGENTS.md`（跨项目共享，可手编）
+  - 用户级：`~/.nexus/AGENTS.md`（Nexus 专属,可手编）
   - 项目级：`nexus/.deepagents/AGENTS.md`（Nexus 身份 / 规则，**禁止手编**）
   - LLM 通过内置 `edit_file` 自更新；`QualityGateMiddleware` 在 `wrap_tool_call` 阶段拦截写受保护 AGENTS.md 的调用并跑 `MemoryFilter` 忠实度评估，不通过则拒绝执行
 - `memory_legacy` 表：v0.1 的旧 `memory` 表已迁移数据并改名为 `memory_legacy`（**只读**，迁移脚本 `scripts/migrate_legacy_memory.py`）

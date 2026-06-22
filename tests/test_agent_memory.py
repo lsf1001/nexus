@@ -39,8 +39,8 @@ class TestMemoryPaths:
         user, _ = make_memory_paths()
         from pathlib import Path
 
-        # user = ~/.deepagents/AGENTS.md → user.parent = ~/.deepagents
-        assert user.parent == Path.home() / ".deepagents"
+        # user = ~/.nexus/AGENTS.md → user.parent = ~/.nexus
+        assert user.parent == Path.home() / ".nexus"
 
     def test_project_path_under_repo(self) -> None:
         _, project = make_memory_paths()

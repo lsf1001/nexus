@@ -229,8 +229,8 @@ def _create_backend(project_root: Path, *, store: BaseStore | None = None):
 
     Note:
         ``virtual_mode=False`` 是必需的 — ``virtual_mode=True`` 会把绝对路径
-        当作虚拟路径锚定到 ``project_root``,导致 ``~/.deepagents/AGENTS.md``
-        这种深 agents 约定的用户级记忆路径解析失败、MemoryMiddleware 静默
+        当作虚拟路径锚定到 ``project_root``,导致 ``~/.nexus/AGENTS.md``
+        这种用户级记忆路径解析失败、MemoryMiddleware 静默
         跳过 → LLM 失去身份感。
         安全由 :class:`FilesystemPermission` + :class:`QualityGateMiddleware`
         在更上层兜底,此处不重复沙箱。
