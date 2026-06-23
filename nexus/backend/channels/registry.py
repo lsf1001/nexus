@@ -1,118 +1,101 @@
-"""ChannelRegistry - Channel 实例的工厂和生命周期管理器"""
+"""ChannelRegistry - Channel 实例的唯一所有权管理器。
+
+所有 Channel 创建 / 启动 / 停止 / 查询都走本类,不再有散落的全局状态。
+取代旧的 _wechat_sessions / get_active_wechat_channel / wechat_state._active_channel。
+"""
+
+from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .base import Channel, ChannelConfig, ChannelType
+from .base import Channel, ChannelConfig, ChannelStatus, ChannelType
+
+if TYPE_CHECKING:
+    from .gateway import Gateway
 
 logger = logging.getLogger(__name__)
 
 
 class ChannelRegistry:
-    """Channel 注册表 - 管理所有 Channel 实例"""
+    """所有 Channel 实例的唯一 owner。
 
-    def __init__(self):
+    职责:
+      - start_channel: 工厂方法,创建 + register + start 一条龙
+      - stop_channel: 停 + 注销
+      - get_active_by_type: 取该类型 RUNNING 的 channel
+      - list_all: 给 /api/channels 用
+    """
+
+    def __init__(self, gateway: Gateway) -> None:
+        self._gateway = gateway
         self._channels: dict[str, Channel] = {}
+        self._by_type: dict[ChannelType, list[str]] = {}
 
-    def register(self, channel: Channel) -> None:
-        """注册 Channel 实例
+    async def start_channel(self, config: ChannelConfig, **kwargs: Any) -> Channel:
+        """创建 + register + start; 同 type 已 RUNNING 抛 ValueError。"""
+        existing = self.get_active_by_type(config.channel_type)
+        if existing is not None:
+            raise ValueError(f"{config.channel_type.value} channel already running: {existing.config.channel_id}")
 
-        Args:
-            channel: Channel 实例
-        """
-        channel_id = channel.get_channel_id()
-        self._channels[channel_id] = channel
-        logger.info(f"Channel registered: {channel_id}")
+        ch = create_channel_from_config(config, **kwargs)
+        self._gateway.register_channel(ch)
+        self._channels[ch.config.channel_id] = ch
+        self._by_type.setdefault(config.channel_type, []).append(ch.config.channel_id)
+        await ch.start()
+        logger.info(f"Channel started: {ch}")
+        return ch
 
-    def unregister(self, channel_id: str) -> None:
-        """注销 Channel 实例
-
-        Args:
-            channel_id: 通道ID
-        """
-        if channel_id in self._channels:
-            self._channels.pop(channel_id)
-            logger.info(f"Channel unregistered: {channel_id}")
+    async def stop_channel(self, channel_id: str) -> None:
+        """停 channel + 从 Registry + Gateway 注销。"""
+        ch = self._channels.pop(channel_id, None)
+        if ch is None:
+            return
+        await ch.stop()
+        cid_list = self._by_type.get(ch.config.channel_type, [])
+        if channel_id in cid_list:
+            cid_list.remove(channel_id)
+        await self._gateway.unregister_channel(channel_id)
+        logger.info(f"Channel stopped: {channel_id}")
 
     def get(self, channel_id: str) -> Channel | None:
-        """获取 Channel 实例
-
-        Args:
-            channel_id: 通道ID
-
-        Returns:
-            Channel 实例或 None
-        """
         return self._channels.get(channel_id)
 
-    def get_by_type(self, channel_type: ChannelType) -> list[Channel]:
-        """获取指定类型的所有 Channel
-
-        Args:
-            channel_type: 通道类型
-
-        Returns:
-            Channel 列表
-        """
-        return [ch for ch in self._channels.values() if ch.get_channel_type() == channel_type]
+    def get_active_by_type(self, ch_type: ChannelType) -> Channel | None:
+        """取该类型第一个 RUNNING 通道。"""
+        for cid in self._by_type.get(ch_type, []):
+            ch = self._channels.get(cid)
+            if ch and ch.state.status == ChannelStatus.RUNNING:
+                return ch
+        return None
 
     def list_all(self) -> list[Channel]:
-        """列出所有 Channel
-
-        Returns:
-            所有 Channel 实例
-        """
         return list(self._channels.values())
 
-    async def start_all(self) -> None:
-        """启动所有 Channel"""
-        for channel in self._channels.values():
-            try:
-                await channel.start()
-            except Exception as e:
-                logger.error(f"Failed to start channel {channel.get_channel_id()}: {e}")
-
     async def stop_all(self) -> None:
-        """停止所有 Channel"""
-        for channel in self._channels.values():
-            try:
-                await channel.stop()
-            except Exception as e:
-                logger.error(f"Failed to stop channel {channel.get_channel_id()}: {e}")
+        for cid in list(self._channels.keys()):
+            await self.stop_channel(cid)
 
 
 def create_channel_from_config(
     config: ChannelConfig,
     **kwargs: Any,
 ) -> Channel:
-    """根据配置创建 Channel 实例
-
-    Args:
-        config: ChannelConfig
-        **kwargs: 传递给 Channel 构造函数的额外参数
-
-    Returns:
-        Channel 实例
+    """根据配置创建 Channel 实例(纯工厂,不 register 不 start)。
 
     Raises:
-        ValueError: 不支持的通道类型
+        NotImplementedError: FEISHU 未实现
+        ValueError: 不支持的 channel_type
     """
     channel_type = config.channel_type
 
-    if channel_type == ChannelType.WEBSOCKET:
-        from .websocket import WebSocketChannel
-
-        token = kwargs.get("token", "")
-        return WebSocketChannel(config=config, token=token)
-
-    elif channel_type == ChannelType.WECHAT:
-        from .wechat import WeChatChannel
+    if channel_type == ChannelType.WECHAT:
+        from .wechat_channel import WeChatChannel
 
         token = kwargs.get("token", "")
         return WeChatChannel(config=config, token=token)
 
-    elif channel_type == ChannelType.FEISHU:
+    if channel_type == ChannelType.FEISHU:
         raise NotImplementedError("Feishu channel not implemented yet")
 
-    else:
-        raise ValueError(f"Unsupported channel type: {channel_type}")
+    raise ValueError(f"Unsupported channel type: {channel_type}")
