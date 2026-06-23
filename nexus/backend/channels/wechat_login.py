@@ -170,7 +170,7 @@ async def wait_qr_scan(session_key: str, registry: ChannelRegistry, timeout_ms: 
                 _save_account(account)
                 _register_weixin_account_id(normalized_id)
 
-                # 创建微信通道并启动 (C7 fixup: 走 ChannelRegistry 取代 _active_channel 全局)
+                # 创建微信通道并启动 (走 ChannelRegistry 取代 _active_channel 全局)
                 config = ChannelConfig(
                     channel_id=f"wechat:{normalized_id}",
                     channel_type=ChannelType.WECHAT,

@@ -1,7 +1,7 @@
 """ChannelRegistry - Channel 实例的唯一所有权管理器。
 
 所有 Channel 创建 / 启动 / 停止 / 查询都走本类,不再有散落的全局状态。
-取代旧的 _wechat_sessions / get_active_wechat_channel / wechat_state._active_channel。
+取代旧的 _wechat_sessions / wechat_state._active_channel。
 """
 
 from __future__ import annotations

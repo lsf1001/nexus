@@ -1,9 +1,8 @@
-"""wechat_state 拆分模块的合法 state dir API 烟雾测试。
+"""wechat_state 模块导入契约测试。
 
-C4 重构后，`_active_channel` 全局 + `get_active_wechat_channel` /
-`_set_active_channel` / `_clear_active_channel` 已被 ChannelRegistry
-取代，对应测试一并删除。本文件保留一个最小烟雾测试，确保拆分模块路径
-仍可被直接 import（替代旧的 wechat 兼容层测试）。
+C4 重构后,模块仅保留 session dir / context token 等账户状态;
+_active_channel 全局 + get/set/clear 三个函数已迁出。
+本测试验证模块仍可正常 import,无 dead import。
 """
 
 from __future__ import annotations
