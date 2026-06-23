@@ -2,7 +2,7 @@
 
 1. delete_model 在无 fallback 时不返回 success，必须抛 400
 2. find_latest_session_by_user 正确按 user_id 模式 + channel 匹配
-3. _resolve_wechat_session 走完 lock-in-lock 路径
+3. Gateway._get_or_create_session 同一 user_id 两次拿到同一个 session (C4 替代旧 _resolve_wechat_session)
 4. setup: ensure find_latest returns None for unknown user
 """
 
@@ -24,7 +24,6 @@ from nexus.backend.db import (
     get_session,
     init_db,
 )
-from nexus.backend.main import _resolve_wechat_session
 from nexus.backend.routes.model_config import init_router
 
 
@@ -106,11 +105,37 @@ def test_find_latest_session_by_user():
 
 
 def test_resolve_wechat_session_creates_and_reuses():
-    """修复 #5: 同一 user_id 两次走 _resolve_wechat_session 拿到同一个 session。"""
+    """修复 #5 (C4 迁移):同一 user_id 两次走 Gateway._get_or_create_session 拿到同一个 session。"""
+    import asyncio
+
+    from nexus.backend.channels.base import ChannelMessage, ChannelType
+    from nexus.backend.channels.gateway import Gateway
+    from nexus.backend.sessions import get_session_manager
+
     init_db()
-    # 第一次 → 新建
-    sid_a = __import__("asyncio").run(_resolve_wechat_session("user_xyz", "acc1"))
-    # 第二次 → 复用
-    sid_b = __import__("asyncio").run(_resolve_wechat_session("user_xyz", "acc1"))
+    sessions_module = get_session_manager()
+    gateway = Gateway(
+        agent=object(),
+        sessions_module=sessions_module,
+        messages_module=__import__("nexus.backend.db", fromlist=["*"]),
+    )
+
+    msg_a = ChannelMessage(
+        channel_id="wechat:acc1",
+        channel_type=ChannelType.WECHAT,
+        session_id="",
+        user_id="user_xyz",
+        content="hello",
+    )
+    msg_b = ChannelMessage(
+        channel_id="wechat:acc1",
+        channel_type=ChannelType.WECHAT,
+        session_id="",
+        user_id="user_xyz",
+        content="hello again",
+    )
+
+    sid_a = asyncio.run(gateway._get_or_create_session(msg_a))
+    sid_b = asyncio.run(gateway._get_or_create_session(msg_b))
     assert sid_a == sid_b
     assert get_session(sid_a) is not None

@@ -182,8 +182,11 @@ class Gateway:
         return full.strip()
 
     async def _safe_add_message(self, session_id: str, role: str, content: str) -> None:
+        """持久化消息。db.add_message 是同步阻塞 IO,用 asyncio.to_thread 切走,
+        避免在事件循环里卡 SQLite 写。"""
         try:
-            await self._messages.add_message(
+            await asyncio.to_thread(
+                self._messages.add_message,
                 str(uuid.uuid4()),
                 session_id,
                 role,

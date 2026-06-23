@@ -595,7 +595,7 @@ async def handle_websocket(
     websocket: WebSocket,
     *,
     get_agent: Callable[[], Any],
-    wechat_callback: Callable | None = None,
+    channel_broadcasts: dict[str, Callable] | None = None,
     get_quality_pipeline: Callable[[], Any] | None = None,
     get_intent_llm: Callable[[], Any] | None = None,
 ) -> None:
@@ -609,8 +609,9 @@ async def handle_websocket(
         get_agent: 无参可调用，返回当前 Agent 实例（线程安全）。
             通常用 ``lambda: _agent``，并在 ``main.py`` 中通过 ``_agent_lock``
             保证一致性。
-        wechat_callback: 微信消息回调（``_handle_wechat_message``），用于在
-            客户端连接时给微信通道挂上广播。``None`` 表示不挂（仅 WS 自用）。
+        channel_broadcasts: dict[channel_type_value -> async fn],WS 客户端连接时
+            给 Gateway 注入广播,Gateway.route_message 走完会把响应推给所有
+            注入的 broadcast。``None`` 或空 dict 表示不广播(仅 WS 自用)。
         get_quality_pipeline: Phase 2 Task 2.5：返回 ``QualityPipeline`` 实例
             的无参可调用。``None`` 或返回 ``None`` 时跳过质量门（向后兼容）。
         get_intent_llm: Phase 2 Task 3：返回分类用 ``BaseChatModel`` 实例
@@ -621,13 +622,14 @@ async def handle_websocket(
     with _clients_lock:
         _ws_clients.append(websocket)
 
-    # 设置微信消息回调
-    if wechat_callback is not None:
-        from ..channels.wechat_state import get_active_wechat_channel
+    # 注入 WS 广播到 Gateway (C4 重构,取代旧的 wechat_callback 单回调)
+    if channel_broadcasts:
+        from ..channels.base import ChannelType  # noqa: N814
 
-        channel = get_active_wechat_channel()
-        if channel:
-            channel.on_message(wechat_callback)
+        gateway = getattr(websocket.app.state, "gateway", None)
+        if gateway is not None:
+            for ch_type_str, fn in channel_broadcasts.items():
+                gateway.set_broadcast(ChannelType(ch_type_str), fn)
 
     # 会话管理
     from ..sessions import get_session_manager

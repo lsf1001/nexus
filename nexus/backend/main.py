@@ -2,8 +2,6 @@ import asyncio
 import logging
 import os
 import threading
-import uuid
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -40,204 +38,33 @@ _agent_ready_event: asyncio.Event | None = None
 # 60s 超时场景下该全局保持 None,getter 安全返回 None。
 _intent_llm: Any = None
 
-# 微信消息处理线程池（全局复用）
-_wechat_executor: ThreadPoolExecutor | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
 
-# 微信用户 session 映射（user_id -> session_id）
-# 关键不变量：
-#   1. 同一 user_id 的两个并发消息不能创建两个 session → 必须用 asyncio.Lock 串行化
-#   2. 后端重启时 in-memory 映射丢失，但 DB 里 channel='wechat' 的旧 session 还在
-#      → 启动时按"该 user_id 最近一次 wechat session"重建映射
-_wechat_sessions: dict[str, str] = {}  # user_id -> session_id
-_wechat_sessions_lock: asyncio.Lock | None = None  # 在 lifespan 内初始化
 
+class _AgentProxy:
+    """Gateway 需要 agent.astream(),但 agent 是懒构造。代理暴露 .astream 调用
+    时的实时 agent 实例,使 Gateway 无需关心 agent 何时就绪。
 
-async def _resolve_wechat_session(user_id: str, account_id: str) -> str:
-    """在 asyncio.Lock 内调用：获取或创建 user_id 对应的 wechat session。
-
-    查找顺序：in-memory 映射 → DB 持久化映射（按"该 user_id 最近一条 wechat 消息
-    所属的 session"重建）→ 新建 session。
+    getter 在 lifespan 时尚未定义(WS 路由后才有),所以延迟到首次调用 .astream
+    时通过 ``_resolve_getter`` 解析一次。Gateway 第一次收到消息已经在
+    WS 已连接 + agent 已懒构造 之后,_resolve_getter 返回真实 getter。
     """
-    from .db import create_session, find_latest_session_by_user, get_session
 
-    # 1) in-memory 命中且 DB 仍有 → 复用
-    if user_id in _wechat_sessions:
-        existing_session_id = _wechat_sessions[user_id]
-        if get_session(existing_session_id):
-            return existing_session_id
-        # 内存有但 DB 已删 → 走 DB 重建
-        del _wechat_sessions[user_id]
+    def __init__(self, resolve_getter):
+        self._resolve_getter = resolve_getter
+        self._getter = None
 
-    # 2) DB 重建：找该 user_id 最近一次 wechat 消息所属的 session
-    db_session_id = find_latest_session_by_user(user_id, channel="wechat")
-    if db_session_id and get_session(db_session_id):
-        _wechat_sessions[user_id] = db_session_id
-        logger.info("Resumed WeChat session for %s from DB: %s", user_id, db_session_id)
-        return db_session_id
-
-    # 3) 都没有 → 新建
-    session_id = str(uuid.uuid4())
-    wx_id = user_id.split("@")[0][:8]
-    acc_id = account_id[:8]
-    title = f"微信 {acc_id} {wx_id}"
-    create_session(session_id, title=title, channel="wechat")
-    _wechat_sessions[user_id] = session_id
-    logger.info("Created session for WeChat user %s: %s", user_id, session_id)
-    return session_id
+    def astream(self, input_dict, stream_mode="updates"):
+        if self._getter is None:
+            self._getter = self._resolve_getter()
+        agent = self._getter()
+        if agent is None:
+            raise RuntimeError("Agent 未就绪,请稍后再试")
+        return agent.astream(input_dict, stream_mode=stream_mode)
 
 
 setup_logging()  # env 驱动:NEXUS_LOG_FORMAT/FILE/LEVEL
 logger = logging.getLogger(__name__)
-
-
-def _handle_wechat_message(channel_message) -> None:
-    """处理微信消息，转发到所有 WebSocket 客户端并生成回复"""
-    try:
-        from .channels.base import ChannelMessage
-
-        if not isinstance(channel_message, ChannelMessage):
-            logger.error(f"Invalid message type: {type(channel_message)}")
-            return
-
-        logger.info(
-            f"_handle_wechat_message CALLED: user={channel_message.user_id}, content={channel_message.content[:50]}..."
-        )
-
-        with _clients_lock:
-            clients = list(_ws_clients)
-
-        logger.info(f"WebSocket clients: {len(clients)}")
-
-        # 构造广播帧：前端 ChatArea / DesktopShell 的 wechatInbox store 订阅此类型。
-        message_data = {
-            "type": "wechat_message",
-            "user_id": channel_message.user_id,
-            "content": channel_message.content,
-        }
-
-        for client in clients:
-            try:
-                if _main_loop and not _main_loop.is_closed():
-                    asyncio.run_coroutine_threadsafe(client.send_json(message_data), _main_loop)
-                else:
-                    logger.warning("主事件循环不可用，跳过 WebSocket 广播")
-            except Exception as e:
-                logger.warning(f"广播失败: {e}")
-
-        # 在线程池中执行异步处理
-        global _wechat_executor
-        if _wechat_executor is None:
-            _wechat_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="wechat-")
-        _wechat_executor.submit(_process_wechat_message_sync, channel_message)
-    except Exception as e:
-        logger.error(f"Error in _handle_wechat_message: {e}")
-
-
-def _process_wechat_message_sync(channel_message) -> None:
-    """在线程池中调用异步处理函数：将协程提交到主事件循环执行。
-
-    这样 DeepAgents 内部的连接池、句柄都能复用主循环资源，
-    而非每次创建销毁临时循环。
-    """
-    if _main_loop is None or _main_loop.is_closed():
-        logger.error("主事件循环不可用，跳过微信消息处理")
-        return
-    try:
-        future = asyncio.run_coroutine_threadsafe(_process_wechat_message(channel_message), _main_loop)
-        future.result(timeout=300)
-    except Exception as e:
-        logger.error(f"处理微信消息失败: {e}")
-
-
-async def _process_wechat_message(channel_message) -> None:
-    """处理微信消息：调用 Agent 生成回复并通过微信通道发送"""
-    try:
-        logger.info(f"Processing WeChat message: {channel_message.content[:50]}...")
-
-        with _agent_lock:
-            agent = _agent
-        if not agent:
-            logger.error("No agent available for WeChat message")
-            return
-
-        from .channels.wechat_api import _send_message
-        from .channels.wechat_state import get_active_wechat_channel
-
-        channel = get_active_wechat_channel()
-        logger.info(f"Active channel: {channel}, account: {channel._account if channel else None}")
-        if not channel or not channel._account:
-            logger.error("No active WeChat channel")
-            return
-
-        # 获取或创建会话（在 asyncio.Lock 内串行化，避免同一 user_id 并发双建 session）
-        user_id = channel_message.user_id
-        account_id = channel._account.account_id if channel._account else "unknown"
-
-        if _wechat_sessions_lock is None:
-            # lifespan 还没跑（极端：测试/热重载）→ 退化用无锁路径
-            session_id = await _resolve_wechat_session(user_id, account_id)
-        else:
-            async with _wechat_sessions_lock:
-                session_id = await _resolve_wechat_session(user_id, account_id)
-
-        # 保存用户消息
-        from .db import add_message
-
-        add_message(str(uuid.uuid4()), session_id, "user", channel_message.content)
-
-        # 发送正在输入状态
-        try:
-            from .channels.wechat_api import _send_typing
-
-            await _send_typing(
-                channel.base_url,
-                channel._account.token,
-                channel_message.user_id,
-                context_token=channel_message.reply_to,
-            )
-        except Exception as e:
-            logger.debug(f"Failed to send typing indicator: {e}")
-
-        # 使用 SessionManager 构建带记忆的 prompt
-        from .sessions import get_session_manager
-
-        session_manager = get_session_manager()
-        prompt = session_manager.build_prompt(session_id, channel_message.content)
-
-        # 调用 Agent
-        full_response = ""
-        async for chunk in agent.astream({"messages": prompt["messages"]}, stream_mode="updates"):
-            if not isinstance(chunk, dict):
-                continue
-            if "model" in chunk:
-                model_data = chunk.get("model", {})
-                if model_data and isinstance(model_data, dict):
-                    msgs = model_data.get("messages", [])
-                    for msg in msgs:
-                        content = getattr(msg, "content", "") or ""
-                        if content:
-                            full_response += content
-
-        if full_response:
-            # 去除思考标签后发送
-            normalized = full_response.replace("<think>", "").replace("</think>", "").strip()
-
-            # 保存助手回复（包含思考过程）
-            add_message(str(uuid.uuid4()), session_id, "assistant", full_response)
-
-            # 发送回复到微信（不含思考标签）
-            context_token = channel_message.reply_to
-            await _send_message(
-                channel.base_url,
-                channel._account.token,
-                channel_message.user_id,
-                normalized,
-                context_token,
-            )
-            logger.info(f"WeChat response sent to {channel_message.user_id}")
-    except Exception as e:
-        logger.error(f"Error processing WeChat message: {e}")
 
 
 def _get_frontend_path() -> Path | None:
@@ -299,14 +126,12 @@ async def lifespan(app: FastAPI):
     从 lifespan 推到首次使用时，/health 在 1-2s 内就能响应 → 桌面端无需
     等待 30s 就能加载 UI。Agent / pipeline 走"懒构造"路径。
     """
-    global _agent, _mcp_tools, _wechat_executor, _main_loop, _wechat_sessions_lock
+    global _agent, _mcp_tools, _main_loop
     # 保存主事件循环引用，供子线程提交协程使用
     _main_loop = asyncio.get_running_loop()
     app.state.main_loop = _main_loop
-    # 初始化 asyncio.Lock：用于 _wechat_sessions 字典的并发读写。
-    # 必须在 lifespan 内创建（绑定到主事件循环），否则在子线程中 asyncio.Lock()
-    # 绑定到子线程的事件循环会出错。
-    _wechat_sessions_lock = asyncio.Lock()
+    global _app_ref
+    _app_ref = app  # 给懒构造的 _ensure_agent_async 复用
     # 初始化数据库
     from .db import init_db
 
@@ -323,22 +148,25 @@ async def lifespan(app: FastAPI):
         create_agent_with_model=_create_agent_with_model,
         set_global_agent=_set_global_agent,
     )
-    # 初始化通道注册表（lifespan 必须设置，否则 /api/channels 会 500）
-    from .channels import ChannelRegistry
 
-    app.state.channel_registry = ChannelRegistry()
+    # 初始化 Gateway + ChannelRegistry (C4 重构: Gateway 真接管路由)
+    import nexus.backend.db as _db_module
+
+    from .channels import ChannelRegistry, Gateway
+    from .sessions import get_session_manager
+
+    sessions_module = get_session_manager()
+    app.state.gateway = Gateway(
+        agent=_AgentProxy(lambda: _get_current_agent),
+        sessions_module=sessions_module,
+        messages_module=_db_module,
+    )
+    app.state.channel_registry = ChannelRegistry(app.state.gateway)
     # QualityPipeline 也延后到 agent 构造完后再做（依赖 judge_llm）
     app.state.quality_pipeline = None
-    logger.info("Nexus Backend 已就绪（Agent 懒构造）")
+    logger.info("Nexus Backend 已就绪 (Gateway 接管路由, Agent 懒构造)")
     yield
     logger.info("Nexus Backend 关闭中")
-    # 清理线程池
-    if _wechat_executor:
-        _wechat_executor.shutdown(wait=False)
-        _wechat_executor = None
-    # 重置 lock 和 in-memory 状态，避免热重载残留
-    _wechat_sessions_lock = None
-    _wechat_sessions.clear()
 
 
 def _ensure_agent_ready(app) -> None:
@@ -551,6 +379,76 @@ async def get_model_info():
     }
 
 
+_agent_init_started = False
+_app_ref: FastAPI | None = None
+
+
+def _ensure_agent_async(app) -> None:
+    """懒构造 Agent：在子线程里跑，构造期间 /health 已经能 200。
+    用一次性触发：一旦构造过就 noop。
+    """
+    global _agent_init_started, _agent_ready_event
+    with _agent_lock:
+        if _agent is not None or _agent_init_started:
+            return
+        _agent_init_started = True
+    if _agent_ready_event is None:
+        _agent_ready_event = asyncio.Event()
+
+    def _run_init_and_signal() -> None:
+        try:
+            _ensure_agent_ready(app)
+        finally:
+            # 跨线程设置 asyncio.Event:必须用 call_soon_threadsafe
+            if _main_loop and not _main_loop.is_closed() and _agent_ready_event is not None:
+                _main_loop.call_soon_threadsafe(_agent_ready_event.set)
+
+    threading.Thread(
+        target=_run_init_and_signal,
+        name="nexus-agent-init",
+        daemon=True,
+    ).start()
+
+
+def _get_current_agent() -> Any:
+    """返回当前 agent。Agent 尚未构造时返回 None;Gateway 走 astream 时
+    会拿到 None → RuntimeError → 走 _send_error 错误路径(同 WS 行为)。
+
+    入口兜底:WS 端 / Gateway 首次调用此函数都会触发 _ensure_agent_async,
+    确保 WeChat 消息先于 WS 连接到达时也能进入懒构造路径。
+    模块级函数,供 _AgentProxy 在 lifespan 后通过 lambda: _get_current_agent 解析。
+    """
+    if _agent is None and not _agent_init_started and _app_ref is not None:
+        _ensure_agent_async(_app_ref)
+    with _agent_lock:
+        return _agent
+
+
+def _build_broadcast_to_ws(websocket: WebSocket):
+    """工厂:给当前 WS 连接生成一个 Gateway 广播回调。
+    Gateway.route_message 走完后会用此回调,把 ChannelMessage 转成 channel_message 帧。
+    """
+
+    async def _broadcast_to_ws(channel_msg) -> None:
+        frame = {
+            "type": "channel_message",
+            "channel_type": channel_msg.channel_type.value,
+            "channel_id": channel_msg.channel_id,
+            "user_id": channel_msg.user_id,
+            "content": channel_msg.content,
+            "session_id": channel_msg.session_id,
+        }
+        with _clients_lock:
+            clients = list(_ws_clients)
+        for client in clients:
+            try:
+                await client.send_json(frame)
+            except Exception as e:
+                logger.warning(f"广播失败: {e}")
+
+    return _broadcast_to_ws
+
+
 @app.websocket(f"{API_PREFIX}/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket 主端点：业务逻辑委托给 ``api.ws.handle_websocket``。"""
@@ -563,34 +461,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # 懒构造 Agent：在子线程里跑，构造期间 /health 已经能 200。
     # 用一次性触发：一旦构造过就 noop。
-    _agent_init_started = False
-
-    def _ensure_agent_async() -> None:
-        nonlocal _agent_init_started
-        global _agent_ready_event
-        with _agent_lock:
-            if _agent is not None or _agent_init_started:
-                return
-            _agent_init_started = True
-        if _agent_ready_event is None:
-            _agent_ready_event = asyncio.Event()
-        import threading
-
-        def _run_init_and_signal() -> None:
-            try:
-                _ensure_agent_ready(websocket.app)
-            finally:
-                # 跨线程设置 asyncio.Event:必须用 call_soon_threadsafe
-                if _main_loop and not _main_loop.is_closed() and _agent_ready_event is not None:
-                    _main_loop.call_soon_threadsafe(_agent_ready_event.set)
-
-        threading.Thread(
-            target=_run_init_and_signal,
-            name="nexus-agent-init",
-            daemon=True,
-        ).start()
-
-    _ensure_agent_async()
+    _ensure_agent_async(websocket.app)
 
     # 等 Agent 构造完成(首启 / PyInstaller 冷启场景下 10-30s 是常态)。
     # 设 60s 上限,极端慢盘 / MCP 加载失败场景下放弃,让 _run_agent_streaming
@@ -601,12 +472,6 @@ async def websocket_endpoint(websocket: WebSocket):
         except TimeoutError:
             logger.warning("Agent 懒构造 60s 超时,首条消息将走 agent_unavailable 错误路径")
 
-    def _get_current_agent() -> Any:
-        # 触发懒构造（首次调用时启动后台线程）
-        _ensure_agent_async()
-        with _agent_lock:
-            return _agent
-
     def _get_quality_pipeline() -> Any:
         return getattr(websocket.app.state, "quality_pipeline", None)
 
@@ -616,7 +481,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await handle_websocket(
         websocket,
         get_agent=_get_current_agent,
-        wechat_callback=_handle_wechat_message,
+        channel_broadcasts={"wechat": _build_broadcast_to_ws(websocket)},
         get_quality_pipeline=_get_quality_pipeline,
         get_intent_llm=_get_intent_llm,
     )
@@ -652,117 +517,84 @@ async def wechat_qr_status(session_key: str, timeout_ms: int = 10000):
 
 
 @app.get(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
-async def wechat_bind_status():
+async def wechat_bind_status(request: Request):
     """获取微信绑定状态"""
-    from .channels.wechat_account import _list_indexed_weixin_account_ids, _load_account
-    from .channels.wechat_state import get_active_wechat_channel
+    from .channels.base import ChannelType
+    from .channels.wechat_account import (
+        _list_indexed_weixin_account_ids,
+        _load_account,
+    )
 
-    # 检查是否有活跃通道
-    channel = get_active_wechat_channel()
-    if channel and channel._account:
+    registry = request.app.state.channel_registry
+    active = registry.get_active_by_type(ChannelType.WECHAT)
+    if active and getattr(active, "_account", None):
         return {
             "bound": True,
-            "account_id": channel._account.account_id,
-            "status": channel.state.status.value if hasattr(channel.state, "status") else "running",
+            "account_id": active._account.account_id,
+            "status": active.state.status.value,
         }
-
-    # 检查是否有已保存的账号
     account_ids = _list_indexed_weixin_account_ids()
     if account_ids:
-        # 加载最近的账号
         account_id = account_ids[0]
         account = _load_account(account_id)
         if account:
-            return {
-                "bound": True,
-                "account_id": account_id,
-                "status": "stopped",
-            }
-
-    return {
-        "bound": False,
-    }
+            return {"bound": True, "account_id": account_id, "status": "stopped"}
+    return {"bound": False}
 
 
 @app.post(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
-async def wechat_do_bind():
-    """绑定微信账号"""
+async def wechat_do_bind(request: Request):
+    """绑定微信账号:从已有账号恢复,或要求重新扫码。"""
     from .channels.base import ChannelConfig, ChannelType
-    from .channels.wechat_account import _delete_account, _list_indexed_weixin_account_ids, _load_account
-    from .channels.wechat_state import get_active_wechat_channel
+    from .channels.wechat_account import (
+        _check_token_valid,
+        _delete_account,
+        _list_indexed_weixin_account_ids,
+        _load_account,
+    )
 
-    # 检查是否已有活跃通道
-    channel = get_active_wechat_channel()
-    if channel and channel._account:
+    registry = request.app.state.channel_registry
+    active = registry.get_active_by_type(ChannelType.WECHAT)
+    if active and getattr(active, "_account", None):
         return {
             "success": True,
             "bound": True,
-            "account_id": channel._account.account_id,
+            "account_id": active._account.account_id,
         }
-
-    # 检查是否有已保存的账号
     account_ids = _list_indexed_weixin_account_ids()
-    if account_ids:
-        account_id = account_ids[0]
-        account = _load_account(account_id)
-        if account:
-            # 创建并启动通道
-            config = ChannelConfig(
-                channel_id=f"wechat:{account_id}",
-                channel_type=ChannelType.WECHAT,
-                name=f"WeChat ({account_id[:8]}...)",
-                settings={"account_id": account_id},
-            )
-            from .channels.wechat_account import _check_token_valid
-            from .channels.wechat_channel import WeChatChannel as WCH  # noqa: N814
-
-            # 先检查 token 是否有效
-            if not _check_token_valid(account_id):
-                # token 过期，删除旧数据
-                _delete_account(account_id)
-                return {
-                    "success": False,
-                    "bound": False,
-                    "error": "登录已过期，请重新扫码绑定",
-                    "need_rescan": True,
-                }
-
-            logger.debug(f"Token valid for account {account_id}, creating channel")
-            # token 有效，创建并启动通道
-            new_channel = WCH(config, token=account_id)
-            logger.debug(f"About to start channel for account {account_id}")
-            await new_channel.start()
-            logger.debug("Channel started, about to set on_message callback")
-            new_channel.on_message(_handle_wechat_message)
-            logger.debug("on_message callback set successfully")
-
-            from .channels.wechat_state import _set_active_channel
-
-            _set_active_channel(new_channel)
-            logger.info(f"Active channel set for account {account_id}")
-
-            return {
-                "success": True,
-                "bound": True,
-                "account_id": account_id,
-            }
-
-    return {
-        "success": False,
-        "error": "请先扫码绑定微信",
-    }
+    if not account_ids:
+        return {"success": False, "error": "请先扫码绑定微信"}
+    account_id = account_ids[0]
+    account = _load_account(account_id)
+    if not account:
+        return {"success": False, "error": "账号已损坏,请重新扫码"}
+    if not _check_token_valid(account_id):
+        _delete_account(account_id)
+        return {
+            "success": False,
+            "bound": False,
+            "error": "登录已过期,请重新扫码绑定",
+            "need_rescan": True,
+        }
+    config = ChannelConfig(
+        channel_id=f"wechat:{account_id}",
+        channel_type=ChannelType.WECHAT,
+        name=f"WeChat ({account_id[:8]}...)",
+        settings={"account_id": account_id},
+    )
+    await registry.start_channel(config, token=account_id)
+    return {"success": True, "bound": True, "account_id": account_id}
 
 
 @app.delete(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
-async def wechat_unbind():
+async def wechat_unbind(request: Request):
     """解除微信绑定"""
-    from .channels.wechat_state import _clear_active_channel, get_active_wechat_channel
+    from .channels.base import ChannelType
 
-    channel = get_active_wechat_channel()
-    if channel:
-        await channel.stop()
-
-    _clear_active_channel()
+    registry = request.app.state.channel_registry
+    active = registry.get_active_by_type(ChannelType.WECHAT)
+    if active:
+        await registry.stop_channel(active.config.channel_id)
     return {"success": True}
 
 
@@ -776,9 +608,9 @@ async def get_channels(request: Request):
     for ch in registry.list_all():
         channels.append(
             {
-                "id": ch.id,
-                "type": ch.type.value if hasattr(ch.type, "value") else str(ch.type),
-                "status": ch.status.value if hasattr(ch.status, "value") else str(ch.status),
+                "id": ch.get_channel_id(),
+                "type": ch.get_channel_type().value,
+                "status": ch.get_status().value,
                 "enabled": True,
             }
         )

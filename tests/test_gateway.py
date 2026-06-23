@@ -52,7 +52,9 @@ def _make_gateway(agent_text: str = "hello back") -> tuple[Gateway, FakeChannel,
     sessions_module.build_prompt.return_value = {"messages": [{"role": "user", "content": "hi"}]}
 
     messages_module = MagicMock()
-    messages_module.add_message = AsyncMock()
+    # db.add_message 是同步阻塞 IO,Gateway 内部用 asyncio.to_thread 切走。
+    # 这里用 sync MagicMock 反映真实 db 接口,断言走 call_count。
+    messages_module.add_message = MagicMock()
 
     # mock deepagents agent.astream
     agent = MagicMock()
@@ -84,8 +86,8 @@ class TestRouteMessageHappyPath:
     async def test_user_and_assistant_messages_added(self) -> None:
         gateway, _ch, mocks = _make_gateway("the answer")
         await gateway.route_message(_msg())
-        assert mocks["messages"].add_message.await_count == 2
-        second_call = mocks["messages"].add_message.await_args_list[1]
+        assert mocks["messages"].add_message.call_count == 2
+        second_call = mocks["messages"].add_message.call_args_list[1]
         assert second_call.args[2] == "assistant"
         assert second_call.args[3] == "the answer"
 

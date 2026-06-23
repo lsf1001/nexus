@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
-from ..main import _handle_wechat_message  # noqa: F401  保持语义
 from .base import ChannelConfig, ChannelType
 from .wechat_account import (
     _list_indexed_weixin_account_ids,
@@ -184,9 +183,8 @@ async def wait_qr_scan(session_key: str, timeout_ms: int = 480000) -> dict:
                 _active_channel = WCH(config, token=normalized_id)
                 await _active_channel.start()
 
-                # 立即设置消息回调
-                _active_channel.on_message(_handle_wechat_message)
-                logger.info(f"Callback set for channel {_active_channel.config.channel_id}")
+                # C4 重构:消息回调已由 WeChatChannel._safe_handle_message 自动
+                # 走 Gateway.route_message,不再需要手动 on_message 绑定。
 
                 with _global_lock:
                     del _active_logins[session_key]

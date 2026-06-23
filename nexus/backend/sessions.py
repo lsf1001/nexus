@@ -12,6 +12,7 @@ from .db import (
     add_message,
     create_session,
     delete_session,
+    find_latest_session_by_user,
     get_conversation_history,
     get_messages,
     get_session,
@@ -42,6 +43,28 @@ class SessionManager:
 
     def __init__(self) -> None:
         """初始化会话管理器。"""
+
+    # ----- 透传到 db 的薄包装:供 Gateway(Gateway 是按 duck-typing 调这些方法的)使用 -----
+
+    def create_session(self, session_id: str, title: str | None = None, channel: str = "main") -> dict:
+        """创建会话。"""
+        return create_session(session_id, title=title, channel=channel)
+
+    def get_session(self, session_id: str) -> dict | None:
+        """获取会话详情。"""
+        return get_session(session_id)
+
+    def update_session(self, session_id: str, title: str | None = None) -> dict | None:
+        """更新会话（Gateway 用它做"心跳"：仅触达 session,保持 in-memory 映射活跃）。"""
+        return update_session(session_id, title=title)
+
+    def find_latest_session_by_user(self, user_id: str, channel: str = "wechat") -> str | None:
+        """查找 user_id 在指定 channel 上最近活跃的 session_id。
+
+        Gateway 用它在后端重启后从 DB 重建 user_id -> session_id 映射,
+        避免同一 IM 用户每次重启都建新 session 导致历史断流。
+        """
+        return find_latest_session_by_user(user_id, channel=channel)
 
     def build_prompt(self, session_id: str, user_message: str) -> dict:
         """构建带对话历史的 prompt。
