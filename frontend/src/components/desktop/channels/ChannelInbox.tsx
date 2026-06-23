@@ -10,14 +10,20 @@
  */
 
 import { useStore } from '../../../store/useStore';
+import type { ChannelInboxMsg } from '../../../store/useStore';
 import type { ChannelType } from '../../../types';
 
 interface ChannelInboxProps {
   channelType: ChannelType;
 }
 
+// 模块级常量,避免 zustand selector 每次返回新引用触发"Maximum update depth
+// exceeded"无限重渲染。selector 必须返回稳定引用,否则 zustand 误判状态变更
+// → 组件 re-render → selector 再次返回新引用 → 死循环。
+const EMPTY_INBOX: readonly ChannelInboxMsg[] = [];
+
 export function ChannelInbox({ channelType }: ChannelInboxProps) {
-  const inbox = useStore((state) => state.channelInbox[channelType] ?? []);
+  const inbox = useStore((state) => state.channelInbox[channelType] ?? EMPTY_INBOX);
   const clearInbox = useStore((state) => state.clearChannelInbox);
 
   if (inbox.length === 0) {

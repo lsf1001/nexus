@@ -654,3 +654,107 @@
 .nexus-desktop[data-theme="dark"] .wechat-header .back-btn:hover {
   background: rgba(255, 248, 236, 0.10);
 }
+
+/* ===== ChannelViewBase: 多通道共享的 bind 卡 + 收件箱 + children 槽 =====
+ *
+ * C5 重构引入(.channel-view / .channel-bind-card / .channel-children),
+ * 取代之前散落在 WechatAssistantView 内部的私有样式。本节补齐 C5 重构
+ * 漏写的 CSS,确保 channelType='wechat' / 'feishu' / 'telegram' 都
+ * 共享同一套基类布局。
+ */
+.channel-view {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.channel-bind-card {
+  flex: 0 0 auto;
+  margin: 24px 24px 0;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.channel-bind-card > button {
+  border: 1px solid var(--forest);
+  background: var(--forest);
+  color: var(--paper-tint);
+  border-radius: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.channel-bind-card > button:hover {
+  background: var(--forest-strong, #2a4a30);
+}
+
+.channel-inbox,
+.channel-inbox-empty {
+  flex: 0 0 auto;
+  margin: 12px 24px 0;
+  padding: 14px 16px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.channel-inbox > button {
+  margin-bottom: 8px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.channel-inbox ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.channel-inbox-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--paper);
+}
+
+.channel-inbox-user {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.channel-inbox-content {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.channel-children {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.channel-children > .wechat-view,
+.channel-children > .feishu-view,
+.channel-children > .telegram-view {
+  flex: 1 1 auto;
+  min-height: 0;
+}
