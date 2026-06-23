@@ -31,9 +31,8 @@ class MessageType(StrEnum):
 
 
 class ChannelType(StrEnum):
-    """通道类型枚举"""
+    """通道类型枚举 (前端 WebSocket 由 FastAPI /api/ws 直管,不走 Channel ABC)"""
 
-    WEBSOCKET = "websocket"
     WECHAT = "wechat"
     FEISHU = "feishu"
 
