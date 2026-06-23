@@ -90,7 +90,6 @@ class WeChatChannel(Channel):
         self._running = False
         self._account: WeixinAccount | None = None
         self._get_updates_buf: str = ""
-        self._on_message_callback = None
 
     @property
     def base_url(self) -> str:
@@ -303,21 +302,11 @@ class WeChatChannel(Channel):
                 reply_to=context_token,
             )
 
-            # 如果有回调，直接调用（用于 WebSocket 转发到前端）
-            if self._on_message_callback:
-                logger.debug(f"Calling callback for message from {from_user}")
-                self._on_message_callback(channel_msg)
-            else:
-                logger.warning(
-                    f"No callback set! Channel id={self.config.channel_id}, callback={self._on_message_callback}"
-                )
-                await self._safe_handle_message(channel_msg)
+            # 走 Channel 基类入口 → Gateway.route_message
+            # (取代旧的 self._on_message_callback 旁路,C4 重构)
+            await self._safe_handle_message(channel_msg)
         except Exception as e:
             logger.error(f"Error handling incoming message: {e}")
-
-    def on_message(self, callback) -> None:
-        """设置消息回调"""
-        self._on_message_callback = callback
 
     def _get_message_type(self, raw: dict) -> MessageType:
         """获取消息类型"""
