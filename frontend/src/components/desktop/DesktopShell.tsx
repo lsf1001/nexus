@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useBootstrap } from './hooks/useBootstrap';
 import { useDarkModeRoot } from './hooks/useDarkModeRoot';
-import { useWechatStatusPolling } from './hooks/useWechatStatusPolling';
+import { useChannelStatusPolling } from '../../hooks/useChannelStatusPolling';
 import { useConversationCrud } from './hooks/useConversationCrud';
 import { ShellLayout } from './ShellLayout';
 import type { Conversation } from '../../types';
@@ -28,7 +28,7 @@ export interface DesktopShellContext {
  * 桌面端外壳组合层。每个职责拆到独立 hook / 子组件,本组件只负责把它们组装起来。
  * 之前 506 行的 8-职责单文件已拆为:
  *   - useBootstrap(模型配置检查 + 活跃模型名注入,首屏 RTT 减半)
- *   - useDarkModeRoot / useWechatStatusPolling
+ *   - useDarkModeRoot / useChannelStatusPolling
  *   - useConversationCrud(SELECT/DELETE/NEW race-guard + resetCounter)
  *   - ShellLayout(主结构 + 视图路由)
  *   - Sidebar(右侧栏 + 右键菜单)
@@ -36,7 +36,8 @@ export interface DesktopShellContext {
 export function DesktopShell() {
   const { isBootstrapping, initialView } = useBootstrap();
   useDarkModeRoot(useStore((state) => state.darkMode));
-  const { wechatConnected } = useWechatStatusPolling();
+  const wechatBindStatus = useChannelStatusPolling('wechat');
+  const wechatConnected = !!(wechatBindStatus?.bound && wechatBindStatus.status === 'running');
   const {
     conversations,
     currentConversationId,

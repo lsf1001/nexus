@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { Message, Model } from '../types';
+import type { ChannelType, Message, Model } from '../types';
+
+/** 通道收件箱里的一条消息(独立于主会话,避免串台污染)。 */
+export interface ChannelInboxMsg {
+  id: string;
+  user_id: string;
+  content: string;
+  timestamp: number;
+}
 
 interface AppState {
   isLoading: boolean;
@@ -11,8 +19,11 @@ interface AppState {
   currentModelId: string | null;
   darkMode: boolean;
   conversationMessages: Message[];
-  /** 微信通道收件箱：与主会话消息隔离，避免串台污染。 */
-  wechatInbox: Message[];
+  /**
+   * 通道收件箱:按 channelType 分桶,与主会话消息隔离。
+   * 取代旧的 wechatInbox: Message[],支持多通道 (wechat/feishu/telegram)。
+   */
+  channelInbox: Record<string, ChannelInboxMsg[]>;
 
   setIsLoading: (loading: boolean) => void;
   setWsConnected: (connected: boolean) => void;
@@ -23,12 +34,12 @@ interface AppState {
   setDarkMode: (dark: boolean) => void;
   setConversationMessages: (messages: Message[]) => void;
   clearConversationMessages: () => void;
-  appendWechatMessage: (message: Message) => void;
-  clearWechatInbox: () => void;
+  addChannelInbox: (channelType: ChannelType, msg: ChannelInboxMsg) => void;
+  clearChannelInbox: (channelType: ChannelType) => void;
 }
 
 // 持久化用户偏好(darkMode / showThinking),刷新后保留。运行时状态
-// (isLoading / wsConnected / conversationMessages / wechatInbox)不持久化,
+// (isLoading / wsConnected / conversationMessages / channelInbox)不持久化,
 // 否则 reload 后会带着上一次 session 的中间态(loading=true 永转、幽灵消息)。
 // 安全的 localStorage 访问:Electron / 浏览器 / SSR 都不会因 window 缺失而崩。
 const safeStorage = {
@@ -66,7 +77,7 @@ export const useStore = create<AppState>()(
       currentModelId: null,
       darkMode: false,
       conversationMessages: [],
-      wechatInbox: [],
+      channelInbox: {},
 
       setIsLoading: (loading) => set({ isLoading: loading }),
       setWsConnected: (connected) => set({ wsConnected: connected }),
@@ -77,9 +88,17 @@ export const useStore = create<AppState>()(
       setDarkMode: (dark) => set({ darkMode: dark }),
       setConversationMessages: (messages) => set({ conversationMessages: messages }),
       clearConversationMessages: () => set({ conversationMessages: [] }),
-      appendWechatMessage: (message) =>
-        set((state) => ({ wechatInbox: [...state.wechatInbox, message] })),
-      clearWechatInbox: () => set({ wechatInbox: [] }),
+      addChannelInbox: (channelType, msg) =>
+        set((state) => ({
+          channelInbox: {
+            ...state.channelInbox,
+            [channelType]: [...(state.channelInbox[channelType] ?? []), msg],
+          },
+        })),
+      clearChannelInbox: (channelType) =>
+        set((state) => ({
+          channelInbox: { ...state.channelInbox, [channelType]: [] },
+        })),
     }),
     {
       name: 'nexus-preferences',

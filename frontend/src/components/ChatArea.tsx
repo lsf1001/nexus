@@ -182,17 +182,20 @@ function ChatArea({
         });
         break;
       }
-      case 'wechat_message': {
-        // 微信消息不应进当前主会话（避免串台污染）。放进独立 store，
-        // 侧边栏收件箱图标显示数量，用户主动点开"微信通道"视图才看。
-        const wechatMsg: Message = {
+      case 'channel_message': {
+        // 通道消息(wechat/feishu/telegram)不应进当前主会话(避免串台污染)。
+        // 按 channel_type 分桶进 store.channelInbox,侧边栏收件箱图标显示
+        // 对应通道的数量,用户主动点开对应通道视图才看具体内容。
+        // 取代旧的 wechat_message 单通道帧(C5 重构)。
+        const channelType = data.channel_type;
+        if (!channelType) break;
+        const { addChannelInbox } = useStore.getState();
+        addChannelInbox(channelType, {
           id: crypto.randomUUID(),
-          role: 'user',
+          user_id: data.user_id || '',
           content: data.content || '',
-          createdAt: new Date(),
-        };
-        const { appendWechatMessage } = useStore.getState();
-        appendWechatMessage(wechatMsg);
+          timestamp: Date.now(),
+        });
         break;
       }
       case 'session_created': {

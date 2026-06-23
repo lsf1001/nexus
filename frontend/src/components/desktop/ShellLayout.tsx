@@ -38,7 +38,7 @@ export function ShellLayout({
   onSessionCreated,
   resetCounter,
 }: ShellLayoutProps) {
-  const wechatInboxCount = useStore((state) => state.wechatInbox.length);
+  const wechatInboxCount = useStore((state) => state.channelInbox['wechat']?.length ?? 0);
 
   return (
     <div className="nexus-desktop">
