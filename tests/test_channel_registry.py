@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -37,38 +38,97 @@ class FakeChannel(Channel):
 
 class TestStartChannel:
     @pytest.mark.asyncio
-    async def test_start_calls_channel_start(self) -> None:
+    async def test_start_registers_and_starts_channel(self) -> None:
+        """端到端验证 start_channel 真正把 channel 装进 Registry 并 start。"""
         gateway = MagicMock()
         registry = ChannelRegistry(gateway)
 
-        ch = FakeChannel(ChannelConfig(channel_id="test:1", channel_type=ChannelType.WECHAT, name="test"))
-        ch.start = AsyncMock()  # type: ignore[method-assign]
-        ch._update_state(status=ChannelStatus.RUNNING)
+        # 用 FakeChannel 替换工厂,避免触发真实 WeChatChannel 的网络连接
+        from nexus.backend.channels import registry as reg_module
 
-        registry._gateway.register_channel(ch)
-        registry._channels[ch.config.channel_id] = ch
-        registry._by_type.setdefault(ch.config.channel_type, []).append(ch.config.channel_id)
-        await ch.start()
+        real_factory = reg_module.create_channel_from_config
 
-        assert ch.start_calls >= 1 or ch.state.status == ChannelStatus.RUNNING
+        def fake_factory(config: ChannelConfig, **kwargs: Any) -> Channel:
+            return FakeChannel(config)
+
+        reg_module.create_channel_from_config = fake_factory
+        try:
+            config = ChannelConfig(channel_id="test:1", channel_type=ChannelType.WECHAT, name="test")
+            ch = await registry.start_channel(config)
+        finally:
+            reg_module.create_channel_from_config = real_factory
+
         assert ch.config.channel_id in registry._channels
         assert ch.config.channel_id in registry._by_type[ChannelType.WECHAT]
+        assert ch.state.status == ChannelStatus.RUNNING
+        assert ch.start_calls == 1
+
+
+class TestStartChannelRollback:
+    """start() 失败时必须回滚:从 _channels / _by_type / Gateway 注销。"""
+
+    @pytest.mark.asyncio
+    async def test_start_raises_rollback_removes_channel(self) -> None:
+        gateway = MagicMock()
+        gateway.unregister_channel = AsyncMock()  # type: ignore[method-assign]
+        registry = ChannelRegistry(gateway)
+
+        class BrokenChannel(Channel):
+            async def start(self) -> None:
+                raise RuntimeError("intentional failure for test")
+
+            async def stop(self) -> None:
+                pass
+
+            async def send_message(self, message: Any) -> None:
+                pass
+
+        from nexus.backend.channels import registry as reg_module
+
+        real_factory = reg_module.create_channel_from_config
+
+        def broken_factory(config: ChannelConfig, **kwargs: Any) -> Channel:
+            return BrokenChannel(config)
+
+        reg_module.create_channel_from_config = broken_factory
+        try:
+            with pytest.raises(RuntimeError, match="intentional failure for test"):
+                await registry.start_channel(
+                    ChannelConfig(
+                        channel_id="rb:1",
+                        channel_type=ChannelType.WECHAT,
+                        name="rb",
+                    ),
+                )
+        finally:
+            reg_module.create_channel_from_config = real_factory
+
+        assert "rb:1" not in registry._channels
+        assert "rb:1" not in registry._by_type.get(ChannelType.WECHAT, [])
+        gateway.unregister_channel.assert_awaited_once_with("rb:1")
 
 
 class TestStopChannel:
     @pytest.mark.asyncio
     async def test_stop_removes_channel(self) -> None:
+        """stop_channel 委托 Gateway 真正调一次 stop(无双调用),并清空 Registry。"""
         gateway = MagicMock()
         registry = ChannelRegistry(gateway)
         ch = FakeChannel(ChannelConfig(channel_id="test:2", channel_type=ChannelType.WECHAT, name="test"))
-        ch.stop = AsyncMock()  # type: ignore[method-assign]
         registry._channels[ch.config.channel_id] = ch
         registry._by_type[ChannelType.WECHAT] = [ch.config.channel_id]
-        gateway.unregister_channel = AsyncMock()  # type: ignore[method-assign]
+
+        # 模拟 Gateway.unregister_channel 内部行为:被调时 await channel.stop()
+        async def fake_unregister(channel_id: str) -> None:
+            await ch.stop()
+
+        gateway.unregister_channel = AsyncMock(side_effect=fake_unregister)  # type: ignore[method-assign]
 
         await registry.stop_channel(ch.config.channel_id)
 
-        ch.stop.assert_awaited_once()
+        # Gateway 接管 stop,无双调用
+        gateway.unregister_channel.assert_awaited_once_with(ch.config.channel_id)
+        assert ch.stop_calls == 1
         assert ch.config.channel_id not in registry._channels
         assert ch.config.channel_id not in registry._by_type[ChannelType.WECHAT]
 
