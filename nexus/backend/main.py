@@ -491,12 +491,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 @app.post(f"{API_PREFIX}/channels/wechat/qr", dependencies=[Depends(require_token)])
-async def wechat_qr_login():
+async def wechat_qr_login(request: Request):
     """获取微信登录二维码"""
     from .channels.wechat_login import wechat_qr_login as do_qr_login
 
     try:
-        result = await do_qr_login()
+        result = await do_qr_login(request.app.state.channel_registry)
         return result
     except Exception as e:
         logger.error(f"WeChat QR login failed: {e}")
@@ -504,12 +504,12 @@ async def wechat_qr_login():
 
 
 @app.get(f"{API_PREFIX}/channels/wechat/status/{{session_key}}", dependencies=[Depends(require_token)])
-async def wechat_qr_status(session_key: str, timeout_ms: int = 10000):
+async def wechat_qr_status(request: Request, session_key: str, timeout_ms: int = 10000):
     """获取微信登录二维码状态"""
     from .channels.wechat_login import wait_qr_scan
 
     try:
-        result = await wait_qr_scan(session_key, timeout_ms=timeout_ms)
+        result = await wait_qr_scan(session_key, request.app.state.channel_registry, timeout_ms=timeout_ms)
         return result
     except Exception as e:
         logger.error(f"WeChat QR status check failed: {e}")

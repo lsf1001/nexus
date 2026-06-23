@@ -16,7 +16,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pass
+    from .registry import ChannelRegistry
 
 from .base import ChannelConfig, ChannelType
 from .wechat_account import (
@@ -94,7 +94,7 @@ def _purge_expired_logins() -> None:
 # ========== 公开 API：QR 登录 ==========
 
 
-async def wechat_qr_login() -> dict:
+async def wechat_qr_login(registry: ChannelRegistry) -> dict:
     """启动 QR 登录流程"""
     session_key = str(uuid.uuid4())
     _purge_expired_logins()
@@ -122,7 +122,7 @@ async def wechat_qr_login() -> dict:
         return {"error": str(e)}
 
 
-async def wait_qr_scan(session_key: str, timeout_ms: int = 480000) -> dict:
+async def wait_qr_scan(session_key: str, registry: ChannelRegistry, timeout_ms: int = 480000) -> dict:
     """等待二维码扫描"""
     with _global_lock:
         session = _active_logins.get(session_key)
@@ -170,21 +170,14 @@ async def wait_qr_scan(session_key: str, timeout_ms: int = 480000) -> dict:
                 _save_account(account)
                 _register_weixin_account_id(normalized_id)
 
-                # 创建微信通道并启动
-                global _active_channel
+                # 创建微信通道并启动 (C7 fixup: 走 ChannelRegistry 取代 _active_channel 全局)
                 config = ChannelConfig(
                     channel_id=f"wechat:{normalized_id}",
                     channel_type=ChannelType.WECHAT,
                     name=f"WeChat ({normalized_id[:8]}...)",
                     settings={"account_id": normalized_id},
                 )
-                from .wechat_channel import WeChatChannel as WCH  # noqa: N814
-
-                _active_channel = WCH(config, token=normalized_id)
-                await _active_channel.start()
-
-                # C4 重构:消息回调已由 WeChatChannel._safe_handle_message 自动
-                # 走 Gateway.route_message,不再需要手动 on_message 绑定。
+                await registry.start_channel(config, token=normalized_id)
 
                 with _global_lock:
                     del _active_logins[session_key]

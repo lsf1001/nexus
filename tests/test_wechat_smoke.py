@@ -149,7 +149,8 @@ async def test_wechat_qr_login_success(monkeypatch: pytest.MonkeyPatch):
     # refactored: 函数体调的是 wechat_login._fetch_qrcode（不是 re-export 引用）
     monkeypatch.setattr("nexus.backend.channels.wechat_login._fetch_qrcode", mock_fetch)
 
-    result = await wechat_qr_login()
+    registry = AsyncMock()
+    result = await wechat_qr_login(registry)
     assert "qrcode_url" in result
     assert result["qrcode"] == "qr-raw-content"
     assert "session_key" in result
@@ -162,7 +163,8 @@ async def test_wechat_qr_login_network_error(monkeypatch: pytest.MonkeyPatch):
     mock_fetch = AsyncMock(side_effect=ConnectionError("network unreachable"))
     monkeypatch.setattr("nexus.backend.channels.wechat_login._fetch_qrcode", mock_fetch)
 
-    result = await wechat_qr_login()
+    registry = AsyncMock()
+    result = await wechat_qr_login(registry)
     assert "error" in result
     assert "network unreachable" in result["error"]
 
@@ -173,6 +175,7 @@ async def test_wechat_qr_login_empty_response(monkeypatch: pytest.MonkeyPatch):
     mock_fetch = AsyncMock(return_value={})  # 没有 qrcode 字段
     monkeypatch.setattr("nexus.backend.channels.wechat_login._fetch_qrcode", mock_fetch)
 
-    result = await wechat_qr_login()
+    registry = AsyncMock()
+    result = await wechat_qr_login(registry)
     assert result["qrcode"] == ""
     assert "session_key" in result

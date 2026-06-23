@@ -1,62 +1,14 @@
-"""wechat_state 活跃 channel 访问器测试（P0 step 7/7）。
+"""wechat_state 拆分模块的合法 state dir API 烟雾测试。
 
-get_active_wechat_channel / _set_active_channel / _clear_active_channel
-从原 wechat.py 迁到 wechat_state.py，行为等价：模块级单例 + 显式 setter/clear。
+C4 重构后，`_active_channel` 全局 + `get_active_wechat_channel` /
+`_set_active_channel` / `_clear_active_channel` 已被 ChannelRegistry
+取代，对应测试一并删除。本文件保留一个最小烟雾测试，确保拆分模块路径
+仍可被直接 import（替代旧的 wechat 兼容层测试）。
 """
 
 from __future__ import annotations
 
 
-def test_active_channel_starts_none() -> None:
-    """无 setter 时返回 None。"""
-    from nexus.backend.channels import wechat_state
-
-    # 隔离：避免与其它测试共享状态
-    wechat_state._clear_active_channel()
-    assert wechat_state.get_active_wechat_channel() is None
-
-
-def test_set_and_get_active_channel() -> None:
-    """set 后 getter 拿到同一对象。"""
-    from nexus.backend.channels import wechat_state
-
-    sentinel = object()
-    try:
-        wechat_state._set_active_channel(sentinel)
-        assert wechat_state.get_active_wechat_channel() is sentinel
-    finally:
-        wechat_state._clear_active_channel()
-
-
-def test_clear_active_channel() -> None:
-    """clear 后回到 None。"""
-    from nexus.backend.channels import wechat_state
-
-    wechat_state._set_active_channel(object())
-    assert wechat_state.get_active_wechat_channel() is not None
-    wechat_state._clear_active_channel()
-    assert wechat_state.get_active_wechat_channel() is None
-
-
-def test_set_overwrites_previous() -> None:
-    """重复 set 后只有最新值生效。"""
-    from nexus.backend.channels import wechat_state
-
-    a = object()
-    b = object()
-    try:
-        wechat_state._set_active_channel(a)
-        wechat_state._set_active_channel(b)
-        assert wechat_state.get_active_wechat_channel() is b
-        assert wechat_state.get_active_wechat_channel() is not a
-    finally:
-        wechat_state._clear_active_channel()
-
-
 def test_state_imports_via_split_module() -> None:
-    """拆分模块路径直接 import 仍能拉出这三个符号（替代旧的 wechat 兼容层测试）。"""
-    from nexus.backend.channels.wechat_state import (  # noqa: F401
-        _clear_active_channel,
-        _set_active_channel,
-        get_active_wechat_channel,
-    )
+    """拆分模块路径直接 import 仍可加载（合法 state dir API 烟雾测试）。"""
+    from nexus.backend.channels import wechat_state  # noqa: F401
