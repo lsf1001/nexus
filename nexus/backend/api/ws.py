@@ -623,7 +623,7 @@ async def handle_websocket(
 
     # 设置微信消息回调
     if wechat_callback is not None:
-        from ..channels.wechat import get_active_wechat_channel
+        from ..channels.wechat_state import get_active_wechat_channel
 
         channel = get_active_wechat_channel()
         if channel:

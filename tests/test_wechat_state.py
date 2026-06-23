@@ -53,9 +53,9 @@ def test_set_overwrites_previous() -> None:
         wechat_state._clear_active_channel()
 
 
-def test_re_exports_via_legacy_wechat_module() -> None:
-    """旧 wechat.py 兼容路径仍能拉出这三个符号。"""
-    from nexus.backend.channels.wechat import (  # noqa: F401
+def test_state_imports_via_split_module() -> None:
+    """拆分模块路径直接 import 仍能拉出这三个符号（替代旧的 wechat 兼容层测试）。"""
+    from nexus.backend.channels.wechat_state import (  # noqa: F401
         _clear_active_channel,
         _set_active_channel,
         get_active_wechat_channel,

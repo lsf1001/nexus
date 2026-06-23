@@ -161,7 +161,8 @@ async def _process_wechat_message(channel_message) -> None:
             logger.error("No agent available for WeChat message")
             return
 
-        from .channels.wechat import _send_message, get_active_wechat_channel
+        from .channels.wechat_api import _send_message
+        from .channels.wechat_state import get_active_wechat_channel
 
         channel = get_active_wechat_channel()
         logger.info(f"Active channel: {channel}, account: {channel._account if channel else None}")
@@ -187,7 +188,7 @@ async def _process_wechat_message(channel_message) -> None:
 
         # 发送正在输入状态
         try:
-            from .channels.wechat import _send_typing
+            from .channels.wechat_api import _send_typing
 
             await _send_typing(
                 channel.base_url,
@@ -627,7 +628,7 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.post(f"{API_PREFIX}/channels/wechat/qr", dependencies=[Depends(require_token)])
 async def wechat_qr_login():
     """获取微信登录二维码"""
-    from .channels.wechat import wechat_qr_login as do_qr_login
+    from .channels.wechat_login import wechat_qr_login as do_qr_login
 
     try:
         result = await do_qr_login()
@@ -640,7 +641,7 @@ async def wechat_qr_login():
 @app.get(f"{API_PREFIX}/channels/wechat/status/{{session_key}}", dependencies=[Depends(require_token)])
 async def wechat_qr_status(session_key: str, timeout_ms: int = 10000):
     """获取微信登录二维码状态"""
-    from .channels.wechat import wait_qr_scan
+    from .channels.wechat_login import wait_qr_scan
 
     try:
         result = await wait_qr_scan(session_key, timeout_ms=timeout_ms)
@@ -653,7 +654,8 @@ async def wechat_qr_status(session_key: str, timeout_ms: int = 10000):
 @app.get(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
 async def wechat_bind_status():
     """获取微信绑定状态"""
-    from .channels.wechat import _list_indexed_weixin_account_ids, _load_account, get_active_wechat_channel
+    from .channels.wechat_account import _list_indexed_weixin_account_ids, _load_account
+    from .channels.wechat_state import get_active_wechat_channel
 
     # 检查是否有活跃通道
     channel = get_active_wechat_channel()
@@ -685,14 +687,9 @@ async def wechat_bind_status():
 @app.post(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
 async def wechat_do_bind():
     """绑定微信账号"""
-    from .channels.wechat import (
-        ChannelConfig,
-        ChannelType,
-        _delete_account,
-        _list_indexed_weixin_account_ids,
-        _load_account,
-        get_active_wechat_channel,
-    )
+    from .channels.base import ChannelConfig, ChannelType
+    from .channels.wechat_account import _delete_account, _list_indexed_weixin_account_ids, _load_account
+    from .channels.wechat_state import get_active_wechat_channel
 
     # 检查是否已有活跃通道
     channel = get_active_wechat_channel()
@@ -716,8 +713,8 @@ async def wechat_do_bind():
                 name=f"WeChat ({account_id[:8]}...)",
                 settings={"account_id": account_id},
             )
-            from .channels.wechat import WeChatChannel as WCH  # noqa: N814
-            from .channels.wechat import _check_token_valid
+            from .channels.wechat_account import _check_token_valid
+            from .channels.wechat_channel import WeChatChannel as WCH  # noqa: N814
 
             # 先检查 token 是否有效
             if not _check_token_valid(account_id):
@@ -739,7 +736,7 @@ async def wechat_do_bind():
             new_channel.on_message(_handle_wechat_message)
             logger.debug("on_message callback set successfully")
 
-            from .channels.wechat import _set_active_channel
+            from .channels.wechat_state import _set_active_channel
 
             _set_active_channel(new_channel)
             logger.info(f"Active channel set for account {account_id}")
@@ -759,7 +756,7 @@ async def wechat_do_bind():
 @app.delete(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
 async def wechat_unbind():
     """解除微信绑定"""
-    from .channels.wechat import _clear_active_channel, get_active_wechat_channel
+    from .channels.wechat_state import _clear_active_channel, get_active_wechat_channel
 
     channel = get_active_wechat_channel()
     if channel:

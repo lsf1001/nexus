@@ -11,18 +11,19 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nexus.backend.channels import wechat
-from nexus.backend.channels.wechat import (
-    QRSession,
-    WeixinAccount,
-    _build_base_info,
-    _build_client_version,
-    _build_headers,
+from nexus.backend.channels import wechat_account, wechat_login
+from nexus.backend.channels.wechat_account import (
     _load_account,
     _normalize_account_id,
     _save_account,
-    wechat_qr_login,
 )
+from nexus.backend.channels.wechat_login import wechat_qr_login
+from nexus.backend.channels.wechat_protocol import (
+    _build_base_info,
+    _build_client_version,
+    _build_headers,
+)
+from nexus.backend.channels.wechat_types import QRSession, WeixinAccount
 
 # ---------- 纯函数测试 ----------
 
@@ -109,7 +110,7 @@ def test_qr_session_creation():
 def test_save_and_load_account_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """_save_account + _load_account 应能往返。"""
     # 让 wechat 写到 tmp_path 而不是 ~/.nexus/
-    monkeypatch.setattr(wechat, "_get_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(wechat_account, "_get_state_dir", lambda: tmp_path)
 
     acc = WeixinAccount(
         account_id="test-acc",
@@ -127,7 +128,7 @@ def test_save_and_load_account_roundtrip(tmp_path: Path, monkeypatch: pytest.Mon
 
 def test_load_nonexistent_account_returns_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """_load_account 加载不存在的账号应返回 None。"""
-    monkeypatch.setattr(wechat, "_get_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(wechat_account, "_get_state_dir", lambda: tmp_path)
     assert _load_account("nope-not-exist") is None
 
 
@@ -144,7 +145,7 @@ async def test_wechat_qr_login_success(monkeypatch: pytest.MonkeyPatch):
             "qrcode_img_content": "data:image/png;base64,iVBORw0KGgo=",
         }
     )
-    monkeypatch.setattr(wechat, "_fetch_qrcode", mock_fetch)
+    monkeypatch.setattr(wechat_login, "_fetch_qrcode", mock_fetch)
     # refactored: 函数体调的是 wechat_login._fetch_qrcode（不是 re-export 引用）
     monkeypatch.setattr("nexus.backend.channels.wechat_login._fetch_qrcode", mock_fetch)
 
