@@ -10,6 +10,8 @@
     让上层 WebSocket 层有统一的处理路径。
   - 不可重试错误（auth / bad_request / context_length）也 yield
     error 事件，不浪费重试次数。
+  - langgraph ``GraphInterrupt`` (HITL 中断) **不**走错误路径,而是
+    透传到外层,让 ``_run_agent_streaming`` 翻译成 confirmation_request。
 
 Phase 1 简化模型：
   - ``astream_events`` 是"工厂"，每次重试都重新调一次（不是同一个
@@ -28,6 +30,8 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
+
+from langgraph.errors import GraphInterrupt
 
 from ..llm.errors import ClassifiedError, LLMErrorKind, classify
 from ..llm.policies import RetryPolicy
@@ -157,6 +161,13 @@ class StreamGuard:
                     yield enriched
                 # 正常流完，返回退出
                 return
+            except GraphInterrupt:
+                # langgraph 图挂起(HITL 中断)不是错误,透传出去让上层
+                # ``_run_agent_streaming`` 翻译成 confirmation_request 帧。
+                # GraphInterrupt 继承 GraphBubbleUp,本就是 langgraph 设计
+                # 的"应被外层捕获"协议——StreamGuard 不应把它当 unknown
+                # error 吞掉 yield 一个 error 事件。
+                raise
             except Exception as exc:  # noqa: BLE001 — 边界统一收口
                 classified = exc if isinstance(exc, ClassifiedError) else classify(exc)
 

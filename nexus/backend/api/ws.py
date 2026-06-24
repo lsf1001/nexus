@@ -177,8 +177,84 @@ _NON_RETRYABLE_ERROR_CODES = frozenset({"auth", "bad_request", "context_length",
 _CLARIFY_TOOL_NAME = "ask_user"
 # WS 帧类型常量
 _EVT_CLARIFICATION_REQUEST = "clarification_request"
+_EVT_CONFIRMATION_REQUEST = "confirmation_request"
+_EVT_CONFIRMATION_RESPONSE = "confirmation_response"
 # _run_agent_streaming 返回值新增第四个:clarification_question(str|None)、
 # clarification_options(list[str]|None),供 handle_websocket 判断是否被澄清挂起。
+
+# HITL(Human-in-the-Loop)挂起状态:langgraph ``Command(resume=...)`` 必须基于
+# 同一 ``thread_id`` 的 checkpointer 才能找回挂起的图状态。本模块把
+# ``session_id`` 当 ``thread_id``(单进程内 session 唯一),续流时复用。
+# 进程重启即丢——新 turn 重新建图,客户端再触发 HITL 走完整流程即可。
+_session_hitl_state: dict[str, dict[str, Any]] = {}
+_session_hitl_lock = threading.RLock()
+
+
+def _serialize_hitl_request(
+    hitl_request: Any,
+    *,
+    interrupt_id: str,
+    event_id: int,
+) -> dict[str, Any]:
+    """把 langchain HITL 标准 hitl_request payload 转 WS confirmation_request 帧。
+
+    hitl_request 标准格式(由 langchain ``HumanInTheLoopMiddleware`` 生成)::
+
+        {
+            "action_requests": [
+                {"name": "write_file", "args": {...}, "description": "..."},
+                ...
+            ],
+            "review_configs": {...},
+        }
+
+    转换:每个 ``action_request`` 展开成一个 ``actions`` 项,含工具名 +
+    目标路径 + 200 字截断内容预览 + approve / reject 两个决策选项。
+
+    WHY 必须手动展开:langchain 给的是"通用协议"dict,前端不便直接消费;
+    本函数把"工具调用入参"翻译成"用户友好视图"(路径 / 预览 / 决策按钮)。
+
+    Args:
+        hitl_request: langchain HumanInTheLoopMiddleware 抛出的
+            ``Interrupt.value``。容错处理:既接受 dict,也接受其它类型
+            (str / None)——异常时仍返回完整帧结构,只是 actions 为空。
+        interrupt_id: langgraph ``Interrupt.id``,续流时用。
+        event_id: 本次流的递增 event_id。
+
+    Returns:
+        ``confirmation_request`` 帧 dict,可直接 ``websocket.send_json()``。
+    """
+    actions: list[dict[str, Any]] = []
+    if isinstance(hitl_request, dict):
+        for req in hitl_request.get("action_requests", []) or []:
+            if not isinstance(req, dict):
+                continue
+            name = str(req.get("name", "unknown"))
+            args = req.get("args") or {}
+            # 目标路径:write_file/edit_file 用 file_path,ls/glob/grep 用 path
+            target_path = args.get("file_path") or args.get("path") or "(未知路径)"
+            # 内容预览:write_file 用 content,edit_file 用 new_string
+            content = args.get("content") or args.get("new_string") or ""
+            content_str = str(content)
+            preview = (content_str[:200] + "...") if len(content_str) > 200 else content_str
+            actions.append(
+                {
+                    "tool_name": name,
+                    "target_path": str(target_path),
+                    "preview": preview,
+                    "description": str(req.get("description", "")),
+                    "options": [
+                        {"label": "批准", "decision": "approve"},
+                        {"label": "拒绝", "decision": "reject"},
+                    ],
+                }
+            )
+    return {
+        "type": _EVT_CONFIRMATION_REQUEST,
+        "event_id": event_id,
+        "interrupt_id": interrupt_id,
+        "actions": actions,
+    }
 
 
 def _estimate_tokens(text: str, context_window: int = 32000) -> tuple[int, int]:
@@ -277,7 +353,9 @@ async def _run_agent_streaming(
     prompt: dict,
     agent: Any,
     resume_from_event_id: int | None = None,
-) -> tuple[int, str, bool, tuple[str, list[str]] | None]:
+    *,
+    command_resume: dict[str, Any] | None = None,
+) -> tuple[int, str, bool, tuple[str, list[str]] | None, tuple | None]:
     """运行 agent 流式响应，把事件转发到 WebSocket。
 
     使用 :class:`StreamGuard` 包装 ``agent.astream_events``：
@@ -286,24 +364,34 @@ async def _run_agent_streaming(
       - 永不抛异常（StreamGuard 已保证），调用方不需要再 try/except
       - 检测到 LLM 调用 ``ask_user`` 工具时,发送 ``clarification_request``
         帧并挂起(不再发 final / done),用户回答通过新 turn 注入历史。
+      - 检测到 ``GraphInterrupt``(langchain HITL 中断)时,发 ``confirmation_request``
+        帧 + 把 ``pending_interrupts`` 填入返回值第 5 元组,handle_websocket 据此
+        挂起本轮流,等客户端发 ``confirmation_response`` 后用 ``Command(resume=...)``
+        新 astream 续流。
 
     Args:
         websocket: 目标 WebSocket 连接。
-        session_id: 会话 ID（用于日志上下文）。
+        session_id: 会话 ID（用于日志上下文 / HITL thread_id）。
         prompt: 已构建好的 prompt dict（含 ``messages``）。
         agent: 当前 Agent 实例（由 ``main.py`` 在调用时通过 ``get_agent()`` 注入）。
         resume_from_event_id: 客户端断点续传位置；Phase 1 简化模型下
             仅作为"客户端告知 server 上次看到哪"，不做真正的去重过滤
             （每次流都有新的 event_id 序列）。
+        command_resume: HITL 续流 payload(``{"decisions": [...]}``)。非空时
+            跳过 messages 输入,改用 ``Command(resume=command_resume)`` 续流
+            已挂起的图。
 
     Returns:
-        ``(last_event_id, response_text, completed, clarification)``：
+        ``(last_event_id, response_text, completed, clarification, pending_interrupts)``：
           - ``last_event_id`` 本次流结束时的最后一个 event_id（供下次签发 resume token）。
           - ``response_text`` 剥离 ``<thinking>`` 标签后的纯回复文本（用于 DB 存储）。
-            错误路径返回空字符串。
-          - ``completed`` 表示本次流是否正常完成；错误 / 澄清挂起 路径不应再发 ``done``。
+            错误 / HITL 挂起 路径返回空字符串。
+          - ``completed`` 表示本次流是否正常完成；错误 / 澄清 / HITL 挂起路径不应再发 ``done``。
           - ``clarification`` ``(question, options)`` 当 LLM 调用 ``ask_user``
             时填入,handle_websocket 据此跳过质量门 + 跳过 ``done`` 帧。
+          - ``pending_interrupts`` ``tuple[Interrupt, ...] | None`` 当 HITL 触发时填入,
+            handle_websocket 据此挂起本轮流,等客户端发 confirmation_response 后用
+            ``Command(resume=...)`` 新 astream 继续。
     """
     if agent is None:
         # 没可用 agent（极端情况：启动时没模型 key）
@@ -316,7 +404,7 @@ async def _run_agent_streaming(
                 "event_id": 1,
             }
         )
-        return 1, "", False, None
+        return 1, "", False, None, None
 
     # StreamGuard 包 astream_events；每次重试会重新调一次 astream_events
     # （幂等重试，由上游 LLM 自行决定是否真幂等）。
@@ -332,8 +420,46 @@ async def _run_agent_streaming(
     if callbacks:
         astream_kwargs["config"] = {"callbacks": callbacks}
 
+    # checkpointer 必须配 thread_id 才能让 Command(resume=...) 找回挂起状态。
+    # session_id 单进程内唯一,直接当 thread_id。
+    existing_config = astream_kwargs.get("config") or {}
+    astream_kwargs["config"] = {
+        **existing_config,
+        "configurable": {
+            **dict(existing_config.get("configurable") or {}),
+            "thread_id": session_id,
+        },
+    }
+
+    # astream 输入:HITL 续流用 Command(resume=...),正常 turn 用 messages dict。
+    # langgraph astream_events overload 接受 Command 作为 input(
+    # langgraph/pregel/main.py:3691),从 checkpointer 找回挂起的图状态。
+    if command_resume is not None:
+        from langgraph.types import Command
+
+        astream_input: Any = Command(resume=command_resume)
+    else:
+        astream_input = {"messages": prompt["messages"]}
+
+    # 关键:把 GraphInterrupt 透传出来。StreamGuard 默认 ``except Exception``
+    # 会把 GraphInterrupt 当 classified 错误吞掉,yield 一个 error 事件——
+    # 但 HITL 不是错误,它是 langgraph 设计的"图挂起"机制(继承 GraphBubbleUp)。
+    #
+    # 实现要点:``agent.astream_events`` 内部抛 GraphInterrupt 是发生在
+    # async generator 的 ``__anext__`` 阶段,不在工厂调用瞬间。所以工厂必须
+    # 自己消费 generator 并在内部 ``async for`` 处 try/except,再 raise 出来
+    # —— 这样 StreamGuard 的 ``async for event in _call_factory(...)`` 就会
+    # 捕获到 GraphInterrupt,从外层 try/except 透传到 _run_agent_streaming。
+    async def _astream_factory(input_: Any, **kw: Any) -> Any:
+        agen = agent.astream_events(input_, **kw)
+        try:
+            async for event in agen:
+                yield event
+        except GraphInterrupt:
+            raise
+
     guard = StreamGuard(
-        astream_events=lambda input, **kw: agent.astream_events(input, **{**astream_kwargs, **kw}),
+        astream_events=_astream_factory,
         retry_policy=WS_RETRY_POLICY,
         max_total_retries=2,
     )
@@ -347,68 +473,101 @@ async def _run_agent_streaming(
     # same data shape (data.chunk / data.output), so the rest of the loop
     # works unchanged.
     astream_kwargs_with_version = {**astream_kwargs, "version": "v2"}
-    async for event in guard.astream_events({"messages": prompt["messages"]}, **astream_kwargs_with_version):
-        event_id = int(event.get("event_id", 0))
-        event_type = event.get("event")
 
-        # StreamGuard 错误事件
-        if event.get("type") == "error":
-            error_code = event.get("error_code", "unknown")
-            retryable = _is_retryable_error_code(error_code)
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "content": event.get("message", "未知错误"),
-                    "event_id": event_id,
-                    "error_code": error_code,
-                    "retryable": retryable,
-                }
-            )
-            last_event_id = event_id
-            had_error = True
-            # 不可重试 / 已耗尽：停止流（不再发 done）。
-            # 返回空字符串，避免在错误路径下把 raw 文本（含 thinking 标签）写入 DB。
-            if not retryable:
-                return last_event_id, "", False, None
-            # 可重试但 StreamGuard 仍 yield error，意味着情况特殊
-            # （理论上不会到这里，StreamGuard 内部就用尽了）。安全起见停止。
-            return last_event_id, "", False, None
+    # HITL 处理:HITL 抛 GraphInterrupt(继承 GraphBubbleUp)是 langgraph
+    # 的"图挂起"协议,不是 LLM 错误。在 StreamGuard 外层捕获后翻译成
+    # confirmation_request 帧,不要让 StreamGuard 把它当 unknown error 吞。
+    from langgraph.errors import GraphInterrupt
 
-        # Phase 1 resume 过滤：跳过 event_id <= resume_from_event_id 的事件
-        if resume_from_event_id is not None and event_id > 0 and event_id <= resume_from_event_id:
-            last_event_id = max(last_event_id, event_id)
-            continue
+    try:
+        async for event in guard.astream_events(astream_input, **astream_kwargs_with_version):
+            event_id = int(event.get("event_id", 0))
+            event_type = event.get("event")
 
-        # 业务事件转发
-        if event_type == "on_chat_model_stream":
-            chunk = event.get("data", {}).get("chunk")
-            content = getattr(chunk, "content", "") if chunk else ""
-            if content:
-                # 仅累积，不在流中转发 chunk；后处理阶段会按 16 字符分块发出去
-                full_response += content
-        elif event_type == "on_tool_start":
-            tool_name = event.get("name", "未知工具")
-            if tool_name == _CLARIFY_TOOL_NAME:
-                # === 澄清挂起 ===
-                # LLM 决定追问用户:把工具入参(问题 + 候选项)作为
-                # clarification_request 帧发出,然后**挂起本轮流**——
-                # 不发 final / done,让客户端在 UI 弹表单。
-                # 用户回答通过新 turn 的用户消息注入,LLM 看到 ask_user 调
-                # 用历史 + 用户回答,继续原任务。
-                tool_input = event.get("data", {}).get("input") or {}
-                question = str(tool_input.get("question", "")).strip()
-                raw_options = tool_input.get("options") or []
-                options: list[str] = []
-                if isinstance(raw_options, list):
-                    for opt in raw_options:
-                        if isinstance(opt, str) and opt.strip():
-                            options.append(opt.strip())
-                        if len(options) >= 6:
-                            break
+            # StreamGuard 错误事件
+            if event.get("type") == "error":
+                error_code = event.get("error_code", "unknown")
+                retryable = _is_retryable_error_code(error_code)
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "content": event.get("message", "未知错误"),
+                        "event_id": event_id,
+                        "error_code": error_code,
+                        "retryable": retryable,
+                    }
+                )
+                last_event_id = event_id
+                had_error = True
+                # 不可重试 / 已耗尽：停止流（不再发 done）。
+                # 返回空字符串，避免在错误路径下把 raw 文本（含 thinking 标签）写入 DB。
+                if not retryable:
+                    return last_event_id, "", False, None, None
+                # 可重试但 StreamGuard 仍 yield error，意味着情况特殊
+                # （理论上不会到这里，StreamGuard 内部就用尽了）。安全起见停止。
+                return last_event_id, "", False, None, None
 
-                if not question:
-                    # 工具入参异常 —— 走默认分支,继续按普通工具处理
-                    logger.warning("ask_user 工具入参缺少 question,降级为普通工具调用")
+            # Phase 1 resume 过滤：跳过 event_id <= resume_from_event_id 的事件
+            if resume_from_event_id is not None and event_id > 0 and event_id <= resume_from_event_id:
+                last_event_id = max(last_event_id, event_id)
+                continue
+
+            # 业务事件转发
+            if event_type == "on_chat_model_stream":
+                chunk = event.get("data", {}).get("chunk")
+                content = getattr(chunk, "content", "") if chunk else ""
+                if content:
+                    # 仅累积，不在流中转发 chunk；后处理阶段会按 16 字符分块发出去
+                    full_response += content
+            elif event_type == "on_tool_start":
+                tool_name = event.get("name", "未知工具")
+                if tool_name == _CLARIFY_TOOL_NAME:
+                    # === 澄清挂起 ===
+                    # LLM 决定追问用户:把工具入参(问题 + 候选项)作为
+                    # clarification_request 帧发出,然后**挂起本轮流**——
+                    # 不发 final / done,让客户端在 UI 弹表单。
+                    # 用户回答通过新 turn 的用户消息注入,LLM 看到 ask_user 调
+                    # 用历史 + 用户回答,继续原任务。
+                    tool_input = event.get("data", {}).get("input") or {}
+                    question = str(tool_input.get("question", "")).strip()
+                    raw_options = tool_input.get("options") or []
+                    options: list[str] = []
+                    if isinstance(raw_options, list):
+                        for opt in raw_options:
+                            if isinstance(opt, str) and opt.strip():
+                                options.append(opt.strip())
+                            if len(options) >= 6:
+                                break
+
+                    if not question:
+                        # 工具入参异常 —— 走默认分支,继续按普通工具处理
+                        logger.warning("ask_user 工具入参缺少 question,降级为普通工具调用")
+                        await websocket.send_json(
+                            {
+                                "type": "thinking",
+                                "content": f"[调用工具] {tool_name}",
+                                "event_id": event_id,
+                            }
+                        )
+                    else:
+                        if event_id > last_event_id:
+                            last_event_id = event_id
+                        await websocket.send_json(
+                            {
+                                "type": _EVT_CLARIFICATION_REQUEST,
+                                "content": question,
+                                "options": options,
+                                "event_id": last_event_id,
+                            }
+                        )
+                        logger.info(
+                            "WS clarification_request 发送: session=%s, q=%s, options=%d",
+                            session_id,
+                            question[:60],
+                            len(options),
+                        )
+                        return last_event_id, "", False, (question, options), None
+                else:
                     await websocket.send_json(
                         {
                             "type": "thinking",
@@ -416,49 +575,52 @@ async def _run_agent_streaming(
                             "event_id": event_id,
                         }
                     )
-                else:
-                    if event_id > last_event_id:
-                        last_event_id = event_id
-                    await websocket.send_json(
-                        {
-                            "type": _EVT_CLARIFICATION_REQUEST,
-                            "content": question,
-                            "options": options,
-                            "event_id": last_event_id,
-                        }
-                    )
-                    logger.info(
-                        "WS clarification_request 发送: session=%s, q=%s, options=%d",
-                        session_id,
-                        question[:60],
-                        len(options),
-                    )
-                    return last_event_id, "", False, (question, options)
-            else:
+            elif event_type == "on_tool_end":
+                output = event.get("data", {}).get("output")
                 await websocket.send_json(
                     {
                         "type": "thinking",
-                        "content": f"[调用工具] {tool_name}",
+                        "content": f"[工具返回] {str(output)[:100]}..." if output else "",
                         "event_id": event_id,
                     }
                 )
-        elif event_type == "on_tool_end":
-            output = event.get("data", {}).get("output")
-            await websocket.send_json(
-                {
-                    "type": "thinking",
-                    "content": f"[工具返回] {str(output)[:100]}..." if output else "",
-                    "event_id": event_id,
-                }
-            )
-        # 其它事件（chain start/end、retriever、agent 节点等）→ 忽略，仅跟踪 event_id
+            # 其它事件（chain start/end、retriever、agent 节点等）→ 忽略，仅跟踪 event_id
 
-        if event_id > last_event_id:
-            last_event_id = event_id
+            if event_id > last_event_id:
+                last_event_id = event_id
+    except GraphInterrupt as gi:
+        # HITL 中断:把 langgraph Interrupt 序列翻成 confirmation_request 帧,
+        # pending 状态存入 _session_hitl_state 供 confirmation_response 续流。
+        interrupts = gi.args[0] or ()  # GraphInterrupt(interrupts=[...])
+        logger.info(
+            "WS HITL GraphInterrupt 捕获: session=%s, interrupts=%d",
+            session_id,
+            len(interrupts),
+        )
+        for intr in interrupts:
+            last_event_id += 1
+            frame = _serialize_hitl_request(intr.value, interrupt_id=str(intr.id), event_id=last_event_id)
+            await websocket.send_json(frame)
+            first_action = frame["actions"][0] if frame["actions"] else {}
+            logger.info(
+                "WS confirmation_request 发送: session=%s, tool=%s, target=%s",
+                session_id,
+                first_action.get("tool_name", "?"),
+                first_action.get("target_path", "?"),
+            )
+        pending: tuple | None = tuple(interrupts) if interrupts else None
+        if pending:
+            with _session_hitl_lock:
+                _session_hitl_state[session_id] = {
+                    "thread_id": session_id,
+                    "pending_interrupts": pending,
+                    "last_event_id": last_event_id,
+                }
+        return last_event_id, "", False, None, pending
 
     if had_error:
         # 已经有 error 事件发出，StreamGuard 走完就不要再发 done
-        return last_event_id, "", False, None
+        return last_event_id, "", False, None, None
 
     # 正常结束：先做归一化 / token 估算 / 思考抽取 / 16 字符分块，
     # 然后按 token_usage → thinking → chunks → final → done 顺序发出去。
@@ -542,7 +704,7 @@ async def _run_agent_streaming(
     )
     last_event_id = stats_event_id
 
-    return stats_event_id, response_text, True, None
+    return stats_event_id, response_text, True, None, None
 
 
 async def _handle_resume_frame(websocket: WebSocket, data: dict) -> int | None:
@@ -654,6 +816,77 @@ async def handle_websocket(
                 await _handle_resume_frame(websocket, data)
                 continue
 
+            # 1.5) confirmation_response 帧:HITL 决策续流。
+            # 取出 _session_hitl_state 中挂起的 interrupt + 把决策装成
+            # ``Command(resume={"decisions": [...]})`` 续流。如果又触发
+            # 新的 HITL,pending2 非空 → 回到 while True 顶部继续等待。
+            if data.get("type") == _EVT_CONFIRMATION_RESPONSE:
+                if session_id is None:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error_code": "no_pending_interrupt",
+                            "content": "当前没有待处理的中断",
+                        }
+                    )
+                    continue
+                interrupt_id = data.get("interrupt_id", "")  # noqa: F841 — 留作审计/日志,实际匹配由 _session_hitl_state 接管
+                decision = data.get("decision", "reject")
+                if decision not in {"approve", "reject"}:
+                    logger.warning("confirmation_response decision 无效: %s", decision)
+                    continue
+                with _session_hitl_lock:
+                    state = _session_hitl_state.pop(session_id, None)
+                if state is None or not state.get("pending_interrupts"):
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error_code": "no_pending_interrupt",
+                            "content": "当前没有待处理的中断",
+                        }
+                    )
+                    continue
+                # HITL 期望的 resume payload:{"decisions": [{"type": ...}, ...]}
+                resume_payload: dict[str, Any] = {
+                    "decisions": [{"type": decision} for _ in state["pending_interrupts"]]
+                }
+                # confirmation_response 路径不需要走 user 消息的 _classify_and_record
+                # 等流程,但 _run_agent_streaming 仍要 prompt 入参。command_resume
+                # 非空时,prompt["messages"] 会被忽略(改走 Command(resume=...))。
+                resume_prompt: dict[str, Any] = {"messages": []}
+                agent = get_agent()
+                (
+                    last_event_id,
+                    response_text,
+                    stream_completed,
+                    clarification,
+                    pending_interrupts,
+                ) = await _run_agent_streaming(
+                    websocket,
+                    session_id,
+                    resume_prompt,
+                    agent,
+                    resume_from_event_id=None,
+                    command_resume=resume_payload,
+                )
+                # 二次 HITL 触发:回到挂起状态,等下一个 confirmation_response
+                if pending_interrupts is not None:
+                    logger.info(
+                        "WS HITL 二次挂起: session=%s, interrupts=%d",
+                        session_id,
+                        len(pending_interrupts),
+                    )
+                    continue
+                # 二次澄清挂起:同正常 turn,加 placeholder 进历史
+                if clarification is not None:
+                    clarify_question, _clarify_options = clarification
+                    placeholder = f"[澄清中] {clarify_question}"
+                    add_message(str(uuid.uuid4()), session_id, "assistant", placeholder)
+                    continue
+                # 正常走完 OR 错误 → fall through 到质量门 / 入库 / done
+                # (后续 quality_gate / add_message / done 逻辑靠 stream_completed
+                # 控制是否发 done,质量门 / 入库对错误路径都安全)
+
             # 2) 普通用户消息帧
             user_content = data.get("content", "")
 
@@ -748,7 +981,21 @@ async def handle_websocket(
                 response_text,
                 stream_completed,
                 clarification,
+                pending_interrupts,
             ) = await _run_agent_streaming(websocket, session_id, prompt, agent, resume_from_event_id)
+
+            # HITL 挂起分支:langchain HumanInTheLoopMiddleware 触发了
+            # GraphInterrupt,confirmation_request 已发出,本轮不再发
+            # final / done,也不跑质量门(没有可评判的 response)。
+            # pending state 已由 _run_agent_streaming 写入 _session_hitl_state,
+            # 客户端发 confirmation_response 时再续流(见上面 1.5 分支)。
+            if pending_interrupts is not None:
+                logger.info(
+                    "WS HITL 挂起: session=%s, interrupts=%d",
+                    session_id,
+                    len(pending_interrupts),
+                )
+                continue  # 回到 while True 顶部,等待 confirmation_response
 
             # 澄清挂起分支:LLM 调了 ask_user,clarification_request 已发出,
             # 本轮不再发 final / done,也不跑质量门(没有可评判的 response)。

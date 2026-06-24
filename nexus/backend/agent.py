@@ -459,6 +459,14 @@ def create_agent(
         protected_paths=tuple(str(p) for p in resolve_protected_paths(project_root)),
     )
 
+    # HITL 桥接:必须配 checkpointer,否则 ``Command(resume=...)`` 无法找回
+    # 挂起的图状态(WS 层 confirmation_response 续流依赖它)。MemorySaver 是
+    # in-process 最简方案;进程重启会丢挂起状态(可接受,新 turn 重新建图)。
+    # SqliteSaver 升级留后续 task。
+    from langgraph.checkpoint.memory import MemorySaver
+
+    checkpointer = MemorySaver()
+
     agent = create_deep_agent(
         model=llm,
         tools=all_tools,
@@ -470,6 +478,7 @@ def create_agent(
         memory=memory_files,
         store=store,
         middleware=[quality_gate],
+        checkpointer=checkpointer,
         skills=[
             ".nexus/skills",
         ]
