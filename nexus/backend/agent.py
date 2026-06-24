@@ -211,8 +211,153 @@ def reload_system_prompt() -> None:
 
 
 def get_project_root() -> Path:
-    """获取项目根目录。"""
-    return Path(__file__).parent.parent
+    """获取项目根目录。
+
+    Returns:
+        仓库根目录 ``/Users/yxb/projects/nexus``。本文件在 ``nexus/backend/``,
+        故向上 3 层才是仓库根(此前 2 层的实现把 project_root 错算成
+        ``/Users/yxb/projects/nexus/nexus``,导致 FilesystemPermission
+        的所有 glob path 都带 ``nexus/nexus/**`` 双重前缀,实际匹配不到
+        任何真实路径 → interrupt 永远不触发,LLM 可任意写源码。E2E 2026-06-24 暴露)。
+    """
+    return Path(__file__).parent.parent.parent
+
+
+# SqliteSaver 实例缓存:langgraph 0.6+ 的 SqliteSaver 持有 sqlite3.Connection,
+# 必须在 agent 整个生命周期保持开。模块级单例 + atexit 关闭,避免每次
+# ``_create_checkpointer`` 调用都开新连接把文件锁死。测试用 ``_reset_checkpointer_cache``
+# 清缓存并关连接(否则 aiosqlite 后台线程让 pytest 退出挂死)。
+#
+# value 是 (saver, close_fn) 元组 — close_fn 负责同步释放 saver 持有的资源
+# (aiosqlite connection),没有 close_fn 的(如 MemorySaver)用 None 占位。
+_CHECKPOINTER_CACHE: dict[str, tuple[Any, Any | None]] = {}
+
+
+def _reset_checkpointer_cache() -> None:
+    """清空 checkpointer 单例缓存 + 显式释放每个 saver 的底层连接(测试用)。
+
+    WHY 1:pytest 跑多个 case 时如果用同一个 tmp db,旧 SqliteSaver 的 connection
+    还拿着文件锁,新实例开不进去。给 fixture teardown 调一下,确保每个 case 独立。
+
+    WHY 2(关键):AsyncSqliteSaver 持有的 aiosqlite.Connection 里有非 daemon
+    后台线程。如果只 clear 缓存引用,线程不会退出,pytest 进程退出挂死。
+    调 close_fn 关连接,后台线程收到 close 信号才会正常退出。
+    """
+    for _key, (_saver, close_fn) in list(_CHECKPOINTER_CACHE.items()):
+        if close_fn is not None:
+            try:
+                close_fn()
+            except Exception:  # noqa: BLE001 - 测试隔离,失败不致命
+                pass
+    _CHECKPOINTER_CACHE.clear()
+
+
+def _ensure_sqlite_checkpoint_tables(db_path: str) -> None:
+    """确保 sqlite DB 里有 langgraph checkpoint 需要的表(checkpoints / writes)。
+
+    WHY:AsyncSqliteSaver 自己也提供 async setup(),但我们要在 sync 上下文
+    (daemon 线程 + _create_checkpointer 同步签名)里做这事。用同步版
+    SqliteSaver.setup() 跑同一份 DDL,跟 AsyncSqliteSaver 共用同一 schema。
+    已存在的业务表(sessions / messages)不会被影响(SqliteSaver 只 CREATE
+    IF NOT EXISTS 自己那几个表)。
+    """
+    import sqlite3 as _sqlite3
+
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    conn = _sqlite3.connect(db_path)
+    try:
+        # SqliteSaver 接受一个 sync sqlite3.Connection,调 .setup() 走 DDL
+        SqliteSaver(conn).setup()
+    finally:
+        conn.close()
+
+
+def _close_async_conn_sync(conn: Any) -> None:
+    """atexit 回调:同步关 aiosqlite 连接。
+
+    WHY:aiosqlite.Connection.close 是 async 协程,直接 ``conn.close()`` 只会
+    创建个未 await 的协程对象(会 RuntimeWarning)。在主线程里 ``asyncio.run``
+    跑它的 close,触发后台线程退出 → 进程能正常结束。
+    """
+    import asyncio as _asyncio
+
+    try:
+        _asyncio.run(conn.close())
+    except Exception:  # noqa: BLE001 - atexit 兜底,失败不致命
+        pass
+
+
+def _make_async_saver_close_fn(conn: Any) -> Any:
+    """构造 AsyncSqliteSaver 的 close 回调 — 给 _CHECKPOINTER_CACHE 用。
+
+    WHY:test fixture 调 ``_reset_checkpointer_cache()`` 时要能主动关 aiosqlite
+    连接,避免后台线程阻塞 pytest 退出。atexit 也注册了一份,但 fixture
+    跑得更早更可控。
+    """
+    return lambda: _close_async_conn_sync(conn)
+
+
+def _create_checkpointer() -> Any:
+    """创建 langgraph checkpointer(HITL 续流 / 跨 turn 状态必备)。
+
+    选型:
+      - ``NEXUS_CHECKPOINTER=memory`` → ``MemorySaver``(in-process,单测用)
+      - 默认 → ``SqliteSaver``(写 ``~/.nexus/nexus.db``,跨进程存活)
+
+    WHY:用户挂起 confirmation_request 后,如果后端进程意外退出,新进程拉起
+    时必须能从 SqliteSaver 找回挂起的图状态,否则 Command(resume=...) 报错
+    "No checkpoint found for thread_id",用户必须重发整个提示词。MemorySaver
+    在进程重启后会丢光所有挂起态 → 用户体验灾难。
+    """
+    import atexit
+    import os as _os
+
+    backend = _os.environ.get("NEXUS_CHECKPOINTER", "sqlite").lower()
+    cache_key = f"{backend}::{_os.environ.get('NEXUS_DB_PATH', '')}"
+    if cache_key in _CHECKPOINTER_CACHE:
+        cached_saver, _close_fn = _CHECKPOINTER_CACHE[cache_key]
+        return cached_saver
+
+    if backend == "memory":
+        from langgraph.checkpoint.memory import MemorySaver
+
+        saver: Any = MemorySaver()
+        close_fn: Any | None = None
+    elif backend == "sqlite":
+        # 注意:必须用 ``AsyncSqliteSaver`` 而不是 ``SqliteSaver``——
+        # agent.astream_events 是异步路径,同步 SqliteSaver 会在第一次 await
+        # 触发 ``NotImplementedError: The SqliteSaver does not support asyn...``。
+        # AsyncSqliteSaver 内部用 aiosqlite,checkpoint 仍落同一张表,
+        # 跟 SqliteSaver 共享 sqlite 文件(同 schema)。
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+        db_path = _os.environ.get("NEXUS_DB_PATH") or str(Path.home() / ".nexus" / "nexus.db")
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        # 走 ``SqliteSaver.setup()``(同步版)做 DDL 建表,跟 AsyncSqliteSaver
+        # 共享同一 schema。这样我们能保持 ``_create_checkpointer`` 同步签名
+        # (主流程在 daemon 线程跑)。
+        _ensure_sqlite_checkpoint_tables(db_path)
+        # AsyncSqliteSaver.__init__ 调 ``asyncio.get_running_loop()`` 捕获
+        # 事件循环 → 必须在 loop 内实例化。把 connect + 实例化都包进
+        # ``asyncio.run`` 闭包,loop 退出时 saver 已持有 ``loop`` 引用。
+        import asyncio as _asyncio
+
+        import aiosqlite
+
+        async def _build_async_saver() -> Any:
+            c = await aiosqlite.connect(db_path)
+            return AsyncSqliteSaver(c), c
+
+        saver, conn = _asyncio.run(_build_async_saver())
+        # 进程退出时关连接(aiosqlite.Connection.close 是 async,走 asyncio.run)
+        atexit.register(_close_async_conn_sync, conn)
+        close_fn: Any | None = _make_async_saver_close_fn(conn)
+    else:
+        raise ValueError(f"未知 NEXUS_CHECKPOINTER={backend!r} (期望 'memory' 或 'sqlite')")
+
+    _CHECKPOINTER_CACHE[cache_key] = (saver, close_fn)
+    return saver
 
 
 def _create_backend(project_root: Path, *, store: BaseStore | None = None):
@@ -254,74 +399,21 @@ def _create_backend(project_root: Path, *, store: BaseStore | None = None):
     )
 
 
-def build_interrupt_on_for_agent(project_root: Path) -> dict:
-    """构造传给 create_deep_agent 的 interrupt_on 配置。
+def build_interrupt_on_for_agent(project_root: Path) -> None:
+    """(已废弃,2026-06-24 删除具体逻辑)。
 
-    WHY: FilesystemPermission 的 mode="interrupt" 仅覆盖已声明的 AGENTS.md
-    路径,但项目内其他源码目录(nexus/、frontend/、desktop/)的写入也需要 HITL
-    兜底——本函数用 ``when`` 谓词对未在白名单的路径二次校验。
+    原实现手动构造 ``interrupt_on`` 的 ``when`` 谓词试图对"未在白名单的路径
+    触发 HITL"。E2E 实测发现该实现与 deepagents 0.6.8 内部的
+    ``_make_exact_when_predicate`` 语义错位 — 后者直接调 ``_check_fs_permission``,
+    而手动版用 regex 白名单匹配,后者在 macOS symlink 等场景下漏判,导致
+    "LLM 写项目源码未触发 HITL"。修复:把项目源码目录加入
+    ``FilesystemPermission`` 的 ``mode="interrupt"`` rules,让 deepagents
+    自动从 permissions 生成 ``interrupt_on``(语义最权威)。
 
-    实现: 复用 build_default_permissions 的白名单 + protected 路径,
-    对每个工具调用判定目标路径是否:
-      1. 在白名单内 → 不 interrupt(由 FilesystemPermission mode=allow 接管)
-      2. 是受保护 AGENTS.md → 已由 mode="interrupt" 规则覆盖
-      3. 其他 → interrupt(项目源码、用户家目录其他位置等)
+    本函数保留为空签名(返回 ``None``)以兼容历史调用方;``create_agent``
+    已改为不调用本函数。
     """
-    from langchain.agents.middleware import InterruptOnConfig
-
-    from .permissions import resolve_protected_paths
-
-    # 入口先 resolve,与 build_default_permissions 对齐,避免 macOS 上 /tmp
-    # -> /private/tmp 这类 symlink 导致两边拼的路径字符串不一致 → .nexus/
-    # 合法写被误判触发 HITL。
-    project_root = project_root.expanduser().resolve()
-
-    allowed_patterns = (
-        re.compile(rf"^{re.escape(str(project_root))}/\.nexus/"),
-        re.compile(r"^/tmp/"),
-    )
-    protected_abs = {str(p) for p in resolve_protected_paths(project_root)}
-
-    def _should_interrupt(target_path: str) -> bool:
-        if not target_path:
-            return True
-        for pat in allowed_patterns:
-            if pat.match(target_path):
-                return False
-        try:
-            abs_path = str(Path(target_path).expanduser().resolve())
-        except (OSError, RuntimeError) as exc:
-            # 解析失败 → 保守走 interrupt(让用户决策,而不是静默放行)。
-            logger.debug("路径解析失败(target=%s): %s", target_path, exc)
-            return True
-        # 已在 FilesystemPermission mode="interrupt" 处理,这里仍放行让 layer 1 接管
-        if abs_path in protected_abs:
-            return False
-        return True
-
-    def when_write_file(req: Any) -> bool:
-        # req 可能是 dict(测试 mock)或 ToolCallRequest 对象(框架传入):
-        # - dict: 形如 {"tool_call": {"args": {"file_path": ...}}}
-        # - 对象: req.tool_call 是 ToolCall dict
-        # 原实现 `hasattr(req, "tool_call")` 在 dict 上恒为 False,导致
-        # 永远走 `tc = req; args = req.get("args", {})` → 拿不到 file_path,
-        # 所有 write 都被 `_should_interrupt("")` 强制判 True(HITL 必触发)。
-        if isinstance(req, dict):
-            tc = req.get("tool_call", req)
-        else:
-            tc = req.tool_call
-        if not isinstance(tc, dict):
-            return True
-        args = tc.get("args", {}) or {}
-        return _should_interrupt(args.get("file_path", ""))
-
-    def when_edit_file(req: Any) -> bool:
-        return when_write_file(req)
-
-    return {
-        "write_file": InterruptOnConfig(when=when_write_file),
-        "edit_file": InterruptOnConfig(when=when_edit_file),
-    }
+    return None
 
 
 def create_subagents(model=None):
@@ -424,7 +516,15 @@ def create_agent(
         all_tools.extend(mcp_tools)
 
     # 创建 LLM 实例
-    llm = get_llm(model_name, api_key, api_base, temperature)
+    if _os.environ.get("NEXUS_E2E_MOCK") == "1":
+        # E2E mock 路径:仅 ``NEXUS_E2E_MOCK=1`` 启用,场景由 NEXUS_E2E_SCENARIO 决定。
+        # 平时完全不加载 — 不影响生产。详见 nexus.backend.llm.e2e_mock。
+        from .llm.e2e_mock import make_e2e_mock_llm
+
+        llm = make_e2e_mock_llm()
+        logger.warning("[E2E-MOCK] using mock LLM scenario=%s", llm.scenario)
+    else:
+        llm = get_llm(model_name, api_key, api_base, temperature)
 
     # 持久化 store：跨重启 AGENTS.md 是首选持久化层；
     # 这里给 deepagents 框架一个 InMemoryStore 供 session 内临时数据。
@@ -440,7 +540,10 @@ def create_agent(
     from .permissions import build_default_permissions, resolve_protected_paths
 
     permissions = build_default_permissions(project_root)
-    interrupt_on = build_interrupt_on_for_agent(project_root)
+    # interrupt_on 由 deepagents 从 ``permissions`` 自动生成(见
+    # deepagents.graph._build_interrupt_on_from_permissions)。Nexus 不再手动
+    # 构造 when 谓词(E2E 暴露过手动版与 deepagents 内部 _check_fs_permission
+    # 语义错位,导致"LLM 写项目源码未触发 HITL")。
 
     # 记忆路径（用户级 + 项目级）——deepagents MemoryMiddleware 会按顺序加载,
     # 缺失的路径它自己跳过(file_not_found),所以我们总是传两条,不需要
@@ -460,12 +563,12 @@ def create_agent(
     )
 
     # HITL 桥接:必须配 checkpointer,否则 ``Command(resume=...)`` 无法找回
-    # 挂起的图状态(WS 层 confirmation_response 续流依赖它)。MemorySaver 是
-    # in-process 最简方案;进程重启会丢挂起状态(可接受,新 turn 重新建图)。
-    # SqliteSaver 升级留后续 task。
-    from langgraph.checkpoint.memory import MemorySaver
-
-    checkpointer = MemorySaver()
+    # 挂起的图状态(WS 层 confirmation_response 续流依赖它)。SqliteSaver
+    # 把 checkpoint 写到 ``nexus.db``(NEXUS_DB_PATH 可覆盖),跨进程存活
+    # —— 用户发 confirmation_response 时即使用户进程重启了,新进程也能
+    # 找回挂起的图状态继续走。``NEXUS_CHECKPOINTER=memory`` 退回 in-process
+    # 模式(单测 / 临时场景)。
+    checkpointer = _create_checkpointer()
 
     agent = create_deep_agent(
         model=llm,
@@ -474,7 +577,6 @@ def create_agent(
         backend=backend,
         subagents=subagents,
         permissions=permissions,
-        interrupt_on=interrupt_on,
         memory=memory_files,
         store=store,
         middleware=[quality_gate],

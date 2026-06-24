@@ -122,11 +122,89 @@ async def test_run_agent_streaming_catches_graph_interrupt() -> None:
     assert len(pending) == 1
     assert pending[0].id == "hitl-abc"
 
-    # 验证:pending state 已写入 _session_hitl_state(供 confirmation_response 续流用)
-    state = ws._session_hitl_state.get("sess-1")
-    assert state is not None
-    assert state["thread_id"] == "sess-1"
-    assert len(state["pending_interrupts"]) == 1
+    # 验证:返回值已含挂起项(供 confirmation_response 续流用,无进程内缓存)
+    # WHY 删 _session_hitl_state 写:挂起 interrupt 已在 checkpoint ``__interrupt__``
+    # channel,continuation 通过 ``agent.aget_state(thread_id)`` 读回,跨进程。
+
+
+@pytest.mark.asyncio
+async def test_run_agent_streaming_reads_state_interrupts_fallback() -> None:
+    """langgraph 0.6+ 走 ``agent.aget_state(...).interrupts`` fallback。
+
+    WHY:langgraph 0.6+ 的 Pregel._loop.__exit__ 会主动 ``return True`` 抑制
+    GraphInterrupt,把 interrupt 信息存到 checkpoint 的 ``__interrupt__`` channel,
+    ``agent.astream_events`` 不再抛异常。因此 ``_run_agent_streaming`` 必须
+    在 astream 正常结束后调 ``agent.aget_state(config).interrupts`` 拿挂起列表。
+
+    WHY aget_state(不是 get_state):用 AsyncSqliteSaver 时,get_state 内部
+    ``checkpointer.get_tuple`` 拿到的是 coroutine(没 await),interrupts 永远空。
+    aget_state 走 ``await checkpointer.aget_tuple`` 正确路径。
+    """
+    from langgraph.types import Interrupt
+
+    from nexus.backend.api import ws
+
+    hitl_request = {
+        "action_requests": [
+            {
+                "name": "write_file",
+                "args": {"file_path": "/Users/yxb/projects/nexus/nexus/backend/x.py", "content": "y"},
+            }
+        ]
+    }
+    interrupt = Interrupt(value=hitl_request, id="hitl-state-fallback")
+
+    async def fake_astream_events(*args, **kwargs):
+        # langgraph 0.6+ 路径:不抛,正常结束
+        if False:
+            yield  # pragma: no cover - 让它成为 async generator
+
+    # mock snapshot with interrupts
+    snapshot = MagicMock()
+    snapshot.interrupts = (interrupt,)
+    mock_agent = MagicMock()
+    mock_agent.astream_events = fake_astream_events
+    # aget_state 是 async,必须 AsyncMock 否则返回非 awaitable
+    mock_agent.aget_state = AsyncMock(return_value=snapshot)
+    mock_agent._nexus_log_handler = None
+    mock_agent._nexus_verbose_handler = None
+
+    mock_ws = AsyncMock()
+    prompt = {"messages": []}
+
+    last_id, response_text, completed, clarification, pending = await ws._run_agent_streaming(
+        mock_ws, "sess-state-fb", prompt, mock_agent
+    )
+
+    # 验证:aget_state 被调用(走 fallback 路径)
+    mock_agent.aget_state.assert_called_once()
+    # 验证:发了一个 confirmation_request 帧(从 state.interrupts 翻译)
+    assert mock_ws.send_json.call_count >= 1
+    sent_frame = mock_ws.send_json.call_args_list[0].args[0]
+    assert sent_frame["type"] == "confirmation_request"
+    assert sent_frame["interrupt_id"] == "hitl-state-fallback"
+    # 验证:返回值标记挂起
+    assert completed is False
+    assert pending is not None
+    assert len(pending) == 1
+    assert pending[0].id == "hitl-state-fallback"
+    # 挂起状态已落 checkpoint __interrupt__ channel,无需进程内缓存可断言。
+
+
+@pytest.mark.asyncio
+async def test_session_hitl_state_dict_removed() -> None:
+    """``_session_hitl_state`` / ``_session_hitl_lock`` 已删(多 worker 兼容)。
+
+    WHY:进程内 dict 在多 worker 部署时各持一份,挂起项找不到。改用
+    ``await agent.aget_state(thread_id)`` 读 checkpoint,跨进程共享。
+    本测试守住"这两个名字不再出现",防止有人回滚加回。
+    """
+    from nexus.backend.api import ws
+
+    assert not hasattr(ws, "_session_hitl_state"), (
+        "_session_hitl_state 已删除(改读 checkpoint);如需多 worker 共享,不要加回进程内 dict。"
+    )
+    assert not hasattr(ws, "_session_hitl_lock"), "_session_hitl_lock 已删除(无锁的 dict,自然也不需要锁)。"
 
 
 @pytest.mark.asyncio

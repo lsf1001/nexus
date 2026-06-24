@@ -2,8 +2,11 @@
 
 # ruff: noqa: I001
 
+import gc
+
 import pytest
 
+from nexus.backend import agent as agent_module
 from nexus.backend import config as config_module
 from nexus.backend import db
 from nexus.backend import models_config
@@ -23,3 +26,16 @@ def isolate_runtime_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setitem(config_module.CONFIG, "database_url", str(database_path))
     monkeypatch.setattr(db, "_INITED", False)
     monkeypatch.setattr(models_config, "MODELS_FILE", models_path)
+
+
+@pytest.fixture(autouse=True)
+def reset_checkpointer_cache() -> None:
+    """每个 case 结束清空 checkpointer 单例,释放 aiosqlite 后台线程。
+
+    WHY:AsyncSqliteSaver 内部持有 aiosqlite 连接,连接里又起了一个非 daemon
+    后台线程。如果测试结束时不释放,线程一直存活,pytest 退出挂死。
+    清缓存 + gc.collect 触发连接关闭,线程能正常退出。
+    """
+    yield
+    agent_module._reset_checkpointer_cache()
+    gc.collect()

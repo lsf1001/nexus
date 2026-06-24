@@ -303,12 +303,9 @@ _EVT_CONFIRMATION_RESPONSE = "confirmation_response"
 # _run_agent_streaming 返回值新增第四个:clarification_question(str|None)、
 # clarification_options(list[str]|None),供 handle_websocket 判断是否被澄清挂起。
 
-# HITL(Human-in-the-Loop)挂起状态:langgraph ``Command(resume=...)`` 必须基于
-# 同一 ``thread_id`` 的 checkpointer 才能找回挂起的图状态。本模块把
-# ``session_id`` 当 ``thread_id``(单进程内 session 唯一),续流时复用。
-# 进程重启即丢——新 turn 重新建图,客户端再触发 HITL 走完整流程即可。
-_session_hitl_state: dict[str, dict[str, Any]] = {}
-_session_hitl_lock = threading.RLock()
+# HITL 挂起状态读取:langgraph 0.6+ 把 interrupt 信息存到 checkpoint 的
+# ``__interrupt__`` channel,直接 ``await agent.aget_state(thread_id)`` 拿回
+# Interrupt 列表,不用进程内缓存(多 worker 部署天然兼容)。
 
 
 def _serialize_hitl_request(
@@ -640,6 +637,15 @@ async def _run_agent_streaming(
                 if content:
                     # 仅累积，不在流中转发 chunk；后处理阶段会按 16 字符分块发出去
                     full_response += content
+            elif event_type == "on_chat_model_end":
+                # 非流式 LLM(mock / 老式客户端)只发 end 不发 stream —
+                # 此时 on_chat_model_stream 整个流里没有累积,需要从 end 拿全量
+                # content 兜底,否则 reject 反思 / mock LLM 这类"一次性返回"的
+                # 场景 full_response 始终为空,前端收不到任何 chunk/final。
+                output = event.get("data", {}).get("output")
+                end_content = getattr(output, "content", "") if output else ""
+                if isinstance(end_content, str) and end_content and not full_response:
+                    full_response = end_content
             elif event_type == "on_tool_start":
                 tool_name = event.get("name", "未知工具")
                 if tool_name == _CLARIFY_TOOL_NAME:
@@ -710,8 +716,10 @@ async def _run_agent_streaming(
             if event_id > last_event_id:
                 last_event_id = event_id
     except GraphInterrupt as gi:
-        # HITL 中断:把 langgraph Interrupt 序列翻成 confirmation_request 帧,
-        # pending 状态存入 _session_hitl_state 供 confirmation_response 续流。
+        # HITL 中断(理论路径,langgraph 0.6+ 实际会在 _loop.__exit__ 中主动 suppress,
+        # 见下方 ``agent.get_state(...).interrupts`` fallback):把 langgraph Interrupt
+        # 序列翻成 confirmation_request 帧,pending 状态存入 _session_hitl_state 供
+        # confirmation_response 续流。
         interrupts = gi.args[0] or ()  # GraphInterrupt(interrupts=[...])
         logger.info(
             "WS HITL GraphInterrupt 捕获: session=%s, interrupts=%d",
@@ -730,14 +738,48 @@ async def _run_agent_streaming(
                 first_action.get("target_path", "?"),
             )
         pending: tuple | None = tuple(interrupts) if interrupts else None
-        if pending:
-            with _session_hitl_lock:
-                _session_hitl_state[session_id] = {
-                    "thread_id": session_id,
-                    "pending_interrupts": pending,
-                    "last_event_id": last_event_id,
-                }
+        # WHY 不写 _session_hitl_state:挂起 interrupt 已经存到 checkpoint 的
+        # ``__interrupt__`` channel,续流时通过 ``agent.aget_state(thread_id)``
+        # 读回,无需进程内缓存(多 worker 部署天然兼容)。
         return last_event_id, "", False, None, pending
+
+    # langgraph 0.6+ 关键修正:Pregel._loop.__exit__ 会主动 ``return True`` 抑制
+    # GraphInterrupt(把 interrupt 信息存到 checkpoint 的 ``__interrupt__`` channel),
+    # 所以 ``agent.astream_events`` 不抛异常而正常结束。HITL 状态只能从
+    # ``agent.get_state(config).interrupts`` 读取 — 这是 langgraph 0.6+ 暴露
+    # pending interrupt 的官方 API。
+    try:
+        # WHY ``agent.aget_state``(不是 ``get_state``):agent 用 AsyncSqliteSaver
+        # 时,``checkpointer.aget_tuple`` 是 async;同步 ``get_state`` 内部
+        # ``checkpointer.get_tuple(config)`` 在 AsyncSqliteSaver 上拿到的是
+        # coroutine(没 await),触发 "coroutine 'aget_tuple' was never awaited"
+        # warning,interrupts 永远空。aget_state 是 langgraph 0.6+ 暴露的 async
+        # 变体,会 await checkpointer.aget_tuple。同步 MemorySaver / SqliteSaver
+        # 也能正常用 aget_state(await 对非 coroutine 是 no-op)。
+        snapshot = await agent.aget_state(astream_kwargs["config"])
+        pending_interrupts = tuple(snapshot.interrupts) if snapshot.interrupts else ()
+    except Exception as gs_exc:  # noqa: BLE001 — 边界统一收口
+        logger.warning("WS get_state 失败,跳过 HITL state 兜底: %s", gs_exc)
+        pending_interrupts = ()
+    if pending_interrupts:
+        logger.info(
+            "WS HITL state.interrupts 捕获: session=%s, interrupts=%d",
+            session_id,
+            len(pending_interrupts),
+        )
+        for intr in pending_interrupts:
+            last_event_id += 1
+            frame = _serialize_hitl_request(intr.value, interrupt_id=str(intr.id), event_id=last_event_id)
+            await websocket.send_json(frame)
+            first_action = frame["actions"][0] if frame["actions"] else {}
+            logger.info(
+                "WS confirmation_request 发送: session=%s, tool=%s, target=%s",
+                session_id,
+                first_action.get("tool_name", "?"),
+                first_action.get("target_path", "?"),
+            )
+        # 挂起状态已写到 checkpoint(__interrupt__ channel),无需进程内缓存
+        return last_event_id, "", False, None, pending_interrupts
 
     if had_error:
         # 已经有 error 事件发出，StreamGuard 走完就不要再发 done
@@ -951,14 +993,22 @@ async def handle_websocket(
                         }
                     )
                     continue
-                interrupt_id = data.get("interrupt_id", "")  # noqa: F841 — 留作审计/日志,实际匹配由 _session_hitl_state 接管
+                interrupt_id = data.get("interrupt_id", "")  # noqa: F841 — 留作审计/日志,挂起项匹配由 checkpoint 接管
                 decision = data.get("decision", "reject")
                 if decision not in {"approve", "reject"}:
                     logger.warning("confirmation_response decision 无效: %s", decision)
                     continue
-                with _session_hitl_lock:
-                    state = _session_hitl_state.pop(session_id, None)
-                if state is None or not state.get("pending_interrupts"):
+                # 从 checkpoint 读挂起 interrupt:langgraph 0.6+ 把 interrupt 存到
+                # ``__interrupt__`` channel,aget_state().interrupts 拿回。
+                # 多 worker 部署天然兼容(共享 nexus.db)。
+                agent = get_agent()
+                try:
+                    snapshot = await agent.aget_state({"configurable": {"thread_id": session_id}})
+                    pending_interrupts_for_resume = tuple(snapshot.interrupts) if snapshot.interrupts else ()
+                except Exception as gs_exc:  # noqa: BLE001
+                    logger.warning("WS confirmation_response get_state 失败: %s", gs_exc)
+                    pending_interrupts_for_resume = ()
+                if not pending_interrupts_for_resume:
                     await websocket.send_json(
                         {
                             "type": "error",
@@ -969,13 +1019,12 @@ async def handle_websocket(
                     continue
                 # HITL 期望的 resume payload:{"decisions": [{"type": ...}, ...]}
                 resume_payload: dict[str, Any] = {
-                    "decisions": [{"type": decision} for _ in state["pending_interrupts"]]
+                    "decisions": [{"type": decision} for _ in pending_interrupts_for_resume]
                 }
                 # confirmation_response 路径不需要走 user 消息的 _classify_and_record
                 # 等流程,但 _run_agent_streaming 仍要 prompt 入参。command_resume
                 # 非空时,prompt["messages"] 会被忽略(改走 Command(resume=...))。
                 resume_prompt: dict[str, Any] = {"messages": []}
-                agent = get_agent()
                 (
                     last_event_id,
                     response_text,
