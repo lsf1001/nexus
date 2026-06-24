@@ -254,19 +254,56 @@ def _create_backend(project_root: Path, *, store: BaseStore | None = None):
     )
 
 
-def _create_permissions(project_root: Path) -> list:
-    """创建文件系统权限规则。
+def build_interrupt_on_for_agent(project_root: Path) -> dict:
+    """构造传给 create_deep_agent 的 interrupt_on 配置。
 
-    通过 create_deep_agent 的 permissions 参数传递给 _PermissionMiddleware。
+    WHY: FilesystemPermission 的 mode="interrupt" 仅覆盖已声明的 AGENTS.md
+    路径,但项目内其他源码目录(nexus/、frontend/、desktop/)的写入也需要 HITL
+    兜底——本函数用 ``when`` 谓词对未在白名单的路径二次校验。
+
+    实现: 复用 build_default_permissions 的白名单 + protected 路径,
+    对每个工具调用判定目标路径是否:
+      1. 在白名单内 → 不 interrupt(由 FilesystemPermission mode=allow 接管)
+      2. 是受保护 AGENTS.md → 已由 mode="interrupt" 规则覆盖
+      3. 其他 → interrupt(项目源码、用户家目录其他位置等)
     """
-    from deepagents.middleware.permissions import FilesystemPermission
+    from langchain.agents.middleware import InterruptOnConfig
 
-    return [
-        # 允许读写 ~/.nexus 目录
-        FilesystemPermission(operations=["read", "write"], paths=[str(project_root / ".nexus" / "**")]),
-        # 只读 /tmp 目录
-        FilesystemPermission(operations=["read"], paths=["/tmp/**"]),
-    ]
+    from .permissions import resolve_protected_paths
+
+    allowed_patterns = (
+        re.compile(rf"^{re.escape(str(project_root))}/\.nexus/"),
+        re.compile(r"^/tmp/"),
+    )
+    protected_abs = {str(p) for p in resolve_protected_paths(project_root)}
+
+    def _should_interrupt(target_path: str) -> bool:
+        if not target_path:
+            return True
+        for pat in allowed_patterns:
+            if pat.match(target_path):
+                return False
+        try:
+            abs_path = str(Path(target_path).expanduser().resolve())
+        except (OSError, RuntimeError):
+            return True
+        # 已在 FilesystemPermission mode="interrupt" 处理,这里仍放行让 layer 1 接管
+        if abs_path in protected_abs:
+            return False
+        return True
+
+    def when_write_file(req: Any) -> bool:
+        tc = req.tool_call if hasattr(req, "tool_call") else req
+        args = tc.get("args", {}) if isinstance(tc, dict) else {}
+        return _should_interrupt(args.get("file_path", ""))
+
+    def when_edit_file(req: Any) -> bool:
+        return when_write_file(req)
+
+    return {
+        "write_file": InterruptOnConfig(when=when_write_file),
+        "edit_file": InterruptOnConfig(when=when_edit_file),
+    }
 
 
 def create_subagents(model=None):
@@ -309,10 +346,13 @@ def create_subagents(model=None):
 
     from deepagents.middleware.subagents import SubAgent
 
+    # 注意:write_file/edit_file/read_file 由 FilesystemMiddleware 注入到主 agent,
+    # subagent 通过 SubAgentMiddleware 继承。这里显式 list 只为清晰表达意图,
+    # 实际由 deepagents 自动注入。"execute" 是 dead reference(tools.py 没注册),删除。
     code_writer = SubAgent(
         name="code_writer",
         model=model or get_llm(model_name=CONFIG["model_name"]) if use_tools else None,
-        tools=[t for t in TOOLS if t.name in ("write_file", "edit_file", "read_file", "execute")] if use_tools else [],
+        tools=[t for t in TOOLS if t.name in {"ask_user", "get_current_date"}] if use_tools else [],
         system_prompt=code_writer_prompt,
         description="代码编写专家",
     )
@@ -377,8 +417,11 @@ def create_agent(
     # 子代理（复用主模型的 LLM 实例）
     subagents = create_subagents(model=llm)
 
-    # 权限规则
-    permissions = _create_permissions(project_root)
+    # 权限规则(白名单 .nexus/ + /tmp/,interrupt AGENTS.md)
+    from .permissions import build_default_permissions, resolve_protected_paths
+
+    permissions = build_default_permissions(project_root)
+    interrupt_on = build_interrupt_on_for_agent(project_root)
 
     # 记忆路径（用户级 + 项目级）——deepagents MemoryMiddleware 会按顺序加载,
     # 缺失的路径它自己跳过(file_not_found),所以我们总是传两条,不需要
@@ -394,7 +437,7 @@ def create_agent(
 
     quality_gate = QualityGateMiddleware(
         filter=MemoryFilter(judge=RubricJudge(llm=llm), rubric=FAITHFULNESS_RUBRIC),
-        protected_paths=(str(user_md), str(project_md)),
+        protected_paths=tuple(str(p) for p in resolve_protected_paths(project_root)),
     )
 
     agent = create_deep_agent(
@@ -404,6 +447,7 @@ def create_agent(
         backend=backend,
         subagents=subagents,
         permissions=permissions,
+        interrupt_on=interrupt_on,
         memory=memory_files,
         store=store,
         middleware=[quality_gate],

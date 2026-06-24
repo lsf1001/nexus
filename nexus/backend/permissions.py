@@ -77,44 +77,6 @@ def build_default_permissions(project_root: Path) -> list[FilesystemPermission]:
     return rules
 
 
-def build_interrupt_on_config() -> dict:
-    """构造显式 ``interrupt_on`` 配置,覆盖"未在白名单内的写路径"。
-
-    WHY: deepagents 框架默认对未匹配 FilesystemPermission 规则的路径全 allow,
-    本函数用 HumanInTheLoopMiddleware 的 ``when`` 谓词兜底——
-    任何 write_file/edit_file 工具调用**没有匹配白名单**时,触发 HITL。
-
-    NOTE: 当前是占位实现。Task 3 之前**不要**调用本函数,误调用会立刻
-    抛 :class:`NotImplementedError`(而不是静默返回 ``when_write -> True``
-    把所有写都触发 HITL)。
-
-    Returns:
-        传给 ``create_deep_agent(interrupt_on=...)`` 的 dict,形如:
-        ``{"write_file": {"when": <callable>}, "edit_file": {"when": <callable>}}``
-
-    Raises:
-        NotImplementedError: Task 3 实现真正 HITL 谓词之前的占位哨兵。
-    """
-    raise NotImplementedError("build_interrupt_on_config is a stub; Task 3 will implement real HITL predicate")
-
-    # 下面是 Task 3 计划实现的真实版本草稿,先注释保留供 Task 3 参考。
-    # from langchain.agents.middleware import InterruptOnConfig
-    #
-    # def when_write(req: Any) -> bool:
-    #     """仅对命中 interrupt 路径规则的工具调用触发 HITL。
-    #
-    #     框架已对 FilesystemPermission mode="allow" 的规则自动放行,
-    #     对 mode="interrupt" 自动转 interrupt_on。本函数处理"无规则匹配"的
-    #     默认情况:不让 LLM 静默写入项目源码等敏感路径。
-    #     """
-    #     ...
-    #
-    # return {
-    #     "write_file": InterruptOnConfig(when=when_write),
-    #     "edit_file": InterruptOnConfig(when=when_write),
-    # }
-
-
 def resolve_protected_paths(project_root: Path) -> list[Path]:
     """解析所有受保护的 AGENTS.md 路径为绝对路径。
 
