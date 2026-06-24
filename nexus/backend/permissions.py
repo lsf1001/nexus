@@ -33,8 +33,9 @@ def build_default_permissions(project_root: Path) -> list[FilesystemPermission]:
     Note:
         - 读操作 ``["read"]`` 对全路径 allow(`/**`),LLM 可读任何文件。
         - 写操作分两层:.nexus/ 和 /tmp/ 直接 allow;AGENTS.md 必须 interrupt;
-          其他路径(deepagents 框架对未匹配路径默认 allow)由前端
-          ``interrupt_on`` 规则接管,见 :func:`build_interrupt_on_config`。
+          其他路径(deepagents 框架对未匹配路径默认 allow)由同模块
+          :func:`build_interrupt_on_for_agent` 提供的 ``when`` 谓词兜底
+          (白名单内放行,其他路径触发 HITL)。
     """
     # 入口先 resolve,避免 macOS 上 /tmp -> /private/tmp 这类 symlink
     # 导致 build_default_permissions 拼的路径与 resolve_protected_paths

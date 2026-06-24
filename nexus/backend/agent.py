@@ -271,6 +271,11 @@ def build_interrupt_on_for_agent(project_root: Path) -> dict:
 
     from .permissions import resolve_protected_paths
 
+    # 入口先 resolve,与 build_default_permissions 对齐,避免 macOS 上 /tmp
+    # -> /private/tmp 这类 symlink 导致两边拼的路径字符串不一致 → .nexus/
+    # 合法写被误判触发 HITL。
+    project_root = project_root.expanduser().resolve()
+
     allowed_patterns = (
         re.compile(rf"^{re.escape(str(project_root))}/\.nexus/"),
         re.compile(r"^/tmp/"),
@@ -285,7 +290,9 @@ def build_interrupt_on_for_agent(project_root: Path) -> dict:
                 return False
         try:
             abs_path = str(Path(target_path).expanduser().resolve())
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError) as exc:
+            # 解析失败 → 保守走 interrupt(让用户决策,而不是静默放行)。
+            logger.debug("路径解析失败(target=%s): %s", target_path, exc)
             return True
         # 已在 FilesystemPermission mode="interrupt" 处理,这里仍放行让 layer 1 接管
         if abs_path in protected_abs:
@@ -293,8 +300,19 @@ def build_interrupt_on_for_agent(project_root: Path) -> dict:
         return True
 
     def when_write_file(req: Any) -> bool:
-        tc = req.tool_call if hasattr(req, "tool_call") else req
-        args = tc.get("args", {}) if isinstance(tc, dict) else {}
+        # req 可能是 dict(测试 mock)或 ToolCallRequest 对象(框架传入):
+        # - dict: 形如 {"tool_call": {"args": {"file_path": ...}}}
+        # - 对象: req.tool_call 是 ToolCall dict
+        # 原实现 `hasattr(req, "tool_call")` 在 dict 上恒为 False,导致
+        # 永远走 `tc = req; args = req.get("args", {})` → 拿不到 file_path,
+        # 所有 write 都被 `_should_interrupt("")` 强制判 True(HITL 必触发)。
+        if isinstance(req, dict):
+            tc = req.get("tool_call", req)
+        else:
+            tc = req.tool_call
+        if not isinstance(tc, dict):
+            return True
+        args = tc.get("args", {}) or {}
         return _should_interrupt(args.get("file_path", ""))
 
     def when_edit_file(req: Any) -> bool:
@@ -346,9 +364,10 @@ def create_subagents(model=None):
 
     from deepagents.middleware.subagents import SubAgent
 
-    # 注意:write_file/edit_file/read_file 由 FilesystemMiddleware 注入到主 agent,
-    # subagent 通过 SubAgentMiddleware 继承。这里显式 list 只为清晰表达意图,
-    # 实际由 deepagents 自动注入。"execute" 是 dead reference(tools.py 没注册),删除。
+    # subagent 工具集: 显式限定为 ask_user + get_current_date。
+    # 文件操作(ls/read_file/write_file/edit_file/glob/grep)由 FilesystemMiddleware
+    # 注入到主 agent,subagent 通过 SubAgentMiddleware 自动继承,不在这里重复。
+    # 移除原 "execute" 死引用(tools.py 未注册该工具)。
     code_writer = SubAgent(
         name="code_writer",
         model=model or get_llm(model_name=CONFIG["model_name"]) if use_tools else None,
