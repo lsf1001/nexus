@@ -18,7 +18,8 @@ HITL 永远到不了前端。本测试守住"HITL 抛异常 → 前端收 confir
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+import time
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -126,3 +127,127 @@ async def test_run_agent_streaming_catches_graph_interrupt() -> None:
     assert state is not None
     assert state["thread_id"] == "sess-1"
     assert len(state["pending_interrupts"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_finalize_after_stream_done_and_assistant_message() -> None:
+    """``_finalize_after_stream`` 无挂起时应发 done + 入库 assistant 消息。
+
+    回归测试:Task 4 commit ``ca6dec5`` 的 ``confirmation_response`` 路径
+    fall-through 错位 —— 该帧的 ``content`` 为空,被 user 消息路径的
+    ``if not user_content: continue`` 拦截,导致 approve 后 LLM 续流响应
+    既不入库也不发 done。引入 ``_finalize_after_stream`` helper 把两条
+    路径的 finalize 合并后,这条不变量必须被守住。
+    """
+    from nexus.backend.api.ws import _finalize_after_stream
+    from nexus.backend.intent.router import DEFAULT_INTENT
+
+    with patch("nexus.backend.api.ws.add_message") as mock_add_message:
+        mock_ws = AsyncMock()
+        await _finalize_after_stream(
+            websocket=mock_ws,
+            session_id="sess-finalize",
+            user_content="",
+            message_id="msg-finalize",
+            chat_start_monotonic=time.monotonic(),
+            intent_result=DEFAULT_INTENT,
+            last_event_id=10,
+            response_text="已写入 /tmp/foo.py",
+            stream_completed=True,
+            clarification=None,
+            pending_interrupts=None,  # 关键:无挂起 → 应当正常 finalize
+            agent=MagicMock(),
+            get_quality_pipeline=None,
+        )
+
+    # 验证:发了一个 done 帧
+    sent_frames = [c.args[0] for c in mock_ws.send_json.call_args_list]
+    done_frames = [f for f in sent_frames if isinstance(f, dict) and f.get("type") == "done"]
+    assert len(done_frames) == 1, f"应发 1 个 done 帧,实际发送: {sent_frames}"
+    assert done_frames[0]["event_id"] == 11  # last_event_id + 1
+
+    # 验证:assistant 消息入库(写库函数被调用)
+    assert mock_add_message.called, "approve 后 LLM 续流响应必须入库"
+    args = mock_add_message.call_args[0]
+    assert args[1] == "sess-finalize"  # session_id
+    assert args[2] == "assistant"  # role
+    assert "已写入" in args[3]  # content
+
+
+@pytest.mark.asyncio
+async def test_finalize_after_stream_pending_interrupts_early_return() -> None:
+    """``_finalize_after_stream`` 看到 ``pending_interrupts`` 应 early-return。
+
+    WHY:HITL 二次挂起时不应发 done / 不入库 / 不 emit ChatEnd —— 等下次
+    ``confirmation_response`` 续流。防止 helper 重复发送/写入。
+    """
+    from nexus.backend.api.ws import _finalize_after_stream
+    from nexus.backend.intent.router import DEFAULT_INTENT
+
+    with patch("nexus.backend.api.ws.add_message") as mock_add_message:
+        mock_ws = AsyncMock()
+        await _finalize_after_stream(
+            websocket=mock_ws,
+            session_id="sess-hitl2",
+            user_content="",
+            message_id="msg-hitl2",
+            chat_start_monotonic=time.monotonic(),
+            intent_result=DEFAULT_INTENT,
+            last_event_id=5,
+            response_text="",  # 挂起时无响应文本
+            stream_completed=False,  # 挂起时未完成
+            clarification=None,
+            pending_interrupts=("hitl-2",),  # 关键:二次挂起
+            agent=MagicMock(),
+            get_quality_pipeline=None,
+        )
+
+    # 验证:不应发 done 帧
+    sent_frames = [c.args[0] for c in mock_ws.send_json.call_args_list]
+    done_frames = [f for f in sent_frames if isinstance(f, dict) and f.get("type") == "done"]
+    assert done_frames == [], f"HITL 挂起时不应发 done,实际: {sent_frames}"
+
+    # 验证:不应入库
+    assert not mock_add_message.called, "HITL 挂起时不应入库 assistant 消息"
+
+
+@pytest.mark.asyncio
+async def test_finalize_after_stream_clarification_writes_placeholder() -> None:
+    """``_finalize_after_stream`` 看到 ``clarification`` 应只写 placeholder。
+
+    WHY:二次澄清挂起时,用户下一条消息进来要能看到上下文里的"刚才问了 X",
+    所以必须写 placeholder 入库;但不发 done(本轮没真正完成)。
+    """
+    from nexus.backend.api.ws import _finalize_after_stream
+    from nexus.backend.intent.router import DEFAULT_INTENT
+
+    with patch("nexus.backend.api.ws.add_message") as mock_add_message:
+        mock_ws = AsyncMock()
+        await _finalize_after_stream(
+            websocket=mock_ws,
+            session_id="sess-clar",
+            user_content="",
+            message_id="msg-clar",
+            chat_start_monotonic=time.monotonic(),
+            intent_result=DEFAULT_INTENT,
+            last_event_id=3,
+            response_text="",
+            stream_completed=False,
+            clarification=("你想调用哪个工具?", ["write_file", "edit_file"]),
+            pending_interrupts=None,
+            agent=MagicMock(),
+            get_quality_pipeline=None,
+        )
+
+    # 验证:写入 1 条 placeholder
+    assert mock_add_message.call_count == 1
+    args = mock_add_message.call_args[0]
+    assert args[1] == "sess-clar"
+    assert args[2] == "assistant"
+    assert "[澄清中]" in args[3]
+    assert "你想调用哪个工具?" in args[3]
+
+    # 验证:不应发 done
+    sent_frames = [c.args[0] for c in mock_ws.send_json.call_args_list]
+    done_frames = [f for f in sent_frames if isinstance(f, dict) and f.get("type") == "done"]
+    assert done_frames == [], f"澄清挂起时不应发 done,实际: {sent_frames}"

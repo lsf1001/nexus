@@ -165,6 +165,127 @@ def _emit_chat_end(
     )
 
 
+async def _finalize_after_stream(
+    *,
+    websocket: WebSocket,
+    session_id: str,
+    user_content: str,
+    message_id: str,
+    chat_start_monotonic: float,
+    intent_result: Any,
+    last_event_id: int,
+    response_text: str,
+    stream_completed: bool,
+    clarification: tuple[str, list[str]] | None,
+    pending_interrupts: tuple | None,
+    agent: Any,
+    get_quality_pipeline: Callable[[], Any] | None,
+) -> None:
+    """流结束后的统一收尾：澄清挂起 / HITL 挂起 / 质量门 / 入库 / done / emit ChatEnd。
+
+    适用于:
+      - 普通 user 消息路径(``_run_agent_streaming`` 之后)
+      - ``confirmation_response`` 续流路径(二次 ``_run_agent_streaming`` 之后)
+
+    WHY:Task 4 commit ``ca6dec5`` 之后,``confirmation_response`` 分支注释
+    说 "fall through 到质量门 / 入库 / done",但实际不会 —— 该帧的
+    ``content`` 字段是空,被 user 消息路径的 ``if not user_content: continue``
+    拦截,导致 approve 后 LLM 续流响应既不入库也不发 done。本 helper 把两
+    条路径的 finalize 合并,消除路径分叉。
+
+    Args:
+        websocket: 目标 ws。
+        session_id: 会话 id。
+        user_content: 本轮 user 消息原文。普通 user 消息路径用真实文本;
+            ``confirmation_response`` 续流场景是空串,pipeline 内部应兜底。
+        message_id: 本轮统一 id,用于入库 + ChatEnd 关联。
+        chat_start_monotonic: ChatStart 的 monotonic 起点(普通 user 消息
+            路径在收到消息时记,confirmation_response 续流场景重新计时)。
+        intent_result: 意图分类结果。普通 user 消息场景由
+            ``_classify_and_record`` 给出;confirmation_response 续流场景
+            用 ``DEFAULT_INTENT`` 兜底(没有 intent 分类)。
+        last_event_id: 来自 ``_run_agent_streaming``。
+        response_text: 来自 ``_run_agent_streaming``。
+        stream_completed: 来自 ``_run_agent_streaming``。
+        clarification: 来自 ``_run_agent_streaming``;非空时不跑后续质量门 /
+            入库 / done(挂起状态需要等下次输入),改为入库 placeholder。
+        pending_interrupts: 来自 ``_run_agent_streaming``;非空时直接
+            early-return(HITL 挂起,等下次 ``confirmation_response``)。
+        agent: 用于 ChatEnd 观测。
+        get_quality_pipeline: 可选 callable,用于质量门。``None`` 或返回
+            ``None`` 时跳过质量门(向后兼容)。
+    """
+    # 澄清挂起：把 ask_user 调用 + 问题追加到会话历史(作为 assistant 角色),
+    # 用户下一条消息进来时 LLM 能自然接住。不发 done。
+    if clarification is not None:
+        clarify_question, _clarify_options = clarification
+        placeholder = f"[澄清中] {clarify_question}"
+        add_message(str(uuid.uuid4()), session_id, "assistant", placeholder)
+        return
+
+    # HITL 挂起：``_run_agent_streaming`` 已经发了 ``confirmation_request`` +
+    # 写入 ``_session_hitl_state``,这里什么都不做(等 ``confirmation_response``)。
+    if pending_interrupts is not None:
+        return
+
+    # 质量门(同 user 消息路径原逻辑)
+    pipeline = get_quality_pipeline() if get_quality_pipeline else None
+    final_response: Any = None
+    if pipeline is not None and response_text:
+        try:
+            pipeline.set_session_id(session_id)
+            final_response = await pipeline.run_with_quality(
+                question=user_content,
+                raw_response=response_text,
+                message_id=message_id,
+            )
+            # 不补发 final 帧 —— agent 流式结束时已经在 ``_run_agent_streaming``
+            # 里发过一个 ``final: 长回复`` 帧给客户端,质量门 verdict 只影响
+            # 入库文本,不影响用户视图(详见原 handle_websocket 实现注释)。
+            _emit_quality_verdict(final_response, session_id, message_id)
+        except Exception as exc:  # noqa: BLE001 — 质量门异常不污染主流程
+            logger.warning("QualityPipeline 失败，使用原回复: %s", exc)
+
+    # 签发新 resume token 给客户端(仅在配置了 secret 且会话建立后)
+    if session_id and last_event_id > 0:
+        try:
+            new_token = make_token(session_id, last_event_id)
+        except RuntimeError:
+            # CONFIG 中 resume_secret 和 ws_token 都为空 → 静默不签发
+            new_token = None
+        if new_token:
+            await websocket.send_json(
+                {
+                    "type": "resume_token",
+                    "resume_token": new_token,
+                    "last_event_id": last_event_id,
+                }
+            )
+
+    # 保存助手回复到数据库
+    if response_text:
+        add_message(message_id, session_id, "assistant", response_text)
+
+    # 发 done + emit ChatEnd
+    if stream_completed:
+        done_event_id = last_event_id + 1
+        await websocket.send_json(
+            {
+                "type": "done",
+                "content": "",
+                "event_id": done_event_id,
+            }
+        )
+        _emit_chat_end(
+            session_id=session_id,
+            message_id=message_id,
+            response_text=response_text,
+            chat_start_monotonic=chat_start_monotonic,
+            intent_result=intent_result,
+            final_response=final_response,
+        )
+
+
 # 当前已注册的 WebSocket 客户端列表（供微信等外部通道在主循环中广播）
 _ws_clients: list[WebSocket] = []
 _clients_lock = threading.RLock()
@@ -869,23 +990,35 @@ async def handle_websocket(
                     resume_from_event_id=None,
                     command_resume=resume_payload,
                 )
-                # 二次 HITL 触发:回到挂起状态,等下一个 confirmation_response
+                # 二次 HITL 触发:仅打日志,真正"挂起等下次 confirmation_response"
+                # 的早返回由 ``_finalize_after_stream`` 内部判断 pending_interrupts 完成。
                 if pending_interrupts is not None:
                     logger.info(
                         "WS HITL 二次挂起: session=%s, interrupts=%d",
                         session_id,
                         len(pending_interrupts),
                     )
-                    continue
-                # 二次澄清挂起:同正常 turn,加 placeholder 进历史
-                if clarification is not None:
-                    clarify_question, _clarify_options = clarification
-                    placeholder = f"[澄清中] {clarify_question}"
-                    add_message(str(uuid.uuid4()), session_id, "assistant", placeholder)
-                    continue
-                # 正常走完 OR 错误 → fall through 到质量门 / 入库 / done
-                # (后续 quality_gate / add_message / done 逻辑靠 stream_completed
-                # 控制是否发 done,质量门 / 入库对错误路径都安全)
+                # 统一 finalize:澄清挂起 / HITL 挂起 / 质量门 / 入库 / done / emit ChatEnd。
+                # WHY:ca6dec5 之前这里依赖 fall through 到 user 消息路径的 quality_gate /
+                # add_message / done,但 confirmation_response 帧的 content 为空,会被
+                # 下面 ``if not user_content: continue`` 拦截,导致 approve 后 LLM
+                # 续流响应既不入库也不发 done。统一走 helper 消除路径分叉。
+                await _finalize_after_stream(
+                    websocket=websocket,
+                    session_id=session_id,
+                    user_content="",  # confirmation_response 不是 user 消息
+                    message_id=str(uuid.uuid4()),  # 续流后用新 message_id 关联 ChatEnd
+                    chat_start_monotonic=time.monotonic(),  # 续流重新计时
+                    intent_result=DEFAULT_INTENT,  # chitchat fallback(没有 intent 分类)
+                    last_event_id=last_event_id,
+                    response_text=response_text,
+                    stream_completed=stream_completed,
+                    clarification=clarification,
+                    pending_interrupts=pending_interrupts,
+                    agent=agent,
+                    get_quality_pipeline=get_quality_pipeline,
+                )
+                continue  # 本轮处理完,等下一次输入
 
             # 2) 普通用户消息帧
             user_content = data.get("content", "")
@@ -984,104 +1117,33 @@ async def handle_websocket(
                 pending_interrupts,
             ) = await _run_agent_streaming(websocket, session_id, prompt, agent, resume_from_event_id)
 
-            # HITL 挂起分支:langchain HumanInTheLoopMiddleware 触发了
-            # GraphInterrupt,confirmation_request 已发出,本轮不再发
-            # final / done,也不跑质量门(没有可评判的 response)。
-            # pending state 已由 _run_agent_streaming 写入 _session_hitl_state,
-            # 客户端发 confirmation_response 时再续流(见上面 1.5 分支)。
+            # HITL 挂起分支:仅打日志,真正 early-return 等 confirmation_response
+            # 由 ``_finalize_after_stream`` 内部处理(避免重复写 placeholder)。
             if pending_interrupts is not None:
                 logger.info(
                     "WS HITL 挂起: session=%s, interrupts=%d",
                     session_id,
                     len(pending_interrupts),
                 )
-                continue  # 回到 while True 顶部,等待 confirmation_response
 
-            # 澄清挂起分支:LLM 调了 ask_user,clarification_request 已发出,
-            # 本轮不再发 final / done,也不跑质量门(没有可评判的 response)。
-            # 把 ask_user 调用 + 问题追加到会话历史(作为 assistant 角色),
-            # 这样用户下一条消息进来时,LLM 看到上下文里的"刚才问了用户 X"
-            # 能自然接住。
-            if clarification is not None:
-                clarify_question, _clarify_options = clarification
-                placeholder = f"[澄清中] {clarify_question}"
-                add_message(str(uuid.uuid4()), session_id, "assistant", placeholder)
-                # 也不发 resume_token:本轮没真正完成,resume 语义不适用
-                continue  # 回到 while True 顶部,等待用户回答
-
-            # Phase 2 Task 2.5：质量门。对 raw_response 跑 RubricJudge + Repair；
-            # verdict 决定入库文本（ACCEPT→raw / REPAIR→重生 / REJECT→fallback）。
-            # pipeline 失败/未配置时降级用原 response_text。
-            # message_id 已在 chat 帧解析时统一生成,此处不再重复。
-            pipeline = get_quality_pipeline() if get_quality_pipeline else None
-            final_response: Any = None
-            if pipeline is not None and response_text:
-                try:
-                    pipeline.set_session_id(session_id)
-                    final_response = await pipeline.run_with_quality(
-                        question=user_content,
-                        raw_response=response_text,
-                        message_id=message_id,
-                    )
-                    # 关键:agent 流式结束时已经在 _run_agent_streaming 里发过
-                    # 一个 `final: 长回复` 帧给客户端(line 360-365)。此时用户已经
-                    # 看到完整流式回复。
-                    #
-                    # quality gate 的 verdict 影响"最终入库文本",但不应该再给用户
-                    # 多发一个 final 帧 —— 否则 REJECT 时用户会先看到完整长回复,
-                    # 然后紧跟一句"抱歉这个问题我答得不够好",体验灾难。
-                    #
-                    # 策略:
-                    #   - ACCEPT  → 入库用原 response_text(用户已经看到)
-                    #   - REPAIR 后 ACCEPT → 入库用重生文本;但用户已看过原回复,
-                    #     此时直接替换为重生文本会让用户困惑;保守起见仍用原回复。
-                    #   - REJECT → 入库用原 response_text;fallback 仅是审计占位
-                    #     (用于 quality_scores 留痕),不污染用户视图。
-                    #
-                    # 不补发 final 帧;response_text 保持原值,后续 add_message 用它。
-                    # emit QualityVerdict:把 4 维度评分 + verdict 落观测层。
-                    _emit_quality_verdict(final_response, session_id, message_id)
-                except Exception as exc:  # noqa: BLE001 — 质量门异常不污染主流程
-                    logger.warning("QualityPipeline 失败，使用原回复: %s", exc)
-
-            # 签发新 resume token 给客户端（仅在配置了 secret 且会话建立后）
-            if session_id and last_event_id > 0:
-                try:
-                    new_token = make_token(session_id, last_event_id)
-                except RuntimeError:
-                    # CONFIG 中 resume_secret 和 ws_token 都为空 → 静默不签发
-                    new_token = None
-                if new_token:
-                    await websocket.send_json(
-                        {
-                            "type": "resume_token",
-                            "resume_token": new_token,
-                            "last_event_id": last_event_id,
-                        }
-                    )
-
-            # 保存助手回复到数据库（用剥离 <thinking> 后的纯文本，避免 DB 存原始含标签内容）
-            if response_text:
-                add_message(message_id, session_id, "assistant", response_text)
-
-            if stream_completed:
-                done_event_id = last_event_id + 1
-                await websocket.send_json(
-                    {
-                        "type": "done",
-                        "content": "",
-                        "event_id": done_event_id,
-                    }
-                )
-                # emit ChatEnd:聚合本次 chat 的关键指标
-                _emit_chat_end(
-                    session_id=session_id,
-                    message_id=message_id,
-                    response_text=response_text,
-                    chat_start_monotonic=chat_start_monotonic,
-                    intent_result=intent_result,
-                    final_response=final_response,
-                )
+            # 统一 finalize:澄清挂起 / HITL 挂起 / 质量门 / 入库 / done / emit ChatEnd。
+            # 复用 ``_finalize_after_stream`` 是关键 —— 它是 confirmation_response 续流
+            # 路径也走的一段,确保 approve 后 LLM 续流的响应会发 done + 入库 + emit ChatEnd。
+            await _finalize_after_stream(
+                websocket=websocket,
+                session_id=session_id,
+                user_content=user_content,
+                message_id=message_id,
+                chat_start_monotonic=chat_start_monotonic,
+                intent_result=intent_result,
+                last_event_id=last_event_id,
+                response_text=response_text,
+                stream_completed=stream_completed,
+                clarification=clarification,
+                pending_interrupts=pending_interrupts,
+                agent=agent,
+                get_quality_pipeline=get_quality_pipeline,
+            )
 
     except WebSocketDisconnect:
         logger.info("客户端断开连接")
