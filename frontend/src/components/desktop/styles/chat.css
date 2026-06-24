@@ -627,3 +627,164 @@
 .nexus-desktop[data-theme="dark"] .clarify-textarea:focus {
   background: #1f251f;
 }
+
+/* ===== HITL 确认卡片（LLM 触发敏感操作，等用户决策）=====
+   与 .clarify-card 对齐布局,但用 amber 警示色强调"这是
+   一次不可回退的操作"语义。每个 action 独立一组选项(approve/reject),
+   允许后端在一次 confirmation_request 里打包多个待审批动作。 */
+.confirm-card {
+  margin: 12px 24px 0;
+  padding: 18px 20px 16px;
+  background: var(--paper);
+  border: 1px solid #f59e0b;
+  border-radius: 16px;
+  box-shadow: 0 4px 18px rgba(217, 119, 6, 0.10);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: confirm-rise 220ms ease-out;
+}
+
+@keyframes confirm-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.confirm-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #92400e;
+}
+
+.confirm-action {
+  border-top: 1px dashed #fbbf24;
+  padding-top: 10px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.confirm-action:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.confirm-action-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #78350f;
+  flex-wrap: wrap;
+}
+
+.confirm-tool {
+  background: rgba(217, 119, 6, 0.12);
+  color: #92400e;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+}
+
+.confirm-target {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  color: var(--ink);
+  word-break: break-all;
+}
+
+.confirm-description {
+  font-size: 13px;
+  color: #78350f;
+  line-height: 1.55;
+}
+
+.confirm-preview {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  max-height: 120px;
+  overflow: auto;
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.confirm-btn {
+  padding: 7px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 140ms ease;
+}
+
+.confirm-btn:hover {
+  filter: brightness(0.95);
+  transform: translateY(-1px);
+}
+
+.confirm-approve {
+  background: #10b981;
+  color: white;
+  border-color: #10b981;
+}
+
+.confirm-reject {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+}
+
+.nexus-desktop[data-theme="dark"] .confirm-card {
+  background: #2a2218;
+  border-color: #b97511;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.32);
+}
+
+.nexus-desktop[data-theme="dark"] .confirm-eyebrow {
+  color: #f5c98a;
+}
+
+.nexus-desktop[data-theme="dark"] .confirm-action {
+  border-top-color: #7a4f0c;
+}
+
+.nexus-desktop[data-theme="dark"] .confirm-action-header {
+  color: #f5c98a;
+}
+
+.nexus-desktop[data-theme="dark"] .confirm-tool {
+  background: rgba(217, 119, 6, 0.20);
+  color: #fbbf24;
+}
+
+.nexus-desktop[data-theme="dark"] .confirm-target {
+  color: #e5e7e0;
+}
+
+.nexus-desktop[data-theme="dark"] .confirm-description {
+  color: #d6b88a;
+}
+
+.nexus-desktop[data-theme="dark"] .confirm-preview {
+  background: #1a1f1a;
+  border-color: #2f3a30;
+  color: #e5e7e0;
+}

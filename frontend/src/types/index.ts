@@ -39,7 +39,7 @@ export interface ChannelMessagePayload {
 }
 
 export interface StreamEvent {
-  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage' | 'channel_message' | 'session_created' | 'resume_token' | 'resume_ack' | 'invalid_resume_token' | 'stats' | 'clarification_request';
+  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage' | 'channel_message' | 'session_created' | 'resume_token' | 'resume_ack' | 'invalid_resume_token' | 'stats' | 'clarification_request' | 'confirmation_request';
   content?: string;
   token_count?: number;
   context_usage?: number;
@@ -61,6 +61,41 @@ export interface StreamEvent {
   events_emitted?: number; // StreamGuard 已发出事件总数
   // 澄清请求(type='clarification_request')
   options?: string[];      // 候选项 0-6 个;空时让用户自由输入
+  // HITL 确认请求(type='confirmation_request')— Task 5 配套
+  interrupt_id?: string;   // GraphInterrupt 的 Interrupt id,用于回传关联
+  actions?: ConfirmationAction[]; // 待审批动作列表
+}
+
+/** HITL 决策选项(approve / reject 二选一,后端 langchain HITL 标准约定) */
+export interface ConfirmationActionOption {
+  label: string;
+  decision: 'approve' | 'reject';
+}
+
+/** HITL 待审批动作(对应 langchain HITL action_requests 一条) */
+export interface ConfirmationAction {
+  tool_name: string;
+  target_path: string;
+  preview: string;       // ≤ 200 字截断内容预览
+  description: string;
+  options: ConfirmationActionOption[];
+}
+
+/** 后端发来的确认请求帧(WS → client) */
+export interface ConfirmationRequestFrame {
+  type: 'confirmation_request';
+  event_id: number;
+  interrupt_id: string;
+  actions: ConfirmationAction[];
+}
+
+/** 客户端发回的 HITL 决策帧(client → WS)。
+ *  注意:这是 outbound 帧,不属于 StreamEvent union,发送时用 `as` 断言。 */
+export interface ConfirmationResponseFrame {
+  type: 'confirmation_response';
+  event_id: number;
+  interrupt_id: string;
+  decision: 'approve' | 'reject';
 }
 
 export interface WSMessage {

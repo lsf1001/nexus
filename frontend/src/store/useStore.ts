@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { ChannelType, Message, Model } from '../types';
+import type { ChannelType, ConfirmationAction, Message, Model } from '../types';
 
 /** 通道收件箱里的一条消息(独立于主会话,避免串台污染)。 */
 export interface ChannelInboxMsg {
@@ -8,6 +8,14 @@ export interface ChannelInboxMsg {
   user_id: string;
   content: string;
   timestamp: number;
+}
+
+/** HITL 待审批挂起项 — 后端 GraphInterrupt → 前端确认卡片。
+ *  与澄清挂起(pendingClarification)互斥:同时只允许一种挂起态展示在 UI。 */
+export interface PendingConfirmation {
+  interruptId: string;
+  eventId: number;
+  actions: ConfirmationAction[];
 }
 
 interface AppState {
@@ -24,6 +32,8 @@ interface AppState {
    * 取代旧的 wechatInbox: Message[],支持多通道 (wechat/feishu/telegram)。
    */
   channelInbox: Record<string, ChannelInboxMsg[]>;
+  /** HITL 挂起项(Task 5 新增)。null = 无挂起 */
+  pendingConfirmation: PendingConfirmation | null;
 
   setIsLoading: (loading: boolean) => void;
   setWsConnected: (connected: boolean) => void;
@@ -36,6 +46,7 @@ interface AppState {
   clearConversationMessages: () => void;
   addChannelInbox: (channelType: ChannelType, msg: ChannelInboxMsg) => void;
   clearChannelInbox: (channelType: ChannelType) => void;
+  setPendingConfirmation: (p: PendingConfirmation | null) => void;
 }
 
 // 持久化用户偏好(darkMode / showThinking),刷新后保留。运行时状态
@@ -78,6 +89,7 @@ export const useStore = create<AppState>()(
       darkMode: false,
       conversationMessages: [],
       channelInbox: {},
+      pendingConfirmation: null,
 
       setIsLoading: (loading) => set({ isLoading: loading }),
       setWsConnected: (connected) => set({ wsConnected: connected }),
@@ -99,6 +111,7 @@ export const useStore = create<AppState>()(
         set((state) => ({
           channelInbox: { ...state.channelInbox, [channelType]: [] },
         })),
+      setPendingConfirmation: (p) => set({ pendingConfirmation: p }),
     }),
     {
       name: 'nexus-preferences',

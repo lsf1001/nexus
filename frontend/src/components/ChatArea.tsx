@@ -4,7 +4,7 @@ import { openContextMenuAt } from '../lib/useContextMenuTrigger';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useLoadingWatchdog } from '../hooks/useLoadingWatchdog';
 import ChatBubble from './ChatBubble';
-import type { StreamEvent, WSMessage, Message } from '../types';
+import type { StreamEvent, WSMessage, Message, ConfirmationResponseFrame } from '../types';
 import { getRuntimeToken } from '../lib/api';
 
 interface ChatAreaProps {
@@ -80,6 +80,8 @@ function ChatArea({
   const setConversationMessages = useStore((s) => s.setConversationMessages);
   const clearConversationMessages = useStore((s) => s.clearConversationMessages);
   const modelName = useStore((s) => s.modelName);
+  const pendingConfirmation = useStore((s) => s.pendingConfirmation);
+  const setPendingConfirmation = useStore((s) => s.setPendingConfirmation);
 
   // 当 conversationId prop 变化时，同步更新 ref
   useEffect(() => {
@@ -93,10 +95,11 @@ function ChatArea({
       clearConversationMessages();
       setInput('');
       setPendingClarification(null);
+      setPendingConfirmation(null);
       setLastError(null);
     }
     resetTriggerRef.current = resetTrigger ?? 0;
-  }, [resetTrigger, clearConversationMessages]);
+  }, [resetTrigger, clearConversationMessages, setPendingConfirmation]);
 
   const handleWsMessage = useCallback((raw: StreamEvent | unknown) => {
     const data = raw as StreamEvent;
@@ -230,8 +233,30 @@ function ChatArea({
         setPendingClarification({ question, options });
         break;
       }
+      case 'confirmation_request': {
+        // HITL 桥接:LLM 触发敏感操作(写文件 / 编辑 AGENTS.md 等),
+        // 后端发 confirmation_request 等用户决策。与澄清路径类似:
+        // 清 loading + disarm watchdog(避免 watchdog 30s 后误清状态
+        // 把卡片也带走),然后渲染确认卡片,不调质量门 / done。
+        //
+        // 注意:与澄清不同,HITL 是阻断 LLM turn 的真正挂起点,用户
+        // 点 approve/reject 后端会恢复执行;澄清是 LLM 主动追问,
+        // 用户回答走自然 turn。这是两条独立路径。
+        setIsLoading(false);
+        disarm();
+        if (!Array.isArray(data.actions) || data.actions.length === 0) {
+          console.warn('confirmation_request 缺少 actions 字段,忽略');
+          break;
+        }
+        setPendingConfirmation({
+          interruptId: data.interrupt_id || '',
+          eventId: data.event_id || 0,
+          actions: data.actions,
+        });
+        break;
+      }
     }
-  }, [onSessionCreated, setConversationMessages, setIsLoading]);
+  }, [onSessionCreated, setConversationMessages, setIsLoading, setPendingConfirmation]);
 
   // === 客户端 watchdog:后端不发终止帧时强制清 loading ===
   // 必须在 handleWsMessage 之前声明 — useCallback 的 deps 数组在 render
@@ -535,6 +560,47 @@ function ChatArea({
             onSubmit={handleClarificationSubmit}
             onCancel={() => setPendingClarification(null)}
           />
+        )}
+        {pendingConfirmation && (
+          <div className="confirm-card" role="group" aria-label="AI 请求你确认一项操作">
+            <div className="confirm-eyebrow">需要你确认</div>
+            {pendingConfirmation.actions.map((action, idx) => (
+              <div key={`${pendingConfirmation.interruptId}-${idx}`} className="confirm-action">
+                <div className="confirm-action-header">
+                  <code className="confirm-tool">{action.tool_name}</code>
+                  <span className="confirm-target">{action.target_path}</span>
+                </div>
+                {action.description && (
+                  <div className="confirm-description">{action.description}</div>
+                )}
+                {action.preview && (
+                  <pre className="confirm-preview">{action.preview}</pre>
+                )}
+                <div className="confirm-actions">
+                  {action.options.map((opt) => (
+                    <button
+                      key={opt.decision}
+                      type="button"
+                      className={`confirm-btn confirm-${opt.decision}`}
+                      onClick={() => {
+                        if (wsSend && getReadyState() === WebSocket.OPEN) {
+                          wsSend({
+                            type: "confirmation_response",
+                            event_id: pendingConfirmation.eventId,
+                            interrupt_id: pendingConfirmation.interruptId,
+                            decision: opt.decision,
+                          } as ConfirmationResponseFrame);
+                        }
+                        setPendingConfirmation(null);
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>
