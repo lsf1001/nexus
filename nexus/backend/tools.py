@@ -4,13 +4,6 @@ from pathlib import Path
 
 import requests
 from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_community.tools.file_management import (
-    CopyFileTool,
-    DeleteFileTool,
-    MoveFileTool,
-    ReadFileTool,
-    WriteFileTool,
-)
 from langchain_core.tools import tool as langchain_tool
 
 from .config import CONFIG
@@ -18,41 +11,9 @@ from .config import CONFIG
 logger = logging.getLogger(__name__)
 
 
-def _get_save_path(filename: str, path: str | None) -> Path:
-    """解析文件路径，默认为配置目录。"""
-    base = Path(CONFIG["default_save_path"]).expanduser()
-    base.mkdir(parents=True, exist_ok=True)
-
-    if path:
-        p = Path(path).expanduser()
-        if p.is_absolute():
-            if p.suffix:  # 完整文件路径
-                return p
-            base = p.parent
-            filename = p.name
-        else:
-            base = base / p
-
-    # 确保文件名有后缀
-    if "." not in Path(filename).suffix:
-        filename += ".txt"
-
-    return base / filename
-
-
-@langchain_tool
-def write_file(filename: str, content: str, path: str | None = None) -> str:
-    """写入内容到文件。
-
-    Args:
-        filename: 文件名（必填，自动添加到默认目录）
-        content: 要写入的内容（必填）
-        path: 子目录路径（可选，如 "subdir" 或完整路径）
-    """
-    save_path = _get_save_path(filename, path)
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    save_path.write_text(content, encoding="utf-8")
-    return f"已保存到 {save_path}"
+# 注:文件管理工具(read_file / write_file / edit_file / ls / glob / grep)由
+# deepagents 的 FilesystemMiddleware 提供(自带 FilesystemPermission 校验),
+# 这里不再重复定义,避免同名工具冲突 + 绕过权限校验。
 
 
 @langchain_tool
@@ -106,12 +67,8 @@ except ImportError as e:
     logger.warning("Wikipedia 工具不可用: %s", e)
     wikipedia = None
 
-# 文件管理工具
-read_file = ReadFileTool()
-write_file_tool = WriteFileTool()
-copy_file = CopyFileTool()
-move_file = MoveFileTool()
-delete_file = DeleteFileTool()
+# 文件管理工具(read_file/write_file/edit_file/ls/glob/grep)由
+# deepagents FilesystemMiddleware 提供 —— 见模块顶部注释。
 
 
 @langchain_tool
@@ -194,16 +151,10 @@ def ask_user(question: str, options: list[str] | None = None) -> str:
 
 TOOLS = [
     get_current_date,
-    write_file,  # 自定义的写文件工具
     yandex_search,
     web_search,
     wikipedia,
-    read_file,
-    write_file_tool,
     list_dir,
-    copy_file,
-    move_file,
-    delete_file,
     ask_user,
 ]
 TOOLS = [t for t in TOOLS if t is not None]
