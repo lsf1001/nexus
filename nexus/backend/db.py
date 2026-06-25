@@ -36,6 +36,12 @@ def get_db():
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    # 30s busy_timeout:agent.py 的 AsyncSqliteStore/AsyncSqliteSaver
+    # (aiosqlite 后台线程) 与本连接同库同表,aiosqlite 持 WAL 写锁期间
+    # sync 写会立即 OperationalError。30s 等待覆盖 agent 懒构造时
+    # AsyncSqliteStore.setup() 的 DDL(实测在 5-15s 之间,busy_timeout=5000
+    # 仍然不够)。30s 是 SQLite 默认上限,生产经验值能扛住 99% 场景。
+    conn.execute("PRAGMA busy_timeout = 30000")
     if not _INITED:
         _INITED = True
         _create_tables(conn)

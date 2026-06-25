@@ -336,6 +336,12 @@ def _create_store() -> Any:
         c = await aiosqlite.connect(db_path)
         store = AsyncSqliteStore(c)
         await store.setup()  # noqa: ERA001 - langgraph 公共 API
+        # 显式 commit:setup() 内有 INSERT store_migrations(默认 deferred
+        # 隔离级别),不 commit 持 WAL 写锁,后续 sync sqlite3 写同库直接
+        # OperationalError: database is locked(busy_timeout 也救不了,持
+        # 锁期间 sync 必失败)。这是 E2E 2026-06-25 真实 LLM 路径暴露的
+        # 根因,务必保留。
+        await c.commit()
         return store, c
 
     store, conn = _asyncio.run(_build_async_store())
