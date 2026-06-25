@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from langchain.agents.middleware.types import AgentMiddleware, AgentState
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
 
 from .memory_filter import MemoryFilter
@@ -36,6 +36,12 @@ logger = logging.getLogger(__name__)
 
 # deepagents 内置文件工具名
 _FILE_TOOLS: frozenset[str] = frozenset({"edit_file", "write_file"})
+
+# 抽 user context 的窗口大小:最近 3 条 HumanMessage 拼成摘要,单条截断到
+# 500 字,总长度上限 1500 字。足够 Judge 理解意图又不会撑爆 token。
+_USER_CONTEXT_WINDOW: int = 3
+_USER_CONTEXT_PER_MSG_CHARS: int = 500
+_USER_CONTEXT_TOTAL_CHARS: int = 1500
 
 
 class QualityGateMiddleware(AgentMiddleware[AgentState, ContextT, ResponseT]):
@@ -100,6 +106,45 @@ class QualityGateMiddleware(AgentMiddleware[AgentState, ContextT, ResponseT]):
             return False
         return resolved in self._protected
 
+    def _extract_user_context(self, state: Any) -> str | None:
+        """从 agent state 抽最近 N 条 HumanMessage 拼成 user context。
+
+        WHY: :meth:`MemoryFilter.check` 的 Judge LLM 拿不到对话历史,只看到
+        要写入的字符串,faithfulness 维度会把"用户明确要求写入的具体值"
+        误判为"完全没回答问题" → 0.0 分 → 工具被拒 → WS 流提前结束。
+        注入最近 user 消息后,Judge 能区分"用户要写的标记串"vs
+        "凭空捏造的乱写"。
+
+        Args:
+            state: deepagents 的 AgentState,期望含 ``messages`` 键。
+
+        Returns:
+            拼接好的中文 user context,或 ``None``(取不到时让 filter 退回
+            旧版兼容路径)。
+        """
+        if not isinstance(state, dict):
+            return None
+        messages = state.get("messages")
+        if not messages:
+            return None
+        humans = [m for m in messages if isinstance(m, HumanMessage)]
+        if not humans:
+            return None
+        recent = humans[-_USER_CONTEXT_WINDOW:]
+        parts: list[str] = []
+        for idx, msg in enumerate(recent, start=1):
+            content = getattr(msg, "content", "") or ""
+            content = str(content).strip()
+            if not content:
+                continue
+            if len(content) > _USER_CONTEXT_PER_MSG_CHARS:
+                content = content[:_USER_CONTEXT_PER_MSG_CHARS] + "...(已截断)"
+            parts.append(f"[{idx}] {content}")
+        joined = "\n".join(parts)
+        if len(joined) > _USER_CONTEXT_TOTAL_CHARS:
+            joined = joined[:_USER_CONTEXT_TOTAL_CHARS] + "...(已截断)"
+        return joined or None
+
     def _make_reject_message(self, tool_call: dict[str, Any], reason: str) -> ToolMessage:
         return ToolMessage(
             content=f"[质量门阻断] {reason}",
@@ -123,7 +168,8 @@ class QualityGateMiddleware(AgentMiddleware[AgentState, ContextT, ResponseT]):
             # 没有内容可评估,放行
             return await handler(request)
 
-        decision = await self._filter.check(content)
+        user_context = self._extract_user_context(request.state)
+        decision = await self._filter.check(content, user_context=user_context)
         if not decision.allow:
             logger.warning(
                 "质量门阻断 %s: score=%.2f reason=%s",
@@ -134,9 +180,10 @@ class QualityGateMiddleware(AgentMiddleware[AgentState, ContextT, ResponseT]):
             return self._make_reject_message(tool_call, decision.reason)
 
         logger.debug(
-            "质量门放行 %s: score=%.2f",
+            "质量门放行 %s: score=%.2f has_user_context=%s",
             tool_call.get("name"),
             decision.score,
+            user_context is not None,
         )
         return await handler(request)
 

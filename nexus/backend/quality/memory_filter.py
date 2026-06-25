@@ -85,6 +85,7 @@ class MemoryFilter:
         value: str,
         *,
         bypass: bool = False,
+        user_context: str | None = None,
     ) -> FilterDecision:
         """评估一个待保存的 value 是否值得持久化。
 
@@ -92,6 +93,10 @@ class MemoryFilter:
             value: 待保存的记忆值。
             bypass: 显式豁免评估（如已有"高 confidence"记忆更新），
                 ``True`` 时直接放行。默认 ``False``。
+            user_context: 最近用户消息摘要（可空）。填了之后 Judge 能看到
+                用户的真实意图，避免把"用户明确要求写入的具体字符串"
+                误判为"完全没有回答问题"。建议 1-3 条 HumanMessage 的
+                ``content`` 用换行串接，单条截断到 500 字。
 
         Returns:
             :class:`FilterDecision`，含 allow / score / reason / bypassed。
@@ -104,8 +109,17 @@ class MemoryFilter:
                 bypassed=True,
             )
 
-        # 构造 question 给 judge：把 value 当作"待评估的事实"喂进去
-        question = "[记忆评估] 这条内容是否值得作为长期记忆持久化？"
+        # 构造 question 给 judge。把"用户最近消息 + 待写入内容"放 question，
+        # 让 :class:`RubricJudge` 的 user template 把它渲染到"用户问题："
+        # 那行；response 字段填 value 是为了同时让 Judge 看到待评估内容
+        # 独立成段、便于评分。
+        #
+        # WHY: 不传 user_context 时,旧版 question 写死"[记忆评估] 这条内容
+        # 是否值得作为长期记忆持久化?",而 response 又恰好是用户要求的写入
+        # 字符串(比如 "e2e_hitl_marker_2026")。Judge 看到的是"用户问是否
+        # 持久化 / 助手只回了一个标记串",FAITHFULNESS 维度直接 0.0,工具被
+        # 拒,WS 流提前结束,前端 HITL 批准后气泡空白。
+        question = _build_question(value, user_context)
         try:
             scores = await self.judge.judge(
                 question=question,
@@ -147,3 +161,23 @@ class MemoryFilter:
             score=score.score,
             reason=f"score {score.score:.2f} ≥ {self.min_score}",
         )
+
+
+def _build_question(value: str, user_context: str | None) -> str:
+    """构造喂给 :class:`RubricJudge` 的 question 字段。
+
+    把"用户原始意图 + 待写入内容"包成一段中文,让 Judge 看到完整故事
+    后按 faithfulness 维度评分。``user_context`` 缺失时退回到旧版写死
+    文案,行为保持兼容。
+    """
+    if user_context:
+        return (
+            "[记忆评估] 当前对话中用户最近的消息摘要如下,助手要按这些消息的"
+            "意图把对应内容写入长期记忆 AGENTS.md。\n\n"
+            f"【最近用户消息】\n{user_context}\n\n"
+            f"【待写入的新内容】\n{value}\n\n"
+            "请评估「待写入的新内容」是否合理地服务于上述用户意图(忠实度):"
+            "用户明确要写这个内容则 score=1.0;内容与用户意图完全无关/凭空"
+            "捏造则 score=0.0。"
+        )
+    return "[记忆评估] 这条内容是否值得作为长期记忆持久化？"

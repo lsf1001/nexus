@@ -13,7 +13,7 @@ import json
 
 import pytest
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from nexus.backend.llm.errors import ClassifiedError, LLMErrorKind
 from nexus.backend.quality.memory_filter import (
@@ -197,3 +197,201 @@ def test_memory_filter_is_frozen():
     filter_obj = MemoryFilter(judge=judge)
     with pytest.raises((AttributeError, Exception)):
         filter_obj.min_score = 0.5  # type: ignore[misc]
+
+
+# ==================== user_context 注入（C5 修复:HITL 批准后气泡空白）====================
+#
+# 根因：旧版 _build_question 写死"[记忆评估] 这条内容是否值得作为长期记忆持久化?",
+# Judge 看不到 user 原始意图,把"用户明确要求写入的具体字符串"(如
+# e2e_hitl_marker_2026)按 faithfulness 维度直接判 0.0,工具被拒,WS 流
+# 提前结束,HITL 批准后气泡空白。
+#
+# 修复：把最近 user 消息 + 待写入内容拼成 question,Judge 能看到完整意图。
+# 验证：传 user_context 时 judge.ainvoke 收到的 messages[1].content 必须
+# 同时包含 user 消息文本 + value;不传时退回旧版写死文案,行为兼容。
+
+
+class _CaptureLLM(_FakeLLM):
+    """把 ainvoke 收到的 messages 全部记下来,供断言用。
+
+    WHY: _FakeLLM 只回固定 JSON,断言 question 拼接只能通过捕获 LLM 入参。
+    """
+
+    # Pydantic field,每个实例自己的 list(不共享)
+    captured_messages: list = []
+
+    async def ainvoke(self, input, config=None, stop=None, **kwargs) -> AIMessage:
+        # _respond() 增加 call_count,这里仅记录 input
+        self.captured_messages.append(input)
+        return AIMessage(content=await self._respond())
+
+
+def _make_capture_filter(
+    score: float = 0.9,
+    reasoning: str = "ok",
+) -> tuple[MemoryFilter, _CaptureLLM]:
+    """构造一个用 _CaptureLLM 的 filter,返回 (filter, llm 实例)。
+
+    之所以返回 llm 实例而不是 class:实例才能拿到自己的 captured_messages。
+    """
+    llm = _CaptureLLM(
+        response={"score": score, "reasoning": reasoning, "evidence": []},
+    )
+    judge = RubricJudge(llm=llm, rubrics=(FAITHFULNESS_RUBRIC,))
+    return MemoryFilter(judge=judge), llm
+
+
+@pytest.mark.asyncio
+async def test_user_context_injected_into_question():
+    """传 user_context 时,Judge 收到的 question 包含 user 消息 + value。
+
+    修复根因:旧版 Judge 看不到 user 意图 → 误判 0.0。
+    """
+    filter_obj, llm = _make_capture_filter(0.9)
+    user_msg = "请在 AGENTS.md 末尾追加 e2e_hitl_marker_2026"
+    await filter_obj.check(value="e2e_hitl_marker_2026", user_context=user_msg)
+
+    # Judge 调了 1 次
+    assert llm.captured_messages, "Judge 没被调用"
+    # _build_messages 模板: system=rubric.prompt, user=user_body
+    messages = llm.captured_messages[0]
+    user_body = messages[1].content  # type: ignore[union-attr]
+    assert user_msg in user_body, f"user 消息未注入 question: {user_body}"
+    assert "e2e_hitl_marker_2026" in user_body, f"value 未注入 question: {user_body}"
+
+
+@pytest.mark.asyncio
+async def test_no_user_context_falls_back_to_legacy_question():
+    """不传 user_context 时,question 退回旧版写死文案,行为兼容。"""
+    filter_obj, llm = _make_capture_filter(0.9)
+    await filter_obj.check(value="some_value")
+
+    messages = llm.captured_messages[0]
+    user_body = messages[1].content  # type: ignore[union-attr]
+    # 旧版写死文案在 question 字段
+    assert "[记忆评估]" in user_body
+    # 旧版没有 "最近用户消息" 段
+    assert "最近用户消息" not in user_body
+
+
+@pytest.mark.asyncio
+async def test_user_context_bypass_still_skips_judge():
+    """bypass=True 仍然短路,bypass 优先级最高,user_context 不影响。"""
+    filter_obj, llm = _make_capture_filter(0.0)
+    decision = await filter_obj.check(
+        value="x",
+        bypass=True,
+        user_context="无论传什么都被豁免",
+    )
+    assert decision.allow is True
+    assert decision.bypassed is True
+    # judge 没被调
+    assert llm.captured_messages == []
+
+
+def test_build_question_includes_user_and_value():
+    """_build_question 直接断言:user 消息和 value 都进 question 字段。"""
+    from nexus.backend.quality.memory_filter import _build_question
+
+    q = _build_question("hello world", "用户说写 hello world")
+    assert "用户说写 hello world" in q
+    assert "hello world" in q
+    assert "待写入的新内容" in q
+
+
+def test_build_question_none_context_legacy_string():
+    """user_context=None 时退回旧版写死文案。"""
+    from nexus.backend.quality.memory_filter import _build_question
+
+    q = _build_question("x", None)
+    assert "是否值得作为长期记忆持久化" in q
+
+
+# ==================== QualityGateMiddleware._extract_user_context ====================
+
+
+def test_extract_user_context_empty_state_returns_none():
+    """state 不是 dict / messages 空 → 返回 None(filter 退回旧版)。"""
+    from nexus.backend.quality.middleware import QualityGateMiddleware
+
+    mw = QualityGateMiddleware(
+        filter=_make_filter(0.9),  # 不会真调
+        protected_paths=("/tmp/dummy",),
+    )
+    assert mw._extract_user_context(None) is None
+    assert mw._extract_user_context({}) is None
+    assert mw._extract_user_context({"messages": []}) is None
+    assert mw._extract_user_context({"messages": "not a list"}) is None
+
+
+def test_extract_user_context_picks_humans_only():
+    """只取 HumanMessage,跳过 AIMessage / ToolMessage。"""
+    from nexus.backend.quality.middleware import QualityGateMiddleware
+
+    mw = QualityGateMiddleware(
+        filter=_make_filter(0.9),
+        protected_paths=("/tmp/dummy",),
+    )
+    state = {
+        "messages": [
+            HumanMessage(content="第一条 user"),
+            AIMessage(content="第一条 ai"),
+            ToolMessage(content="tool 结果", tool_call_id="1"),
+            HumanMessage(content="第二条 user"),
+            HumanMessage(content="第三条 user"),
+        ]
+    }
+    ctx = mw._extract_user_context(state)
+    assert ctx is not None
+    assert "第一条 user" in ctx
+    assert "第二条 user" in ctx
+    assert "第三条 user" in ctx
+    # ai / tool 内容不进 user context
+    assert "第一条 ai" not in ctx
+    assert "tool 结果" not in ctx
+
+
+def test_extract_user_context_truncates_long_content():
+    """单条超过 500 字 / 总长超过 1500 字 → 截断标注。"""
+    from nexus.backend.quality.middleware import QualityGateMiddleware
+
+    mw = QualityGateMiddleware(
+        filter=_make_filter(0.9),
+        protected_paths=("/tmp/dummy",),
+    )
+    long_msg = "x" * 2000
+    state = {"messages": [HumanMessage(content=long_msg)]}
+    ctx = mw._extract_user_context(state)
+    assert ctx is not None
+    assert "已截断" in ctx
+    # 截断后不会包含全部 2000 个 x
+    assert ctx.count("x") < 2000
+
+
+def test_extract_user_context_window_limit():
+    """只取最近 3 条 HumanMessage,更早的忽略。"""
+    from nexus.backend.quality.middleware import QualityGateMiddleware
+
+    mw = QualityGateMiddleware(
+        filter=_make_filter(0.9),
+        protected_paths=("/tmp/dummy",),
+    )
+    state = {
+        "messages": [
+            HumanMessage(content="old-1"),
+            HumanMessage(content="old-2"),
+            HumanMessage(content="old-3"),
+            HumanMessage(content="new-1"),
+            HumanMessage(content="new-2"),
+            HumanMessage(content="new-3"),
+            HumanMessage(content="new-4"),  # 第 7 条
+        ]
+    }
+    ctx = mw._extract_user_context(state)
+    assert ctx is not None
+    # new-1/2/3/4 中只取最近 3 条(new-2/3/4)
+    assert "new-1" not in ctx
+    assert "new-2" in ctx
+    assert "new-3" in ctx
+    assert "new-4" in ctx
+    assert "old-" not in ctx
