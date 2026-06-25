@@ -209,6 +209,13 @@ class TestCreateSubagentsPolicies:
 class TestCreateAgentIntegration:
     """``create_agent`` 把 ``ResilientRunnable`` 喂给 deepagents，不应再崩溃。"""
 
+    # 契约只验 model= 是不是 ResilientRunnable,后端是 sqlite 还是 memory 都不影响。
+    # 强制走 memory 避开 aiosqlite 后台线程 + sync sqlite3 同库持锁死锁。
+    @pytest.fixture(autouse=True)
+    def _disable_sqlite_backends(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEXUS_STORE", "memory")
+        monkeypatch.setenv("NEXUS_CHECKPOINTER", "memory")
+
     def test_create_agent_uses_resilient_llm(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """端到端：``get_llm`` 包装后的 ``ResilientRunnable`` 作为 ``create_deep_agent`` 的 model 传入。
 

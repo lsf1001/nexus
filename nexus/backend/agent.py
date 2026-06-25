@@ -818,6 +818,16 @@ def create_agent(
     else:
         llm = get_llm(model_name, api_key, api_base, temperature)
 
+    # 顺序敏感：**先 checkpointer 再 store**。
+    # _create_checkpointer() 走 sync sqlite3 + 同步 DDL(``_ensure_sqlite_checkpoint_tables``),
+    # 调完就关连接、不留后台线程。_create_store() 走 aiosqlite,内部 ``asyncio.run``
+    # 起一个 loop、``AsyncSqliteStore.setup()`` 在 loop 内 DDL 后 aiosqlite 连接
+    # 保持打开(WAL 模式持写锁直到连接关)。如果先 store 再 checkpointer,aiosqlite
+    # 的 WAL 写锁会让后续 sync sqlite3 的 DDL 直接 OperationalError: database is
+    # locked(同库双连接,busy_timeout 也救不了,aiosqlite 持锁期间 sync 必失败)。
+    # 倒过来：sync DDL 一次性完成,aiosqlite 后开连接不复用锁。
+    checkpointer = _create_checkpointer()
+
     # 持久化 store:挂 /memories/ 路由供 LLM 跨 session 读写。
     # SqliteStore 把数据落 ~/.nexus/nexus.db,跟 checkpoint 同一库 —
     # 跨进程 / 跨重启存活(InMemoryStore 只在进程内,重启丢光)。
@@ -857,13 +867,7 @@ def create_agent(
         protected_paths=tuple(str(p) for p in resolve_protected_paths(project_root)),
     )
 
-    # HITL 桥接:必须配 checkpointer,否则 ``Command(resume=...)`` 无法找回
-    # 挂起的图状态(WS 层 confirmation_response 续流依赖它)。SqliteSaver
-    # 把 checkpoint 写到 ``nexus.db``(NEXUS_DB_PATH 可覆盖),跨进程存活
-    # —— 用户发 confirmation_response 时即使用户进程重启了,新进程也能
-    # 找回挂起的图状态继续走。``NEXUS_CHECKPOINTER=memory`` 退回 in-process
-    # 模式(单测 / 临时场景)。
-    checkpointer = _create_checkpointer()
+    # ``checkpointer`` 已在上面 _create_store() 之前构造(顺序敏感,见那段注释)。
 
     agent = create_deep_agent(
         model=llm,

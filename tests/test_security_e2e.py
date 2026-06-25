@@ -103,56 +103,65 @@ def test_is_write_to_protected_path_3_agents_md_paths() -> None:
 
 
 def test_interrupt_on_preserves_allowlist() -> None:
-    """interrupt_on 谓词对白名单内路径返回 False(放行,layer 1 接管)。
+    """``permissions`` allow 规则覆盖 .nexus/ + /tmp/,白名单内写不触发 HITL。
 
-    WHY:生产中 deepagents 框架传给 ``when`` 的 ``target_path`` 是已经
-    ``.expanduser().resolve()`` 过的绝对路径(macOS 上 ``/tmp`` →
-    ``/private/tmp`` 等 symlink 也已解开)。本测试必须传入 resolve 后的
-    字符串才能命中 ``allowed_patterns``,否则会因 ``tempfile`` 的
-    ``/var/folders`` vs ``/private/var/folders`` 误触发 HITL。
+    新架构:interrupt_on 由 deepagents 从 ``mode="interrupt"`` 派生;
+    ``mode="allow"`` 规则直接放行(LLM 可写)。本测试守住 allow 规则
+    覆盖 .nexus/ + /tmp/ 的不变量,防止未来重构把白名单漏掉导致
+    LLM 写配置/日志时也被 HITL 拦下。
     """
-    from nexus.backend.agent import build_interrupt_on_for_agent
-
-    # 用 tempfile 临时目录(实际在 /var/folders/... 避开 /tmp 误匹配)
     with tempfile.TemporaryDirectory() as td:
         project_root = Path(td).expanduser().resolve()
-        cfg = build_interrupt_on_for_agent(project_root)
-        when = cfg["write_file"]["when"]
-
-        # .nexus/ 写应放行(白名单)——用 resolve 后的路径,匹配生产行为
-        nexus_path = str((project_root / ".nexus" / "x.md").resolve())
-        req_nexus = {"tool_call": {"args": {"file_path": nexus_path}}}
-        assert when(req_nexus) is False, f".nexus/ 写应放行({nexus_path})"
-
-        # 受保护 AGENTS.md 写交给 layer 1(放行让 FilesystemPermission interrupt 接管)
-        protected_abs = [str(p) for p in resolve_protected_paths(project_root)]
-        for p in protected_abs:
-            req = {"tool_call": {"args": {"file_path": p}}}
-            assert when(req) is False, f"AGENTS.md 路径 {p} 应交给 layer 1 接管"
+        perms = build_default_permissions(project_root)
+        allow_write_rules = [p for p in perms if "write" in p.operations and p.mode == "allow"]
+        assert allow_write_rules, "应至少 1 条 allow-write 规则"
+        # .nexus/ 必须被 allow 规则覆盖(用户级 + 项目级都允许写)
+        all_allowed_paths = [path for rule in allow_write_rules for path in rule.paths]
+        nexus_allowed = any(".nexus/**" in p for p in all_allowed_paths)
+        assert nexus_allowed, f".nexus/** 应在 allow 规则中,实际: {all_allowed_paths}"
 
 
 def test_interrupt_on_blocks_project_source() -> None:
-    """interrupt_on 谓词对项目内非白名单源码路径返回 True(触发 HITL)。"""
-    from nexus.backend.agent import build_interrupt_on_for_agent
+    """``permissions`` interrupt 规则覆盖受保护 AGENTS.md,非白名单项目源码默认 allow。
 
+    新架构下,deepagents 的 FilesystemPermission 行为是:
+    - 命中 mode="allow" → 放行
+    - 命中 mode="interrupt" → 弹 HITL
+    - 未命中 → 默认 allow(deny-by-default 禁用,详见 permissions.py 设计原则)
+
+    所以"项目源码"在 allow 规则**不**覆盖的情况下默认 allow,而不是触发 HITL。
+    真正会触发 HITL 的只有 mode="interrupt" 规则明确列出的路径(3 处 AGENTS.md)。
+    本测试验证这层"默认 allow + interrupt 显式列"的语义。
+    """
     with tempfile.TemporaryDirectory() as td:
         project_root = Path(td)
-        cfg = build_interrupt_on_for_agent(project_root)
-        when = cfg["write_file"]["when"]
-
-        # 项目源码路径(不是 .nexus/ 不是 /tmp/)
-        src_path = str((project_root / "nexus" / "foo.py").resolve())
-        req = {"tool_call": {"args": {"file_path": src_path}}}
-        assert when(req) is True, f"项目源码 {src_path} 应触发 HITL"
+        perms = build_default_permissions(project_root)
+        interrupt_rules = [p for p in perms if p.mode == "interrupt"]
+        assert interrupt_rules, "应至少 1 条 interrupt 规则"
+        # 全部 interrupt 路径必须是 3 处 AGENTS.md 之一(非源码路径)
+        all_interrupt_paths = [path for rule in interrupt_rules for path in rule.paths]
+        protected_abs = [str(p) for p in resolve_protected_paths(project_root)]
+        for ip in all_interrupt_paths:
+            assert any(ip == p for p in protected_abs), (
+                f"interrupt 规则路径 {ip} 不在受保护 AGENTS.md 列表 {protected_abs} 中 — "
+                "可能把普通源码路径错配为 interrupt 了,会误伤 LLM 改源码"
+            )
 
 
 def test_interrupt_on_covers_write_file_and_edit_file() -> None:
-    """interrupt_on 配置必须同时覆盖 write_file 和 edit_file。"""
-    from nexus.backend.agent import build_interrupt_on_for_agent
+    """``permissions`` interrupt 规则的 ``operations`` 必须含 ``"write"``,
+    deepagents 才会把它同时映射到 write_file / edit_file 两个工具。
 
-    cfg = build_interrupt_on_for_agent(Path("/tmp/proj"))
-    assert "write_file" in cfg, "应覆盖 write_file"
-    assert "edit_file" in cfg, "应覆盖 edit_file"
-    # 两者 when 谓词都应是 callable
-    assert callable(cfg["write_file"]["when"]), "write_file.when 应为 callable"
-    assert callable(cfg["edit_file"]["when"]), "edit_file.when 应为 callable"
+    WHY:deepagents 的 FilesystemPermission 用 ``operations`` 字段做"操作类型
+    匹配",``["write"]`` 覆盖 write_file 和 edit_file(两个写工具)。如果
+    写成 ``["write_file"]`` 之类单工具名,edit_file 不会触发 interrupt。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        project_root = Path(td)
+        perms = build_default_permissions(project_root)
+        interrupt_rules = [p for p in perms if p.mode == "interrupt"]
+        assert interrupt_rules, "应至少 1 条 interrupt 规则"
+        for rule in interrupt_rules:
+            assert "write" in rule.operations, (
+                f"interrupt 规则的 operations 必须含 'write' 才能覆盖 write_file/edit_file, 实际: {rule}"
+            )

@@ -65,6 +65,14 @@ class TestBuildSystemPromptSlim:
 class TestCreateAgentWiresDeepAgentsMemory:
     """``create_agent`` 把 ``memory=`` / ``store=`` / ``middleware=`` 正确传给 deepagents。"""
 
+    # 4 个契约测试都打 ``create_agent`` 但不想真去起 AsyncSqliteStore / AsyncSqliteSaver
+    # (那俩会在同库上开 aiosqlite 后台线程持 WAL 写锁,跟 conftest 的 sync sqlite3
+    # 撞锁 → 整个测试 hang)。契约只验 deepagents 收到什么 kwarg,后端用 memory 即可。
+    @pytest.fixture(autouse=True)
+    def _disable_sqlite_backends(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEXUS_STORE", "memory")
+        monkeypatch.setenv("NEXUS_CHECKPOINTER", "memory")
+
     def test_memory_kwarg_contains_agents_md_paths(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
         from nexus.backend.agent import create_agent

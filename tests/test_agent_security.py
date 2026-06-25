@@ -1,10 +1,20 @@
-"""agent 构造应启用 FilesystemPermission + interrupt_on。"""
+"""agent 构造应启用 FilesystemPermission + interrupt_on。
+
+新架构(2026-06-24 之后):``interrupt_on`` 不再手动构造,而是让 deepagents
+从 ``permissions`` mode="interrupt" 规则自动派生。测试现在验证
+``create_agent`` 透传的 ``permissions`` 是否包含正确的 allow + interrupt
+规则 — 这是触发 HITL 的真正入口。
+"""
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from nexus.backend.agent import build_interrupt_on_for_agent
+import pytest
+
 from nexus.backend.permissions import build_default_permissions, resolve_protected_paths
 
 
@@ -16,10 +26,19 @@ def test_agent_includes_filesystem_permissions() -> None:
 
 
 def test_interrupt_on_covers_write_tools() -> None:
-    """interrupt_on 配置必须覆盖 write_file 和 edit_file。"""
-    cfg = build_interrupt_on_for_agent(Path("/tmp/proj"))
-    assert "write_file" in cfg
-    assert "edit_file" in cfg
+    """``permissions`` 必须含 mode="interrupt" 规则,且覆盖 write_file 工具集。
+
+    WHY:deepagents 从 mode="interrupt" 规则自动派生 ``interrupt_on``。
+    规则必须在 ``operations`` 列表里包含 ``"write"``(覆盖 write_file / edit_file
+    两个写工具)才会在 deepagents 中触发 HITL。
+    """
+    perms = build_default_permissions(Path("/tmp/proj"))
+    interrupt_perms = [p for p in perms if p.mode == "interrupt"]
+    assert interrupt_perms, "至少 1 条 interrupt 规则"
+    # 每条 interrupt 规则都必须含 write 操作(deepagents 把 write 映射到
+    # write_file / edit_file 两个工具的 interrupt_on)
+    for rule in interrupt_perms:
+        assert "write" in rule.operations, f"interrupt 规则必须覆盖 write 操作: {rule}"
 
 
 def test_resolve_protected_paths_covers_all_agents_md() -> None:
@@ -36,44 +55,40 @@ def test_resolve_protected_paths_covers_all_agents_md() -> None:
     assert any("nexus/.deepagents/AGENTS.md" in p for p in str_paths), "应覆盖项目级 nexus/.deepagents/AGENTS.md"
 
 
-def test_interrupt_on_when_dict_request_unpacks_correctly() -> None:
-    """when 谓词必须能从 dict-shaped request 里正确解出 file_path(回归测试)。
+def test_create_agent_passes_interrupt_permissions_to_deepagents() -> None:
+    """``create_agent`` 必须把 ``permissions`` 透传给 ``create_deep_agent``。
 
-    WHY: f86f2db 的 ``when_write_file`` 用了 ``hasattr(req, "tool_call")`` 判断,
-    而测试/框架传的 req 是 ``dict``(有 ``tool_call`` key,不是 attribute),结果
-    ``hasattr`` 恒为 False → ``tc = req`` → ``args = req.get("args", {})`` 拿空
-    dict → ``file_path = ""`` → ``_should_interrupt("")`` 必返回 True(强制 HITL),
-    屏蔽了下游所有逻辑(包括 symlink fix 后的白名单匹配)。
-
-    本测试用 4 类场景守住解包后的判定语义。
+    新架构下,deepagents 看到 ``mode="interrupt"`` 规则就自动给
+    write_file / edit_file 装上 interrupt_on 谓词。Nexus 这一侧
+    不需要再手写 when 函数,只要保证透传即可。
     """
-    cfg = build_interrupt_on_for_agent(Path("/tmp/proj"))
-    when = cfg["write_file"]["when"]
-
-    def _call(file_path: str) -> bool:
-        return when({"tool_call": {"args": {"file_path": file_path}}})
-
-    # 1. 写 .nexus/ 下任意文件 → 不应 interrupt(白名单放行)
-    assert _call("/tmp/proj/.nexus/foo.md") is False, "白名单 .nexus/ 必须放行"
-    # 2. 写 .nexus/AGENTS.md(protected) → 不 interrupt(由 layer 1 接管)
-    pps = [str(p) for p in resolve_protected_paths(Path("/tmp/proj"))]
-    assert _call(pps[1]) is False, "受保护 AGENTS.md 必须放行让 layer 1 接管"
-    # 3. 写 /tmp/scratch.md → 不 interrupt(/tmp/ 白名单)
-    assert _call("/tmp/scratch.md") is False, "/tmp/ 白名单必须放行"
-    # 4. 写项目内源码(nexus/foo.py,resolve 后路径) → 必须 interrupt
-    # 注:必须用 resolve 后的绝对路径,因为白名单还有 `^/tmp/`(设计:整个 /tmp/ 任意
-    # 路径都允许写,如 /tmp/scratch.md;但 /private/tmp/.../nexus/foo.py 不会被此
-    # pattern 误命中 → 走 interrupt 判定)。
-    import tempfile
-
+    # 契约测试:避免真起 AsyncSqliteStore/AsyncSqliteSaver(同库持锁)
     with tempfile.TemporaryDirectory() as td:
         project_root = Path(td)
-        cfg = build_interrupt_on_for_agent(project_root)
-        when = cfg["write_file"]["when"]
-        resolved_src = str((project_root / "nexus" / "foo.py").resolve())
-        # 白名单放过 .nexus/ 与 /tmp/(顶层),但 nexus/foo.py 在 /private/...
-        # 不会被这两个 pattern 命中 → 必须 interrupt
-        result = when({"tool_call": {"args": {"file_path": resolved_src}}})
-        assert result is True, f"项目源码 {resolved_src} 必须触发 HITL,got {result}"
-    # 5. 空 file_path → 保守 interrupt(强制 HITL)
-    assert _call("") is True, "空 file_path 必须强制 HITL"
+        os.environ["NEXUS_HOME"] = str(project_root / ".nexus")
+        os.environ["NEXUS_STORE"] = "memory"
+        os.environ["NEXUS_CHECKPOINTER"] = "memory"
+        os.environ["MINIMAX_API_KEY"] = "test-key"
+        try:
+            from nexus.backend.agent import create_agent
+
+            with patch("deepagents.create_deep_agent") as mock_create:
+                mock_create.return_value = MagicMock()
+                create_agent(
+                    model_name="m",
+                    api_key="k",
+                    api_base="https://x",
+                )
+                kwargs = mock_create.call_args.kwargs
+                assert "permissions" in kwargs, "permissions kwarg 缺失 — deepagents 不会派生 interrupt_on"
+                permissions = kwargs["permissions"]
+                interrupt_rules = [p for p in permissions if p.mode == "interrupt"]
+                assert interrupt_rules, "至少需要 1 条 mode='interrupt' 规则触发 HITL"
+                # 每条 interrupt 规则必须含 write(覆盖 write_file / edit_file)
+                for rule in interrupt_rules:
+                    assert "write" in rule.operations, (
+                        f"interrupt 规则必须覆盖 write 操作(派生 write_file/edit_file 的 interrupt_on): {rule}"
+                    )
+        finally:
+            for k in ("NEXUS_HOME", "NEXUS_STORE", "NEXUS_CHECKPOINTER", "MINIMAX_API_KEY"):
+                os.environ.pop(k, None)

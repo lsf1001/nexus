@@ -48,6 +48,9 @@ class TestCreateAgentCheckpointer:
         """``NEXUS_CHECKPOINTER=memory`` 时退化到 MemorySaver(给单测 / 临时场景)。"""
         monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
         monkeypatch.setenv("NEXUS_CHECKPOINTER", "memory")
+        # 必须把 store 也切到 memory,否则默认 AsyncSqliteStore 跟 conftest 的
+        # sync sqlite3 同库持锁,create_agent() 在 _create_store() 阶段死锁。
+        monkeypatch.setenv("NEXUS_STORE", "memory")
 
         from langgraph.checkpoint.memory import MemorySaver
 
