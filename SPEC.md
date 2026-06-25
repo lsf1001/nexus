@@ -74,8 +74,36 @@ nexus/                 # 仓库根
 ### Agent (agent.py)
 
 - `create_agent()` - 创建 DeepAgents Agent
-- `create_subagents()` - 子代理（code_writer, researcher）
+- `create_subagents()` - 子代理（code_writer, researcher + 可选 AsyncSubAgent / CompiledSubAgent）
 - `get_llm()` - LLM 实例创建
+- `_create_store()` - langgraph Store（默认 AsyncSqliteStore 持久化,可切 InMemoryStore）
+- `_create_checkpointer()` - langgraph checkpointer（默认 AsyncSqliteSaver,可切 MemorySaver）
+- `_select_filesystem_backend()` - 选 backend（FilesystemBackend / LocalShellBackend / LangSmithSandbox / ContextHubBackend）
+- `_ensure_registered()` - 注册 Nexus 的 ProviderProfile + HarnessProfile（minimax / minimax:MiniMax-M3）
+
+#### DeepAgents 0.6.8 模块集成清单
+
+| 模块 | 状态 | 入口 / 触发 |
+| --- | --- | --- |
+| `FilesystemBackend` | 默认 | `_select_filesystem_backend()` 默认分支 |
+| `LocalShellBackend` | env-gated | `NEXUS_ENABLE_EXEC=1` |
+| `LangSmithSandbox` | env-gated | `NEXUS_EXEC_BACKEND=langsmith` + `NEXUS_LANGSMITH_SANDBOX_NAME=<name>` |
+| `ContextHubBackend` | env-gated | `NEXUS_EXEC_BACKEND=context_hub` + `NEXUS_CONTEXT_HUB_ID=<owner/name>` |
+| `AsyncSqliteStore` | 默认 | `_create_store()` 默认分支 |
+| `InMemoryStore` | 可选 | `NEXUS_STORE=memory` |
+| `AsyncSqliteSaver` | 默认 | `_create_checkpointer()` 默认分支 |
+| `MemorySaver` | 可选 | `NEXUS_CHECKPOINTER=memory` |
+| `ProviderProfile` (minimax) | 默认 | `register_nexus_profiles()` |
+| `HarnessProfile` + `GeneralPurposeSubagentProfile` | 默认 | `register_nexus_profiles()` |
+| `AsyncSubAgent` (LangGraph Platform) | env-gated | `NEXUS_ASYNC_SUBAGENTS_JSON=[...]` |
+| `CompiledSubAgent` (任意 Runnable) | env-gated | `NEXUS_COMPILED_SUBAGENTS_JSON=[...]` |
+| `SkillsMiddleware` + `SKILL.md` | 默认 | `.nexus/skills/<name>/SKILL.md` |
+| `MemoryMiddleware` + AGENTS.md | 默认 | `make_memory_paths()`(用户级 + 项目级) |
+
+⚠️ **execution backend 警告**:LocalShellBackend / LangSmithSandbox / ContextHubBackend 让
+LLM 可以执行 shell / 远程代码。deepagents 0.6.8 的 FilesystemMiddleware 不支持同时配
+permissions 和 execution backend(框架会主动禁用 permissions)。生产建议禁用,
+本地开发 / CI 测试按需开启。
 
 ### WebSocket (main.py)
 

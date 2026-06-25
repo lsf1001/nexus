@@ -298,6 +298,54 @@ def _make_async_saver_close_fn(conn: Any) -> Any:
     return lambda: _close_async_conn_sync(conn)
 
 
+def _create_store() -> Any:
+    """创建 langgraph Store — 给 ``/memories/`` 路由挂的 StoreBackend 用。
+
+    选型:
+      - ``NEXUS_STORE=memory`` → ``InMemoryStore``(in-process,单测用)
+      - 默认 → ``AsyncSqliteStore``(写 ``~/.nexus/nexus.db``,跨进程持久)
+
+    WHY 默认 Sqlite:LLM 写到 ``/memories/`` 路径的临时记忆(用户偏好 / 项目
+    约定 / 中间结果)跨进程 / 跨重启存活,跟 checkpoint 同寿命。
+    InMemoryStore 重启丢光,等于"用户偏好每次重启都得重写"。
+
+    WHY AsyncSqliteStore:deepagents 0.6.8 的 StoreBackend 走 async 路径
+    (astream_events),同步 SqliteStore 会抛 ``NotImplementedError``。
+    """
+    import os as _os
+
+    backend = _os.environ.get("NEXUS_STORE", "sqlite").lower()
+    if backend == "memory":
+        from langgraph.store.memory import InMemoryStore
+
+        return InMemoryStore()
+
+    from langgraph.store.sqlite.aio import AsyncSqliteStore
+
+    db_path = _os.environ.get("NEXUS_DB_PATH") or str(Path.home() / ".nexus" / "nexus.db")
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+
+    # AsyncSqliteStore.__init__ 调 ``asyncio.get_running_loop()`` 捕获循环
+    # → 必须在 loop 内实例化。把 connect + 实例化都包进 ``asyncio.run`` 闭包,
+    # loop 退出时 store 已持有 ``loop`` 引用(跟 AsyncSqliteSaver 一致)。
+    import asyncio as _asyncio
+
+    import aiosqlite
+
+    async def _build_async_store() -> Any:
+        c = await aiosqlite.connect(db_path)
+        store = AsyncSqliteStore(c)
+        await store.setup()  # noqa: ERA001 - langgraph 公共 API
+        return store, c
+
+    store, conn = _asyncio.run(_build_async_store())
+    # 注册 atexit 关连接(aiosqlite.Connection.close 是 async,走 asyncio.run)
+    import atexit  # noqa: PLC0415 - 延迟到函数内 import,跟随 _create_checkpointer 风格
+
+    atexit.register(_close_async_conn_sync, conn)
+    return store
+
+
 def _create_checkpointer() -> Any:
     """创建 langgraph checkpointer(HITL 续流 / 跨 turn 状态必备)。
 
@@ -360,11 +408,83 @@ def _create_checkpointer() -> Any:
     return saver
 
 
+def _select_filesystem_backend(project_root: Path) -> Any:
+    """根据 ``NEXUS_ENABLE_EXEC`` / ``NEXUS_EXEC_BACKEND`` env 选 backend。
+
+    选项:
+      - 默认(``NEXUS_ENABLE_EXEC`` 未设):``FilesystemBackend``(无 execute 工具)
+      - ``NEXUS_ENABLE_EXEC=1``:``LocalShellBackend``(本地执行,无 HITL)
+      - ``NEXUS_EXEC_BACKEND=langsmith``:``LangSmithSandbox``(远程沙箱,需 LANGSMITH_API_KEY)
+      - ``NEXUS_EXEC_BACKEND=context_hub``:``ContextHubBackend``(LangSmith Hub repo)
+
+    WHY env-gated:LangSmithSandbox / ContextHubBackend 都依赖 LangSmith 账号
+    + 配额,生产默认关。只在本地开发 / 评测场景按需启用。
+
+    ⚠️ 所有 execution backend 都跟 FilesystemPermission 互斥(deepagents 0.6.8
+    框架限制,源码 ``filesystem.py:737-744``)。开启 = LLM 写源码不再触发
+    HITL,源码侧由 confirmation 层兜底。
+    """
+    import os as _os
+
+    backend_name = _os.environ.get("NEXUS_EXEC_BACKEND", "").lower()
+    enable_exec = _os.environ.get("NEXUS_ENABLE_EXEC", "").lower() in {"1", "true", "yes"}
+
+    if backend_name == "langsmith":
+        from deepagents.backends.langsmith import LangSmithSandbox
+        from langsmith.sandbox import Sandbox  # langsmith SDK 已装(deepagents 间接依赖)
+
+        # LangSmithSandbox 需要一个已启动的 Sandbox 实例。SDK 不暴露
+        # ``Sandbox.create`` 同步工厂,只有 ``reconnect(name)`` 拉已存在沙箱。
+        # 真正启用流程:用户在 LangSmith 控制台建好 sandbox → 设
+        # ``NEXUS_LANGSMITH_SANDBOX_NAME=xxx`` → Nexus 启动期 reconnect 拉回
+        # 句柄。不在 Nexus 启动期阻塞拉新容器(避免配额 + 几十秒阻塞)。
+        sandbox_name = _os.environ.get("NEXUS_LANGSMITH_SANDBOX_NAME")
+        if not sandbox_name:
+            raise ValueError("NEXUS_EXEC_BACKEND=langsmith 必须配 NEXUS_LANGSMITH_SANDBOX_NAME=<已建好的沙箱名>")
+        sandbox = Sandbox.reconnect(name=sandbox_name)
+        logger.warning("NEXUS_EXEC_BACKEND=langsmith:LangSmithSandbox 已启用,沙箱名=%s", sandbox.name)
+        return LangSmithSandbox(sandbox=sandbox)
+
+    if backend_name == "context_hub":
+        from deepagents.backends.context_hub import ContextHubBackend
+
+        # ContextHubBackend 用 LangSmith Client + Hub agent repo("owner/name" 或 "-/name")。
+        # ``identifier`` 从 env 读;未设 → 抛错(强制用户显式配置)。
+        identifier = _os.environ.get("NEXUS_CONTEXT_HUB_ID")
+        if not identifier:
+            raise ValueError("NEXUS_EXEC_BACKEND=context_hub 必须配 NEXUS_CONTEXT_HUB_ID='owner/name' 或 '-/name'")
+        logger.warning("NEXUS_EXEC_BACKEND=context_hub:ContextHubBackend 已启用,hub=%s", identifier)
+        return ContextHubBackend(identifier=identifier)
+
+    if enable_exec:
+        from deepagents.backends.local_shell import LocalShellBackend
+
+        # inherit_env=True 让 LLM 看到 PATH 等环境变量(能找到 python / git 等)。
+        # max_output_bytes=100_000 防 LLM 一次 dump 巨大日志。
+        local = LocalShellBackend(
+            root_dir=project_root,
+            virtual_mode=False,
+            inherit_env=True,
+            max_output_bytes=100_000,
+        )
+        logger.warning(
+            "NEXUS_ENABLE_EXEC=1:LocalShellBackend 已启用,LLM 可调 execute 工具跑 shell;"
+            "FilesystemPermission 不生效(框架限制),源码 HITL 由用户在 confirmation 层兜底。"
+        )
+        return local
+
+    from deepagents.backends.filesystem import FilesystemBackend
+
+    return FilesystemBackend(root_dir=project_root, virtual_mode=False)
+
+
 def _create_backend(project_root: Path, *, store: BaseStore | None = None):
     """创建组合 backend。
 
     使用 CompositeBackend 组合多个 backend：
-    - FilesystemBackend: 真实文件系统访问
+    - FilesystemBackend: 真实文件系统访问(**默认,NEXUS_ENABLE_EXEC 未设**)
+    - LocalShellBackend: 文件 + shell 命令执行(``NEXUS_ENABLE_EXEC=1`` 时)
+    - LangSmithSandbox / ContextHubBackend: 远程沙箱(env-gated)
     - StateBackend: 状态管理（内存）
     - StoreBackend: 持久化存储（挂到 ``/memories/`` 路由）
 
@@ -379,13 +499,20 @@ def _create_backend(project_root: Path, *, store: BaseStore | None = None):
         跳过 → LLM 失去身份感。
         安全由 :class:`FilesystemPermission` + :class:`QualityGateMiddleware`
         在更上层兜底,此处不重复沙箱。
+
+    ⚠️ **execution backend 警告**:
+        LocalShellBackend / LangSmithSandbox / ContextHubBackend 让 LLM 可以
+        跑 shell / 远程代码。deepagents 0.6.8 的 FilesystemMiddleware
+        **不支持同时配 permissions 和 execution backend**(框架会主动禁用
+        permissions,源码 ``filesystem.py:737-744``)。开启 = LLM 写源码不再
+        触发 HITL,由用户自负风险。建议只在本地开发 / CI 测试环境开启,
+        生产禁用。
     """
     from deepagents.backends.composite import CompositeBackend
-    from deepagents.backends.filesystem import FilesystemBackend
     from deepagents.backends.state import StateBackend
     from deepagents.backends.store import StoreBackend
 
-    fs_backend = FilesystemBackend(root_dir=project_root, virtual_mode=False)
+    fs_backend = _select_filesystem_backend(project_root)
 
     routes: dict[str, Any] = {
         ".nexus/state/": StateBackend(),
@@ -433,7 +560,11 @@ def create_subagents(model=None):
             和描述，由调用方决定是否注入模型）。
 
     Returns:
-        SubAgent 列表，包含 ``code_writer`` 与 ``researcher``。
+        :class:`SubAgent` 列表，包含 ``code_writer`` 与 ``researcher``。
+
+        + 可选的 :class:`AsyncSubAgent` 配置(从环境变量 ``NEXUS_ASYNC_SUBAGENTS_JSON``
+        读取,JSON 数组格式)。没配就不返回 — AsyncSubAgent 需要外部 Agent Protocol
+        服务器,空配置不会误启用。
     """
     from .tools import TOOLS
 
@@ -476,7 +607,161 @@ def create_subagents(model=None):
         description="研究分析专家",
     )
 
-    return [code_writer, researcher]
+    result: list[Any] = [code_writer, researcher]
+
+    # ------------------------------------------------------------------
+    # AsyncSubAgent 可选集成(env-gated)
+    # ------------------------------------------------------------------
+    # WHY env-gated:AsyncSubAgent 需要一个跑 Agent Protocol 的远程服务器
+    # (LangGraph Platform 自托管或托管版)。没配服务器就启用会直接报错。
+    # 配置方式:``NEXUS_ASYNC_SUBAGENTS_JSON='[{"name":"x","description":"...",
+    # "url":"https://..."}]'``。
+    async_specs = _load_async_subagent_specs()
+    result.extend(async_specs)
+
+    # ------------------------------------------------------------------
+    # CompiledSubAgent 可选集成(env-gated)
+    # ------------------------------------------------------------------
+    # WHY env-gated:CompiledSubAgent 让用户塞任意 ``langchain_core.runnables.
+    # Runnable`` 进来(预编译的子图 / LangChain ``create_agent`` 实例 / 自定义
+    # graph)。需要保证 runnable 的 state schema 含 ``messages`` 键(框架要求,
+    # 否则结果回不来)。配置不当 = 启动失败 / 运行时炸,默认不启用。
+    # 配置方式:``NEXUS_COMPILED_SUBAGENTS_JSON='[{"name":"x","description":"...",
+    # "module_path":"my_pkg.my_module","factory":"build_my_agent"}]'``。
+    # ``factory`` 是 module 内的可调用,返回 ``Runnable`` 实例。
+    compiled_specs = _load_compiled_subagent_specs()
+    result.extend(compiled_specs)
+
+    return result
+
+
+def _load_compiled_subagent_specs() -> list[Any]:
+    """从 env 读取 CompiledSubAgent 配置(JSON),返回 :class:`CompiledSubAgent` 列表。
+
+    WHY 不默认启用:CompiledSubAgent 接受任意 ``Runnable``,用户必须保证:
+      - runnable 的 state schema 含 ``messages`` 键(框架硬要求)
+      - ``runnable.invoke({...})`` 能跑通(无 import 错误 / 无依赖缺失)
+
+    JSON 字段(对应 :class:`deepagents.CompiledSubAgent`):
+      - ``name`` (必填):subagent 唯一标识
+      - ``description`` (必填):主代理看到的描述
+      - ``module_path`` (必填):Python 模块路径,如 ``nexus.backend.my_agent``
+      - ``factory`` (必填):模块内的可调用名(返回 ``Runnable``)
+
+    加载失败时记 warning + 跳过该条;不让单条坏配置炸整个 ``create_agent``。
+
+    返回空列表 = 不附加 CompiledSubAgent,等价于只跑内置 SubAgent。
+    """
+    import importlib
+    import json as _json
+    import os as _os
+
+    from deepagents.middleware.subagents import CompiledSubAgent
+
+    raw = _os.environ.get("NEXUS_COMPILED_SUBAGENTS_JSON")
+    if not raw:
+        return []
+
+    try:
+        specs_raw = _json.loads(raw)
+    except _json.JSONDecodeError as exc:
+        logger.warning("NEXUS_COMPILED_SUBAGENTS_JSON 解析失败,已忽略: %s", exc)
+        return []
+
+    if not isinstance(specs_raw, list):
+        logger.warning("NEXUS_COMPILED_SUBAGENTS_JSON 必须是 JSON 数组,实际 %s", type(specs_raw).__name__)
+        return []
+
+    result: list[Any] = []
+    for entry in specs_raw:
+        if not isinstance(entry, dict):
+            logger.warning("CompiledSubAgent 配置项必须是 dict,跳过: %r", entry)
+            continue
+        required = {"name", "description", "module_path", "factory"}
+        missing = required - set(entry.keys())
+        if missing:
+            logger.warning("CompiledSubAgent 缺字段 %s,跳过: %r", missing, entry)
+            continue
+
+        try:
+            mod = importlib.import_module(str(entry["module_path"]))
+            factory = getattr(mod, str(entry["factory"]))
+            runnable = factory()
+        except (ImportError, AttributeError, TypeError, ValueError) as exc:
+            # ImportError:module 不存在;AttributeError:factory 名不存在;
+            # TypeError:factory 调用方式错(比如需要参数);ValueError:用户 factory 自己抛
+            logger.warning(
+                "CompiledSubAgent 加载失败(%s.%s): %s",
+                entry["module_path"],
+                entry["factory"],
+                exc,
+            )
+            continue
+
+        spec: CompiledSubAgent = {  # type: ignore[typeddict-item]
+            "name": str(entry["name"]),
+            "description": str(entry["description"]),
+            "runnable": runnable,
+        }
+        result.append(spec)
+        logger.info("CompiledSubAgent 已加载: %s -> %s.%s", entry["name"], entry["module_path"], entry["factory"])
+
+    return result
+
+
+def _load_async_subagent_specs() -> list[Any]:
+    """从 env 读取 AsyncSubAgent 配置(JSON),返回 :class:`AsyncSubAgent` 列表。
+
+    WHY 不默认启用:AsyncSubAgent 走 LangGraph SDK 连远程 Agent Protocol
+    服务器,需要 ``LANGGRAPH_API_KEY`` / 自托管 URL / headers 等额外配置。
+    没这些就跑不起来。
+
+    JSON 字段(对应 :class:`deepagents.AsyncSubAgent`):
+      - ``name`` (必填):subagent 唯一标识
+      - ``description`` (必填):主代理看到的描述
+      - ``url`` (可选):Agent Protocol server URL;缺省走 LangGraph Platform
+      - ``headers`` (可选 dict):自托管鉴权 headers
+
+    返回空列表 = 不附加 AsyncSubAgent,等价于只跑 sync SubAgent。
+    """
+    import json as _json
+    import os as _os
+
+    raw = _os.environ.get("NEXUS_ASYNC_SUBAGENTS_JSON")
+    if not raw:
+        return []
+
+    try:
+        specs_raw = _json.loads(raw)
+    except _json.JSONDecodeError as exc:
+        logger.warning("NEXUS_ASYNC_SUBAGENTS_JSON 解析失败,已忽略: %s", exc)
+        return []
+
+    if not isinstance(specs_raw, list):
+        logger.warning("NEXUS_ASYNC_SUBAGENTS_JSON 必须是 JSON 数组,实际 %s", type(specs_raw).__name__)
+        return []
+
+    from deepagents.middleware.async_subagents import AsyncSubAgent
+
+    result: list[Any] = []
+    for entry in specs_raw:
+        if not isinstance(entry, dict):
+            logger.warning("AsyncSubAgent 配置项必须是 dict,跳过: %r", entry)
+            continue
+        if "name" not in entry or "description" not in entry:
+            logger.warning("AsyncSubAgent 缺 name/description,跳过: %r", entry)
+            continue
+        # TypedDict 接受任何 dict,字段缺失会在运行时炸 — 这里先做基本校验
+        spec: AsyncSubAgent = {  # type: ignore[typeddict-item]
+            "name": str(entry["name"]),
+            "description": str(entry["description"]),
+        }
+        if "url" in entry:
+            spec["url"] = str(entry["url"])
+        if "headers" in entry and isinstance(entry["headers"], dict):
+            spec["headers"] = {str(k): str(v) for k, v in entry["headers"].items()}
+        result.append(spec)
+    return result
 
 
 def create_agent(
@@ -503,12 +788,19 @@ def create_agent(
         mcp_tools: MCP 服务器加载的工具列表
     """
     from deepagents import create_deep_agent
-    from langgraph.store.memory import InMemoryStore
 
     from .tools import TOOLS
 
     project_root = get_project_root()
     skills_dir = project_root / ".nexus" / "skills"
+
+    # 注册 Nexus 的 LLM provider / harness profiles(MiniMax-M3 + minimax family)。
+    # WHY 在 create_agent 入口调:deepagents 的 profile registry 是全局的,
+    # 必须在 create_deep_agent() 之前注册,否则它 resolve_model 时拿不到
+    # 我们的 init_kwargs / system_prompt_suffix。
+    from .profiles import _ensure_registered
+
+    _ensure_registered()
 
     # 合并 MCP 工具和内置工具
     all_tools = list(TOOLS)
@@ -526,9 +818,12 @@ def create_agent(
     else:
         llm = get_llm(model_name, api_key, api_base, temperature)
 
-    # 持久化 store：跨重启 AGENTS.md 是首选持久化层；
-    # 这里给 deepagents 框架一个 InMemoryStore 供 session 内临时数据。
-    store = InMemoryStore()
+    # 持久化 store:挂 /memories/ 路由供 LLM 跨 session 读写。
+    # SqliteStore 把数据落 ~/.nexus/nexus.db,跟 checkpoint 同一库 —
+    # 跨进程 / 跨重启存活(InMemoryStore 只在进程内,重启丢光)。
+    # WHY 选 SqliteStore(不是 InMemoryStore):AGENTS.md 之外的 LLM 临时记忆
+    # (用户偏好 / 项目约定 / 中间结果)跨进程共享,跟 checkpoint 同寿命。
+    store = _create_store()
 
     # 创建 backend（挂 StoreBackend 到 /memories/ 路由）
     backend = _create_backend(project_root, store=store)
