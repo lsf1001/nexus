@@ -1075,18 +1075,21 @@ async def handle_websocket(
             if not user_content:
                 continue
 
-            # 创建或获取会话
+            # 创建或获取会话。客户端可在 body 传 session_id(用于多轮/续传),
+            # 也可不传(让服务端自动分配)。无论谁给的 id,都需保证 sessions 表
+            # 里有该行,否则 add_message 会触发 FK constraint 失败。
+            # 旧实现只在 session_id is None 时才 create_session,导致客户端
+            # 传新 id 时直接 FK 失败 — 2026-06 E2E 用例 8/11 复现,详见 task #42。
+            from ..db import create_session, get_session
+
             new_session_created = False
             title = ""
+            client_supplied_id: str | None = None
             if session_id is None:
-                session_id = data.get("session_id")
-                if not session_id:
-                    from ..db import create_session
-
+                client_supplied_id = data.get("session_id")
+                if not client_supplied_id:
+                    # 客户端没传,服务端生成新 id
                     session_id = str(uuid.uuid4())
-                    # 用首条用户消息做 title（前 30 字）—— 否则侧边栏会
-                    # 显示 N 条"新会话"占位,用户找不到自己的对话。客户端
-                    # 也可显式传 title 字段覆盖(用于会话改名等场景)。
                     client_title = (data.get("title") or "").strip()
                     if client_title:
                         title = client_title
@@ -1097,6 +1100,22 @@ async def handle_websocket(
                             title = "新会话"
                     create_session(session_id, title=title, channel="main")
                     new_session_created = True
+                else:
+                    # 客户端传了 id,先用它,再 ensure DB 行存在
+                    session_id = client_supplied_id
+                    if get_session(session_id) is None:
+                        client_title = (data.get("title") or "").strip()
+                        if client_title:
+                            title = client_title
+                        else:
+                            cleaned = user_content.strip().replace("\n", " ")
+                            title = cleaned[:30] + ("…" if len(cleaned) > 30 else "")
+                            if not title:
+                                title = "新会话"
+                        create_session(session_id, title=title, channel="main")
+                        # 客户端用的 id 是新的(此前 DB 无),发 session_created
+                        # 让客户端拿回服务端认可的 title 字段
+                        new_session_created = True
 
             if new_session_created:
                 await websocket.send_json(

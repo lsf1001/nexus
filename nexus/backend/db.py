@@ -205,21 +205,39 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
 
 
 def create_session(session_id: str, title: str | None = None, channel: str = "main") -> dict:
-    """创建新会话。"""
+    """创建新会话(idempotent — 已存在则复用,避免 FK constraint)。
+
+    关键:客户端在 WS 首条消息 body 传 ``session_id``(用于多轮 / 续传)时,
+    服务端不能假设该 id 已存在于 sessions 表。早期实现用 ``INSERT`` 不带
+    OR IGNORE,直接覆盖客户端的 id 而不查存在性,后续 ``add_message`` 写
+    messages(session_id FK → sessions.id)会触发 FOREIGN KEY constraint
+    failed,WS 连接异常断开。
+
+    现改为 ``INSERT OR IGNORE``:已存在则不写,再 SELECT 拿回真实行
+    (title / channel 保留原值,新传入的 title 仅在新行生效)。
+
+    Returns:
+        实际写入或已存在的 sessions 行 dict。
+    """
     now = datetime.now().isoformat()
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO sessions (id, title, created_at, updated_at, channel) VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO sessions (id, title, created_at, updated_at, channel) "
+            "VALUES (?, ?, ?, ?, ?)",
             (session_id, title, now, now, channel),
         )
-        # 初始化会话统计(session_stats 表已删,2026-06 迁移到 deepagents AGENTS.md)
-        return {
-            "id": session_id,
-            "title": title,
-            "created_at": now,
-            "updated_at": now,
-            "channel": channel,
-        }
+        row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if row is None:
+            # 极端情况:INSERT OR IGNORE 因 UNIQUE 冲突跳过,但 SELECT 拿不到
+            # 行(理论上不应发生);回落到返回构造 dict
+            return {
+                "id": session_id,
+                "title": title,
+                "created_at": now,
+                "updated_at": now,
+                "channel": channel,
+            }
+        return dict(row)
 
 
 def get_session(session_id: str) -> dict | None:
