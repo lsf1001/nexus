@@ -13,8 +13,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from nexus.backend.permissions import build_default_permissions, resolve_protected_paths
 
 
