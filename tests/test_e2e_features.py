@@ -72,7 +72,13 @@ def _http():
 
 
 async def _ws_send_and_collect(content: str, *, timeout: float = TIMEOUT_S) -> dict:
-    """发一条 user 消息,收集所有事件,返回汇总。"""
+    """发一条 user 消息,收集所有事件,返回汇总。
+
+    HITL 自动 approve:在端到端测试里我们对用户发起的 prompt 默认信任何工具
+    调用(其它机制 — QualityGate / MemoryFilter — 仍然在服务端做内容忠实度
+    评估,挡住越权 / 注入内容)。不 auto-approve 会让所有"用户希望 LLM 写
+    AGENTS.md / 改源码"的 e2e 永远卡在 confirmation_request。
+    """
     async with websockets.connect(WS_URL, max_size=10 * 1024 * 1024) as ws:
         await ws.send(json.dumps({"type": "message", "content": content}))
         chunks: list[str] = []
@@ -82,6 +88,7 @@ async def _ws_send_and_collect(content: str, *, timeout: float = TIMEOUT_S) -> d
         final_text: str | None = None
         intents: list[str] = []
         event_types: list[str] = []
+        confirmations: list[dict] = []  # 记录出现过的 confirmation_request
 
         while True:
             raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
@@ -100,6 +107,20 @@ async def _ws_send_and_collect(content: str, *, timeout: float = TIMEOUT_S) -> d
                 final_text = ev.get("content")
             elif etype == "token_usage" and "intent" in ev:
                 intents.append(ev["intent"])
+            elif etype == "confirmation_request":
+                # 自动 approve — 端到端测试默认信任 user prompt 触发的工具调用。
+                # QualityGate 仍会在写受保护路径时做忠实度评估,挡住真实恶意/越权。
+                confirmations.append(ev)
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "confirmation_response",
+                            "event_id": ev.get("event_id"),
+                            "interrupt_id": ev.get("interrupt_id"),
+                            "decision": "approve",
+                        }
+                    )
+                )
             elif etype == "done":
                 break
 
@@ -111,6 +132,7 @@ async def _ws_send_and_collect(content: str, *, timeout: float = TIMEOUT_S) -> d
             "errors": errors,
             "final": final_text or "".join(chunks),
             "intents": intents,
+            "confirmations": confirmations,
         }
 
 
