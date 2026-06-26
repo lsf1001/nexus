@@ -69,14 +69,15 @@
 
 .message-row {
   display: flex;
+  flex-direction: column;
 }
 
 .message-row.is-user {
-  justify-content: flex-end;
+  align-items: flex-end;
 }
 
 .message-row.is-assistant {
-  justify-content: flex-start;
+  align-items: flex-start;
 }
 
 .message-bubble {
@@ -86,6 +87,24 @@
   padding: 16px 18px;
   overflow-wrap: break-word;
   word-break: break-word;
+}
+
+/* 消息时间戳:气泡下方/旁边的小灰字,user 靠右 / assistant 靠左 */
+.message-timestamp {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.4);
+  margin-top: 4px;
+  padding: 0 6px;
+  user-select: none;
+}
+.message-row.is-user .message-timestamp {
+  text-align: right;
+}
+.message-row.is-assistant .message-timestamp {
+  text-align: left;
+}
+.nexus-desktop[data-theme="dark"] .message-timestamp {
+  color: rgba(255, 255, 255, 0.45);
 }
 
 /* 用户气泡：森林绿，呼应主色 */

@@ -8,6 +8,20 @@ interface ChatBubbleProps {
   onCopy?: (content: string) => void;
 }
 
+/** 友好时间格式:今天 HH:MM / 昨天 HH:MM / YYYY-MM-DD HH:MM */
+function formatTimestamp(d: Date): string {
+  const now = new Date();
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (sameDay(d, now)) return `今天 ${hm}`;
+  if (sameDay(d, yesterday)) return `昨天 ${hm}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
+}
+
 function ChatBubble({ message, showThinking = true, onCopy }: ChatBubbleProps) {
   const isUser = message.role === 'user';
   const roleClass = isUser ? 'is-user' : 'is-assistant';
@@ -16,6 +30,8 @@ function ChatBubble({ message, showThinking = true, onCopy }: ChatBubbleProps) {
     const text = message.content || message.thinking || '';
     onCopy?.(text);
   };
+
+  const timestamp = message.createdAt ? formatTimestamp(message.createdAt) : '';
 
   // 右击消息任意位置 → 弹"复制 消息"菜单（user / assistant 都支持）
   const handleContextMenu = useContextMenuTrigger(
@@ -70,6 +86,7 @@ function ChatBubble({ message, showThinking = true, onCopy }: ChatBubbleProps) {
           <ReactMarkdown>{message.content}</ReactMarkdown>
         </div>
       </div>
+      {timestamp && <div className={`message-timestamp ${roleClass}`}>{timestamp}</div>}
     </div>
   );
 }
