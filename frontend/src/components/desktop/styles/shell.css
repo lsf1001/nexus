@@ -481,9 +481,23 @@
   border-bottom-color: var(--line);
 }
 
+.topbar-topic {
+  /* flex 子项默认 min-width:auto,长标题会撑破 topbar 把状态 pill 顶出视口
+   * (e2e 截图证据:用 write_file 工具在 ~/.nexus/AGEN... 被截断)。
+   * 显式 min-width:0 + max-width + overflow:hidden + ellipsis,
+   * 配合 title 属性鼠标悬停看完整标题。 */
+  min-width: 0;
+  max-width: 60%;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
 .topbar-topic strong,
 .topbar-topic span {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbar-topic strong {

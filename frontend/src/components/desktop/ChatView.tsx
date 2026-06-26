@@ -42,8 +42,10 @@ export function ChatView({
     <>
       <header className="topbar">
         <div className="topbar-topic">
-          <strong>{currentConv?.title || '新任务'}</strong>
-          <span>
+          <strong title={currentConv?.title || '新任务'}>
+            {currentConv?.title || '新任务'}
+          </strong>
+          <span title={`${context.modelName || '未配置模型'}${currentConv ? ` · ${currentConv.channel === 'wechat' ? '微信通道' : '本地对话'}` : ''}`}>
             {context.modelName || '未配置模型'}
             {currentConv ? ` · ${currentConv.channel === 'wechat' ? '微信通道' : '本地对话'}` : ''}
           </span>

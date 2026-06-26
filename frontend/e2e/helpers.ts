@@ -13,34 +13,34 @@ import { type Page, expect, type Locator } from '@playwright/test';
 //   - 顶部 SetupView: "本地运行已就绪"
 //   - ChatView pill:  "本地在线" / "正在连接本地助手" / "本地助手离线"
 //   - Sidebar 微信:   "已连接" / "未绑定"（仅微信通道）
-// E2E 之前用的"已连接/未连接"是新 UI 之前的旧 ChatArea 顶部状态条，
-// 已删除；helper 改用 "本地运行已就绪" 作为系统就绪指示。
-const WELCOME_HEADING = '把日常想法交给一个更安静的助手';
-const READY_INDICATOR = '本地运行已就绪';
+//
+// 2026-06-25 适配：useBootstrap 拿到已配置模型后直接进 ChatView。
+// ChatView 已经带 4 个快捷 prompt + 输入框,不再需要走"点新任务"步骤。
+// SetupView 仅在模型未配置时才出现(4 个 API 配置字段 + 开始使用 按钮),
+// e2e 关注的是有模型可用的常见路径,所以 openHome 直接等 ChatView 输入框。
+//
+// 启动期 useBootstrap 异步发 /api/models 决定首屏,
+// 30s 足够覆盖后端 1-2s 健康 + 模型加载 + 30s 冷启 agent 窗口。
 export type QuickPromptTitle = '写代码' | '分析数据' | '知识问答' | '写作助手';
 
-/** 打开首页（vite serve 在 /app/ 子路径），等待欢迎语出现，自动切到 ChatView。
+/** 打开首页（vite serve 在 /app/ 子路径），等到 ChatView 输入框可点。
  *
- * 新 desktop shell 流程：SetupView（无输入框）→ 点击"新任务"→ ChatView。
- * 把"点新任务"塞进 openHome 统一处理，spec 不再重复。
+ * ChatView 判定:4 个快捷 prompt 按钮之一("整理今天的待办")出现 +
+ * 输入框 placeholder "告诉 Nexus 你想完成什么" 可见 + 可编辑。
+ *
+ * 若模型未配置(useBootstrap 走 SetupView 路径),输入框不会出现,
+ * 这种情况下 helper 直接抛错,让 spec 自己决定要不要走 setup 流程。
  */
 export async function openHome(page: Page): Promise<void> {
   await page.goto('/app/');
-  // 等待 SetupView 显示 "本地运行已就绪"（系统就绪指示）
-  await expect(page.getByText(READY_INDICATOR, { exact: true })).toBeVisible({ timeout: 20_000 });
-  // 等待欢迎界面标题
-  await expect(page.getByRole('heading', { name: new RegExp(WELCOME_HEADING) })).toBeVisible();
 
-  // 切到 ChatView：优先侧栏"新任务"按钮，回退欢迎页 CTA
-  const sidebarNew = page.locator('button.btn-new-task');
-  if (await sidebarNew.count()) {
-    await sidebarNew.first().click();
-  } else {
-    const firstTask = page.getByRole('button', { name: '+ 新建第一个任务' });
-    if (await firstTask.count()) {
-      await firstTask.click();
-    }
-  }
+  // 首选信号:ChatView 4 个快捷 prompt 按钮之一,这是 ChatView 渲染完成的标志
+  // "整理今天的待办" 是 ChatArea.tsx QUICK_PROMPTS[0].title。
+  const readyPrompt = page.getByRole('button', { name: /整理今天的待办/ });
+  await expect(readyPrompt).toBeVisible({ timeout: 30_000 });
+
+  // 输入框必须可点 —— 发送消息前 sendMessageAndWaitForReply 也会再等一次
+  await expect(messageInput(page)).toBeEnabled({ timeout: 30_000 });
 }
 
 /** 获取欢迎界面上的某个快捷 prompt 按钮。 */
