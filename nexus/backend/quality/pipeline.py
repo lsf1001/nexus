@@ -329,7 +329,13 @@ class QualityPipeline:
                     )
                 ),
             ]
-            result = await self._main_llm.ainvoke(messages)
+            # ``callbacks=[]`` 隔离 Judge / 重生 LLM 的 on_chat_model_stream 事件冒泡,
+            # 避免 ws.py 把 Judge 的 raw JSON 输出当作主 LLM 的响应累积到 full_response
+            # (导致用户看到 ``{"score": 1.0, "reasoning": ...}`` 风格的内容)。
+            result = await self._main_llm.ainvoke(
+                messages,
+                config={"callbacks": [], "run_name": "quality_repair_regenerate"},
+            )
             # 兼容 AIMessage / str / dict
             content = getattr(result, "content", None)
             if content is None and isinstance(result, dict):

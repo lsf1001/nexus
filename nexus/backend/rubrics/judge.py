@@ -171,8 +171,21 @@ class RubricJudge:
         for attempt in range(self._max_parse_retries + 1):
             try:
                 messages = _build_messages(rubric, question, response, tool_calls, retry_feedback=last_error)
+                # ``callbacks=[]`` 显式传空 list —— 这是隔离核心。
+                # 不传的话,langgraph ``astream_events`` 监听整张图所有 LLM 调用,
+                # Judge 的 ``on_chat_model_stream`` 事件会冒泡到外层 ``agent.astream_events``,
+                # 被 ws.py 当成"主 LLM 的输出 chunk"累加到 ``full_response``,用户前端 chunk
+                # 帧看到 ``{"score": 1.0, "reasoning": ...}`` raw JSON。传空 callbacks
+                # 后,Judge 的 on_*_事件不再传播到外层监听器,但仍能被 RubricJudge 内部的
+                # run_manager 看见(我们要的就是 JSON 解析回执)。
+                #
+                # ``run_name`` 让 langsmith tracing 能区分 Judge 调用 vs 主 LLM 调用,
+                # 不影响功能行为。
                 raw = await asyncio.wait_for(
-                    self._llm.ainvoke(messages),
+                    self._llm.ainvoke(
+                        messages,
+                        config={"callbacks": [], "run_name": f"rubric_judge.{rubric.name}"},
+                    ),
                     timeout=self._per_rubric_timeout,
                 )
                 content = _extract_content(raw)

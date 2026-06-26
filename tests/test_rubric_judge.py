@@ -394,3 +394,84 @@ def test_tool_calls_formatted_in_prompt():
     assert "web_search" in all_content
     assert "天气" in all_content
     assert "晴天 25度" in all_content
+
+
+# ==================== callback 隔离(防止 Judge 输出泄漏到主 LLM 的 stream 帧)====================
+#
+# 根因(bug #58):``RubricJudge._evaluate_one`` 直接 ``self._llm.ainvoke(messages)``
+# 不传 config 时,Judge LLM 调用的 ``on_chat_model_stream`` 事件会通过 langgraph
+# ``astream_events`` 的 event_streamer 冒泡,被 ws.py 当成"主 LLM 的输出 chunk"
+# 累加到 ``full_response``,用户在前端 chunk/final 帧看到 raw JSON(``{"score": 1.0, "reasoning": ...}``)。
+# 修复:显式传 ``config={"callbacks": [], "run_name": "rubric_judge.<name>"}`` —— 空
+# callbacks list 不继承外层 event_streamer,Judge 输出不再冒泡;run_name 让 langsmith
+# tracing 能区分 Judge vs 主 LLM 调用。
+#
+# 这两个测试必须断言:
+#  1. ``self._llm.ainvoke`` 收到的 ``config["callbacks"]`` 是空 list(不是 None 也不是
+#     默认管理器)
+#  2. ``config["run_name"]`` 含 "rubric_judge." 前缀,便于排查/观测
+
+
+class _CaptureConfigLLM(_FakeLLM):
+    """把每次 ``ainvoke`` 收到的 ``config`` dict 收集到 ``captured_configs`` 列表。"""
+
+    captured_configs: list = []
+
+    async def ainvoke(self, input, config=None, stop=None, **kwargs):
+        # 抄一份防止下游被改写
+        self.captured_configs.append(dict(config) if isinstance(config, dict) else config)
+        return await super().ainvoke(input, config=config, stop=stop, **kwargs)
+
+
+def test_evaluate_one_passes_empty_callbacks():
+    """``callbacks=[]`` 隔离:不让 Judge LLM 的 on_* 事件冒泡到外层 astream_events。"""
+
+    class _OneRubricLLM(_CaptureConfigLLM):
+        captured_configs: list = []
+
+    llm = _OneRubricLLM(response={"score": 0.9, "reasoning": "ok", "evidence": []})
+    judge = _make_judge(llm, rubrics=_make_rubrics()[:1])
+    asyncio.run(judge.judge(question="q", response="r"))
+
+    # 至少调一次
+    assert len(llm.captured_configs) >= 1
+    cfg = llm.captured_configs[0]
+    assert isinstance(cfg, dict), f"ainvoke 必须收到 dict config, 实际 {type(cfg).__name__}"
+    # 关键断言:callbacks 必须是空 list,不能是 None(继承)也不能是 BaseCallbackManager
+    assert "callbacks" in cfg, f"config 必须显式包含 callbacks 键: {cfg}"
+    assert cfg["callbacks"] == [], f"callbacks 必须是 [] 阻断传播, 实际 {cfg['callbacks']!r}"
+
+
+def test_evaluate_one_sets_run_name():
+    """``run_name`` 含 ``rubric_judge.`` 前缀:langsmith tracing 能区分 Judge 调用。"""
+
+    class _OneRubricLLM(_CaptureConfigLLM):
+        captured_configs: list = []
+
+    llm = _OneRubricLLM(response={"score": 0.9, "reasoning": "ok", "evidence": []})
+    judge = _make_judge(llm, rubrics=_make_rubrics()[:1])
+    asyncio.run(judge.judge(question="q", response="r"))
+
+    assert len(llm.captured_configs) >= 1
+    cfg = llm.captured_configs[0]
+    assert cfg.get("run_name", "").startswith("rubric_judge."), (
+        f"run_name 应以 'rubric_judge.' 开头, 实际 {cfg.get('run_name')!r}"
+    )
+
+
+def test_evaluate_one_run_name_contains_rubric():
+    """``run_name`` 形如 ``rubric_judge.<rubric_name>``:便于按 rubric 维度排查。"""
+
+    class _OneRubricLLM(_CaptureConfigLLM):
+        captured_configs: list = []
+
+    llm = _OneRubricLLM(response={"score": 0.9, "reasoning": "ok", "evidence": []})
+    # 用单 rubric,验证 run_name 包含 rubric name
+    judge = _make_judge(llm, rubrics=_make_rubrics()[:1])
+    asyncio.run(judge.judge(question="q", response="r"))
+
+    cfg = llm.captured_configs[0]
+    first_rubric_name = _make_rubrics()[0].name
+    assert first_rubric_name in cfg["run_name"], (
+        f"run_name 应含 rubric 名 '{first_rubric_name}', 实际 {cfg['run_name']!r}"
+    )
