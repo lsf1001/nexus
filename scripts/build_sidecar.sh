@@ -41,11 +41,12 @@ rm -rf "$ROOT_DIR/dist" "$ROOT_DIR/build"
 echo ">>> sidecar: $ROOT_DIR/release/nexus-runtime/"
 ls -la "$ROOT_DIR/release/nexus-runtime/" | head -10
 
-# 4. Tauri externalBin 命名约定: nexus-runtime-{arch}-{platform}
-# 复制为符合 Tauri 约定的文件名
-ARCH=$(uname -m)
+# 4. Tauri externalBin 命名约定: nexus-runtime-{rust_target_triple}
+# 例如 aarch64-apple-darwin, x86_64-apple-darwin(不是 uname -m 的 arm64)
+ARCH_RUST=$(rustc -vV 2>/dev/null | awk '/^host:/ {print $2}' | cut -d- -f1)
+[ -z "$ARCH_RUST" ] && ARCH_RUST="aarch64"  # mac 默认 aarch64
 PLATFORM="apple-darwin"
-TARBALL_NAME="nexus-runtime-${ARCH}-${PLATFORM}"
+TARBALL_NAME="nexus-runtime-${ARCH_RUST}-${PLATFORM}"
 cp "$ROOT_DIR/release/nexus-runtime/nexus-runtime" \
    "$ROOT_DIR/desktop/src-tauri/binaries/${TARBALL_NAME}"
 chmod +x "$ROOT_DIR/desktop/src-tauri/binaries/${TARBALL_NAME}"

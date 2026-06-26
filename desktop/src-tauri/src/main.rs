@@ -4,7 +4,7 @@
 mod runtime;
 mod ws_relay;
 
-use tauri::{Manager, RunEvent, WindowEvent};
+use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
 fn main() {
     env_logger::init();

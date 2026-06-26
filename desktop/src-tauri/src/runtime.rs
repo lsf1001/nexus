@@ -9,7 +9,9 @@ use tokio::time::Instant;
 
 pub struct AppState {
     pub sidecar: Arc<RwLock<Option<Child>>>,
+    #[allow(dead_code)]
     pub api_base: String,
+    #[allow(dead_code)]
     pub ws_url: String,
 }
 
@@ -32,11 +34,11 @@ pub enum RuntimeStatus {
 }
 
 #[tauri::command]
-pub async fn get_runtime_status(state: tauri::State<'_, AppState>) -> RuntimeStatus {
+pub async fn get_runtime_status(state: tauri::State<'_, AppState>) -> Result<RuntimeStatus, String> {
     if state.sidecar.read().await.is_some() {
-        RuntimeStatus::Ready
+        Ok(RuntimeStatus::Ready)
     } else {
-        RuntimeStatus::Starting
+        Ok(RuntimeStatus::Starting)
     }
 }
 
@@ -155,10 +157,18 @@ pub async fn supervise_sidecar(app: AppHandle) {
 
 pub fn shutdown_sidecar(app: &tauri::AppHandle) {
     let state: tauri::State<AppState> = app.state();
-    if let Ok(mut guard) = state.sidecar.try_write() {
-        if let Some(mut child) = guard.take() {
-            log::info!("killing sidecar");
-            child.kill().ok();
-        }
+    let child_opt = {
+        let Ok(mut guard) = state.sidecar.try_write() else {
+            return;
+        };
+        guard.take()
+    };
+    if let Some(mut child) = child_opt {
+        log::info!("killing sidecar");
+        tokio::spawn(async move {
+            if let Err(e) = child.kill().await {
+                log::error!("kill sidecar failed: {e}");
+            }
+        });
     }
 }

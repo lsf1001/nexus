@@ -1,6 +1,7 @@
 # Tauri
 src-tauri/target/
 src-tauri/Cargo.lock
+src-tauri/gen/
 src-tauri/binaries/*-apple-darwin
 !src-tauri/binaries/.gitkeep
 

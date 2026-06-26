@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use tauri::Channel;
+use tauri::ipc::Channel;
 use tokio::sync::RwLock;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -76,7 +76,7 @@ pub async fn ws_send(
     state: tauri::State<'_, RelayState>,
 ) -> Result<(), String> {
     // 1. 取出 session,把 rx 从 Option 里搬出来给 task
-    let (tx, rx, old_task) = {
+    let (rx, old_task) = {
         let mut sessions = state.sessions.write().await;
         let session = sessions
             .get_mut(&session_id)
@@ -88,7 +88,7 @@ pub async fn ws_send(
             .ok_or_else(|| "rx already consumed".to_string())?;
         let old_task = session.rx_task.take();
 
-        (tx, rx, old_task)
+        (rx, old_task)
     };
 
     // 取消之前的 task(如果有,通常是 reconnect)
