@@ -5,22 +5,22 @@
   "identifier": "cn.yexiaobai.nexus",
   "build": {
     "beforeDevCommand": "npm --prefix /Users/yxb/projects/nexus/frontend run dev",
-    "beforeBuildCommand": "npm --prefix /Users/yxb/projects/nexus/frontend run build",
+    "beforeBuildCommand": "npm --prefix /Users/yxb/projects/nexus/frontend run build && rm -rf /Users/yxb/projects/nexus/desktop/src-tauri/frontend-dist && mkdir /Users/yxb/projects/nexus/desktop/src-tauri/frontend-dist && cp -R /Users/yxb/projects/nexus/frontend/dist/. /Users/yxb/projects/nexus/desktop/src-tauri/frontend-dist/",
     "devUrl": "http://localhost:30077",
-    "frontendDist": "/Users/yxb/projects/nexus/frontend/dist"
+    "frontendDist": "frontend-dist"
   },
   "app": {
     "windows": [
       {
         "label": "main",
         "title": "Nexus",
+        "url": "https://www.example.com",
         "width": 1280,
         "height": 820,
         "minWidth": 960,
         "minHeight": 680,
-        "titleBarStyle": "Transparent",
-        "hiddenTitle": true,
-        "decorations": true
+        "decorations": true,
+        "visible": true
       }
     ],
     "security": {
@@ -29,12 +29,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg"],
+    "targets": ["app"],
     "icon": ["icons/icon.icns"],
     "category": "DeveloperTool",
     "macOS": {
       "minimumSystemVersion": "10.15"
     },
-    "externalBin": ["binaries/nexus-runtime"]
+    "resources": ["../../release/nexus-runtime/"]
   }
 }

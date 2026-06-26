@@ -67,25 +67,34 @@ pub async fn start_sidecar(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_sidecar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+fn resolve_sidecar_path(_app: &AppHandle) -> Result<std::path::PathBuf, String> {
     use tauri::path::BaseDirectory;
 
-    // 1. 打包模式:Resource 目录(整个 onedir 目录被 externalBin 复制到 .app/Contents/Resources/)
-    if let Ok(p) = app.path().resolve("nexus-runtime/nexus-runtime", BaseDirectory::Resource) {
-        if p.exists() {
-            return Ok(p);
+    // 1. 打包模式:用 current_exe() 反推 .app 内的 Resources 目录
+    //    tauri 把 release/nexus-runtime/ 放在 Resources/_up_/_up_/release/nexus-runtime/
+    if let Ok(exe) = std::env::current_exe() {
+        // exe = .../Nexus.app/Contents/MacOS/nexus-desktop
+        // resources = .../Nexus.app/Contents/Resources
+        if let Some(resources) = exe.parent().and_then(|p| p.parent()).map(|p| p.join("Resources")) {
+            // Tauri 2 资源路径会带 _up_/_up_ 反映 ../../ 跳出
+            for rel in [
+                "_up_/_up_/release/nexus-runtime/nexus-runtime",
+                "release/nexus-runtime/nexus-runtime",
+                "nexus-runtime/nexus-runtime",
+                "nexus-runtime",
+            ] {
+                let p = resources.join(rel);
+                if p.exists() {
+                    return Ok(p);
+                }
+            }
         }
     }
 
-    // 2. 再尝试 .app/Contents/MacOS/(Tauri 2 习惯)
-    if let Ok(resource) = app.path().resource_dir() {
-        let macos_path = resource
-            .parent()
-            .unwrap_or(&resource)
-            .join("MacOS")
-            .join("nexus-runtime");
-        if macos_path.exists() {
-            return Ok(macos_path);
+    // 2. 兜底:Tauri 提供的 resource 解析
+    if let Ok(p) = _app.path().resolve("nexus-runtime/nexus-runtime", BaseDirectory::Resource) {
+        if p.exists() {
+            return Ok(p);
         }
     }
 
@@ -110,7 +119,7 @@ fn resolve_sidecar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     }
 
     Err(format!(
-        "sidecar binary not found. tried: resource dir, .app/Contents/MacOS/, dev bundle: {dev_bundle:?}, dev single: {dev_path:?}"
+        "sidecar binary not found. tried: bundle Resources, dev bundle: {dev_bundle:?}, dev single: {dev_path:?}"
     ))
 }
 
