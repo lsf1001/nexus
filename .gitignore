@@ -75,3 +75,8 @@ desktop/dist/
 
 # Full-stack verify scripts 截图产物(verify-full.js 用)
 .verify-shots/
+
+# Playwright 自动产物(root + frontend)
+test-results/
+frontend/test-results/
+playwright-report/
