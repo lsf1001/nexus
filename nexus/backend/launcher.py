@@ -10,6 +10,7 @@
 """
 
 import argparse
+import os
 import sys
 import threading
 import time
@@ -52,6 +53,13 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=30000)
     parser.add_argument("--no-gui", action="store_true", help="只跑后端不开窗口(headless / debug)")
     args = parser.parse_args()
+
+    # PyInstaller 打包后,告诉后端前端 dist 在哪。
+    # dev 模式下走 main.py 里的"项目目录/frontend/dist"分支,无需设。
+    if getattr(sys, "frozen", False) and not os.environ.get("NEXUS_FRONTEND_DIST"):
+        bundled_frontend = Path(sys._MEIPASS) / "frontend"  # type: ignore[attr-defined]
+        if bundled_frontend.exists():
+            os.environ["NEXUS_FRONTEND_DIST"] = str(bundled_frontend)
 
     backend_thread = threading.Thread(
         target=_run_backend,
