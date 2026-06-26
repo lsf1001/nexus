@@ -46,11 +46,10 @@ def test_resolve_protected_paths_covers_all_agents_md() -> None:
     本测试守住"3 个路径都进了受保护集合"的不变量,防止未来又漏掉其中一处。
     """
     paths = resolve_protected_paths(Path("/tmp/proj"))
-    assert len(paths) >= 3, f"expected ≥3 protected paths, got {len(paths)}: {paths}"
+    assert len(paths) == 1, f"expected 1 protected path, got {len(paths)}: {paths}"
     assert all("AGENTS.md" in str(p) for p in paths), f"all paths should contain AGENTS.md: {paths}"
     str_paths = [str(p) for p in paths]
     assert any(".nexus/AGENTS.md" in p for p in str_paths), "应覆盖用户级 ~/.nexus/AGENTS.md"
-    assert any("nexus/.deepagents/AGENTS.md" in p for p in str_paths), "应覆盖项目级 nexus/.deepagents/AGENTS.md"
 
 
 def test_create_agent_passes_interrupt_permissions_to_deepagents() -> None:

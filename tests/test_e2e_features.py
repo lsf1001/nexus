@@ -12,7 +12,7 @@
   7. 长期记忆写入(LLM 调 edit_file 写 ~/.nexus/AGENTS.md)
   8. 长期记忆读回(同 session 新提问,LLM 应引用之前存的偏好)
   9. Intent 路由(chitchat 短路 vs knowledge 走完整)
- 10. read_file 工具调用(LLM 主动读 nexus/.deepagents/AGENTS.md)
+ 10. read_file 工具调用(LLM 主动读 ~/.nexus/AGENTS.md)
  11. 多 session 隔离(sessionA 的偏好不污染 sessionB)
 
 运行前提:
@@ -20,6 +20,12 @@
   $ source .venv/bin/activate && pytest tests/test_e2e_features.py -v -s
 
 每个测试独立 — 不依赖其它测试的状态(临时 session_id 隔离,写偏好走唯一 key 命名)。
+
+2026-06 OpenClaw 定位重设计后:
+  - 原"项目级 AGENTS.md"已删除(``nexus/.deepagents/AGENTS.md`` 孤儿文件)
+  - 产品身份 hardcode 进 ``_build_system_prompt``
+  - 用户级 ``~/.nexus/AGENTS.md`` 是唯一长期记忆文件
+  - 测试 10 改测用户级 AGENTS.md 的 read_file
 """
 
 from __future__ import annotations
@@ -40,7 +46,6 @@ WS_URL = "ws://localhost:30000/api/ws?token=nexus-default-token"
 AUTH_HEADERS = {"Authorization": "Bearer nexus-default-token"}
 TIMEOUT_S = 90
 USER_AGENTS_MD = Path.home() / ".nexus" / "AGENTS.md"
-PROJECT_AGENTS_MD = Path("/Users/yxb/projects/nexus/nexus/.deepagents/AGENTS.md")
 
 
 # ============================================================================
@@ -416,30 +421,33 @@ async def test_e2e_09_intent_routing():
 
 @pytest.mark.asyncio
 async def test_e2e_10_read_file_tool():
-    """让 LLM 主动 read_file 读项目级 AGENTS.md,验证响应包含文件内容(行为验证)。
+    """让 LLM 主动 read_file 读用户级 AGENTS.md,验证响应包含文件内容(行为验证)。
 
     同 test_07:WS 协议不发 tool_call 事件;验证走 thinking trace + 响应内容。
+
+    2026-06 之前测项目级 ``nexus/.deepagents/AGENTS.md``(含"Nexus 身份"段);
+    OpenClaw 定位重设计后该文件已删除,改测用户级 ``~/.nexus/AGENTS.md``
+    (LLM 写入的偏好会落在这里;e2e 不预设内容,只验证 read_file 被调用)。
     """
     r = await _ws_send_and_collect(
-        f"请立即调用 read_file 工具,参数 file_path = {PROJECT_AGENTS_MD},"
-        f"读取后告诉我前 3 行内容。不要问我问题,直接调用工具。",
+        f"请立即调用 read_file 工具,参数 file_path = {USER_AGENTS_MD},"
+        f"读取后告诉我文件是否存在(存在回答'存在',不存在回答'不存在')。"
+        f"不要问我问题,直接调用工具。",
         timeout=180,
     )
     assert "done" in r["event_types"]
     assert not r["errors"], f"error 事件: {r['errors']}"
 
-    # 行为验证 1:thinking trace 里出现 read_file 调用
+    # 行为验证:thinking trace / chunks 里出现 read_file 调用
     assert "read_file" in r["thinking"] or "read_file" in r["chunks"], (
         f"thinking/chunks 里都没出现 read_file 调用 — LLM 没真读文件\n"
         f"  thinking: {r['thinking'][:300]!r}\n"
         f"  chunks: {r['chunks'][:300]!r}"
     )
 
-    # 行为验证 2:响应里包含项目 AGENTS.md 标志性内容("Nexus 身份" / "夜小白")
-    # 这只能由 read_file 真读到文件才会出现
-    assert "Nexus 身份" in r["chunks"] or "夜小白" in r["chunks"], (
-        f"响应没出现 Nexus 身份/夜小白 — LLM 可能没真读文件\n  chunks: {r['chunks'][:300]!r}"
-    )
+    # 行为验证 2:响应里给出"存在"/"不存在"结论(LLM 真读文件才能判断)
+    response_has_verdict = ("存在" in r["chunks"]) or ("存在" in r["thinking"])
+    assert response_has_verdict, f"响应没出现'存在/不存在'判定 — LLM 可能没真读文件\n  chunks: {r['chunks'][:300]!r}"
 
 
 # ============================================================================

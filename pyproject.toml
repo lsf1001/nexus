@@ -54,7 +54,7 @@ asyncio_mode = "auto"
 nexus = "nexus.cli.main:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["nexus", "nexus/cli"]
+packages = ["nexus"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

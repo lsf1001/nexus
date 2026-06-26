@@ -50,12 +50,20 @@ def test_resolve_protected_paths_returns_absolute() -> None:
 
 
 def test_is_write_to_protected_path_matches_agents_md() -> None:
-    """工具调用命中 AGENTS.md 时返回 True。"""
+    """工具调用命中用户级 ``~/.nexus/AGENTS.md`` 时返回 True。
+
+    历史实现保护 ``{project_root}/.nexus/AGENTS.md`` 与
+    ``{project_root}/nexus/.deepagents/AGENTS.md`` —— 2026-06 OpenClaw
+    定位重设计后只保护用户级一条(``~/.nexus/AGENTS.md``),dev 时路径
+    已无对应文件,删除。
+    """
     protected = resolve_protected_paths(Path("/tmp/proj"))
+    from nexus.backend.memory import USER_MEMORY_PATH
+
     assert (
         is_write_to_protected_path(
             tool_name="write_file",
-            target_path="/tmp/proj/.nexus/AGENTS.md",
+            target_path=str(USER_MEMORY_PATH),
             protected_paths=protected,
         )
         is True

@@ -64,13 +64,13 @@ def build_default_permissions(project_root: Path) -> list[FilesystemPermission]:
             mode="allow",
         ),
         # AGENTS.md 写入必须 HITL
-        # 注:FilesystemPermission 路径必须以 '/' 开头,所以 ~ 要展开成绝对路径
+        # 注:FilesystemPermission 路径必须以 '/' 开头,所以 ~ 要展开成绝对路径。
+        # Nexus 是个人智能助理（对标 OpenClaw），用户数据目录唯一
+        # ``~/.nexus/``，没有"项目级 AGENTS.md"概念 —— 只保护用户级那一条。
         FilesystemPermission(
             operations=["write"],
             paths=[
                 str((Path.home() / ".nexus" / "AGENTS.md").expanduser().resolve()),
-                f"{project_root}/.nexus/AGENTS.md",
-                f"{project_root}/nexus/.deepagents/AGENTS.md",
             ],
             mode="interrupt",
         ),
@@ -82,15 +82,17 @@ def resolve_protected_paths(project_root: Path) -> list[Path]:
     """解析所有受保护的 AGENTS.md 路径为绝对路径。
 
     Returns:
-        绝对路径列表,供 QualityGateMiddleware 校验 edit_file/write_file
-        目标路径是否需要走忠实度评估。
+        单元素绝对路径列表（``~/.nexus/AGENTS.md``）,供
+        :class:`QualityGateMiddleware` 校验 edit_file/write_file 目标路径
+        是否需要走忠实度评估。
+
+    Note:
+        历史实现含 ``{project_root}/.nexus/AGENTS.md`` 与
+        ``{project_root}/nexus/.deepagents/AGENTS.md`` 两条 —— 2026-06
+        OpenClaw 定位重设计后产品身份 hardcode 进代码,这两个 dev 时
+        路径已无对应文件,删除。
     """
-    home = Path.home()
-    return [
-        (home / ".nexus" / "AGENTS.md").expanduser().resolve(),
-        (project_root / ".nexus" / "AGENTS.md").resolve(),
-        (project_root / "nexus" / ".deepagents" / "AGENTS.md").resolve(),
-    ]
+    return [(Path.home() / ".nexus" / "AGENTS.md").expanduser().resolve()]
 
 
 def is_write_to_protected_path(

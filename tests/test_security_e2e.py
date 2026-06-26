@@ -66,21 +66,20 @@ def test_no_deny_rules_added_by_design() -> None:
     assert denies == [], f"不应有 deny 规则,实际: {denies}"
 
 
-def test_resolve_protected_paths_matches_3_agents_md_locations() -> None:
-    """受保护路径覆盖用户级 + 项目级 + .deepagents 级三处。
+def test_resolve_protected_paths_matches_user_agents_md_only() -> None:
+    """受保护路径只剩用户级 ``~/.nexus/AGENTS.md``(OpenClaw 定位)。
 
-    QualityGateMiddleware.protected_paths 依赖这个不变量(3 个路径都进
-    忠实度评估,任何漏掉一处都意味着 LLM 可绕过质量门污染 AGENTS.md)。
+    QualityGateMiddleware.protected_paths 依赖这个不变量(只保护用户级
+    一条;任何漏判意味着 LLM 可绕过质量门污染用户长期偏好)。
     """
     paths = resolve_protected_paths(Path("/tmp/proj"))
-    assert len(paths) == 3, f"应返回 3 个受保护路径,实际 {len(paths)}: {paths}"
+    assert len(paths) == 1, f"应返回 1 个受保护路径,实际 {len(paths)}: {paths}"
     str_paths = [str(p) for p in paths]
     assert any(".nexus/AGENTS.md" in p for p in str_paths), "应覆盖用户级 ~/.nexus/AGENTS.md"
-    assert any("nexus/.deepagents/AGENTS.md" in p for p in str_paths), "应覆盖项目级 nexus/.deepagents/AGENTS.md"
 
 
-def test_is_write_to_protected_path_3_agents_md_paths() -> None:
-    """3 处 AGENTS.md 路径都判定为受保护。"""
+def test_is_write_to_protected_path_user_agents_md() -> None:
+    """用户级 ``~/.nexus/AGENTS.md`` 路径判定为受保护。"""
     protected = resolve_protected_paths(Path("/tmp/proj"))
     for sample_path in protected:
         assert (
