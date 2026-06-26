@@ -61,8 +61,10 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
-# PyInstaller onedir 整个目录挪到 Resources/
-mv "$ROOT_DIR/dist/nexus-backend" "$APP_DIR/Contents/Resources/nexus-backend"
+# PyInstaller onedir 整个目录挪到 Resources/,改名为 Nexus(跟 APP 同名,避免"两个 nexus")
+mv "$ROOT_DIR/dist/nexus-backend" "$APP_DIR/Contents/Resources/Nexus"
+# 内部 bootloader 也改名 nexus-backend → nexus,整 APP 内只出现 "Nexus" 一个名字
+mv "$APP_DIR/Contents/Resources/Nexus/nexus-backend" "$APP_DIR/Contents/Resources/Nexus/nexus"
 
 # Info.plist
 cat > "$APP_DIR/Contents/Info.plist" <<PLIST
@@ -98,8 +100,8 @@ cat > "$APP_DIR/Contents/MacOS/${APP_NAME}" <<SH
 #!/usr/bin/env bash
 # Nexus.app 启动壳脚本 —— Finder 双击 APP 时由 LaunchServices 调用
 # exec PyInstaller 打的单进程入口,所有逻辑(含后端 + WKWebView)都在那一个进程里
-DIR="\$(cd "\$(dirname "\$0")/../Resources/nexus-backend" && pwd)"
-exec "\$DIR/nexus-backend" "\$@"
+DIR="\$(cd "\$(dirname "\$0")/../Resources/Nexus" && pwd)"
+exec "\$DIR/nexus" "\$@"
 SH
 chmod +x "$APP_DIR/Contents/MacOS/${APP_NAME}"
 
