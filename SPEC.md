@@ -22,9 +22,9 @@
 | 组件 | 技术 |
 |------|------|
 | 前端 | React + TypeScript + Vite + Tailwind CSS + Zustand |
-| 后端 | FastAPI + DeepAgents + SQLite |
+| 后端 | FastAPI + DeepAgents + SQLite + pywebview(WKWebView) |
 | 模型 | MiniMax / DeepSeek / Qwen (OpenAI SDK 兼容) |
-| 守护 | launchd (macOS) / systemd (Linux) |
+| 桌面 APP | **单二进制**:PyInstaller onedir + pywebview(无 Electron / 无 Chromium) |
 
 ## 项目结构
 
@@ -51,11 +51,10 @@ nexus/                 # 仓库根
 │   │   ├── routes/     # REST 路由 (model_config 等)
 │   │   ├── channels/   # wechat, base, registry
 │   │   └── plugins/    # MCP / 工具插件
-│   └── cli/            # CLI (Typer)
-│       ├── main.py
-│       └── daemon/     # launchd, systemd
 └── tests/             # pytest (后端)
 ```
+
+桌面 APP 不再是独立工程:`scripts/build_dmg.sh` 一步完成 PyInstaller onedir + .app bundle 构造 + hdiutil 打 DMG。APP 内只有一个 Python 进程,uvicorn 起在后台线程,pywebview 主线程弹 WKWebView。
 
 ## 核心模块
 

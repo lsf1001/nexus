@@ -1,10 +1,8 @@
 {
   "scripts": {
-    "desktop:install": "npm install --prefix desktop",
-    "desktop:build": "npm run build --prefix desktop",
-    "desktop:dev": "npm run dev --prefix desktop",
-    "desktop:test": "npm run test --prefix desktop",
-    "desktop:pack": "npm run pack --prefix desktop",
+    "build:frontend": "cd frontend && npm install && npm run build",
+    "build:dmg": "bash scripts/build_dmg.sh",
+    "build:all": "npm run build:frontend && npm run build:dmg",
     "verify:full": "node verify-full.js"
   },
   "devDependencies": {

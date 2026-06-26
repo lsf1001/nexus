@@ -77,17 +77,17 @@ python nexus/backend/run.py
 > 终端用户也可本地构建 DMG（v0.1.0 release 暂未挂预构建 DMG,网络上传限制）。
 
 ```bash
-cd desktop && npm install && npm run pack
-# 产物输出到 desktop/dist/ 或 release/
-# 产物：Nexus-1.0.0-arm64.dmg（约 167 MB，arm64，未签名）
+bash scripts/build_dmg.sh
+# 产物：release/Nexus-1.0.0-arm64.dmg（约 70 MB，arm64，未签名）
 ```
 
 | 项 | 值 |
 | --- | --- |
-| 产物 | `desktop/dist/Nexus-1.0.0-arm64.dmg`（本地构建约 167 MB，arm64） |
+| 产物 | `release/Nexus-1.0.0-arm64.dmg`（本地构建约 70 MB，arm64） |
 | 架构 | macOS Apple Silicon（Intel 暂未出包） |
 | 签名 | **未签名**（内测版，无 Apple Developer ID） |
-| 端口 | 后端 30000 / 前端 30077（启动时自动拉起） |
+| 端口 | 后端 30000 + WKWebView 弹原生窗口（启动时自动拉起） |
+| 内部结构 | `MacOS/Nexus`(壳脚本)→ exec `Resources/nexus-backend/nexus-backend`(PyInstaller 单二进制 + Python 运行时 + pywebview) |
 
 > **首次启动绕过 Gatekeeper**（仅一次）：
 >
@@ -151,7 +151,7 @@ ws.send(JSON.stringify({ content: '你好' }));
 - [CLAUDE.md](./CLAUDE.md) - 开发规范
 - [CHANGELOG.md](./CHANGELOG.md) - 版本变更
 - [docs/RELEASE_NOTES_v0.1.0.md](./docs/RELEASE_NOTES_v0.1.0.md) - v0.1.0 发布说明
-- [desktop/](./desktop/) - 桌面端源码
+- [scripts/build_dmg.sh](./scripts/build_dmg.sh) - DMG 打包脚本(PyInstaller + hdiutil)
 
 ---
 

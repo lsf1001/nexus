@@ -5,6 +5,41 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [Unreleased] — 桌面 APP 架构简化(electron+pyinstaller 双运行时 → pywebview+pyinstaller 单运行时)
+
+### Changed
+
+- **桌面 APP 从 Electron + Python 双运行时,改为 pywebview(WKWebView)+ PyInstaller 单运行时**:
+  - 旧:`Electron 主进程 + Renderer + Helper*(GPU/Renderer/Plugin) + nexus-backend(PyInstaller)` 两个独立 runtime 互 spawn
+  - 新:`Nexus.app/Contents/MacOS/Nexus`(壳脚本)→ exec `Resources/nexus-backend/nexus-backend`(PyInstaller 单二进制,内嵌 Python 运行时 + pywebview + 后端)
+  - **DMG 167MB → 70MB**(arm64,UDZO 压缩),.app 124MB 主要是 PyInstaller _internal
+  - **进程数 1**(原来 5+ 个 Electron Helper + Python 子进程)
+  - 内存占用大幅降低(无 Chromium,WKWebView 由 macOS 共享)
+  - FastAPI 已经在 `/app` 挂载前端 dist,所以 launcher 只需后台线程跑 uvicorn + 主线程 `webview.start()`
+
+### Added
+
+- **`nexus/backend/launcher.py`** — 桌面 APP 入口:`uvicorn.run()` daemon 线程 + `webview.create_window()` 主线程 + `--no-gui` headless 选项
+- **`scripts/build_dmg.sh`** — 一键打包(PyInstaller onedir + .app bundle 构造 + hdiutil)
+- **`pyproject.toml`** 加 `pywebview>=6.0 ; sys_platform == 'darwin'`(仅 macOS 装,其他平台不依赖)
+
+### Removed
+
+- **`desktop/` 整目录删除** — Electron + TypeScript + electron-builder(~136MB node_modules + 489 行 TS + 180 行测试)
+- **`scripts/build_backend_app.sh`** 替换为 `scripts/build_dmg.sh`
+- **`frontend/e2e/dmg-cdp/`** 删除(Electron `--remote-debugging-port` CDP attach 测试,新架构不再适用)
+- **`pyproject.toml` desktop 引用** 删
+- **顶层 `package.json` desktop:* 脚本** 替换为 `build:frontend|build:dmg|build:all`
+
+### Verified
+
+- `ruff check / format`:全过
+- `pytest`:468 passed / 12 skipped in 43.92s
+- E2E 5/5(真 LLM):简单闲聊 / 长期记忆+身份 / 联网搜索 / 澄清 / 跨 session 隔离
+- DMG 本地构建:`scripts/build_dmg.sh` 一次成功,产物 70MB,`/Applications/Nexus.app` 启动后 1 个 `nexus-backend` 进程监听 30000
+
+---
+
 ## [Unreleased] — CLI 清理(产品不再提供 CLI,终端用户走 DMG)
 
 ### Removed

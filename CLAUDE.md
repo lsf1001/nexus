@@ -18,10 +18,9 @@
 
 ## 架构
 
-- `nexus/backend/`：FastAPI 后端（端口 30000）— `main.py` 入口、`agent.py` DeepAgents 封装、`db.py` SQLite + 自动迁移
-- `nexus/cli/`：Typer CLI（install/start/stop/doctor/daemon）
-- `frontend/`：Vite + React（端口 30077）— `src/components/` `src/hooks/` `e2e/`
-- `desktop/`：Electron + electron-builder — `src/{main,backend,preload}.ts`
+- `nexus/backend/`：FastAPI 后端（端口 30000）— `main.py` 入口、`launcher.py` 桌面 APP 启动（pywebview + uvicorn 后台线程）、`agent.py` DeepAgents 封装、`db.py` SQLite + 自动迁移
+- `frontend/`：Vite + React（端口 30077 / DMG 内 `/app/`）— `src/components/` `src/hooks/` `e2e/`
+- `scripts/build_dmg.sh`：PyInstaller onedir + .app bundle 构造 + hdiutil 打 DMG
 - `tests/`：pytest 后端测试
 - `docs/superpowers/`：设计稿 / 计划 / 进度
 - `docs/operations/`：运维文档（含 quality.md 质量门）
@@ -50,12 +49,11 @@ ruff format nexus/                     # 格式化
 cd frontend && npm install
 npm run dev|build|lint|test:e2e
 
-# 桌面端
-cd desktop && npm install
-npm run dev|test|pack
+# DMG 打包
+bash scripts/build_dmg.sh     # 产物 release/Nexus-1.0.0-arm64.dmg (~70MB)
 
 # 顶层 npm 脚本
-npm run desktop:install|build|dev|test|pack
+npm run build:frontend|build:dmg|build:all
 ```
 
 ## 关键约束
