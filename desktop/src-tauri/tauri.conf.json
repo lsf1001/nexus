@@ -14,7 +14,6 @@
       {
         "label": "main",
         "title": "Nexus",
-        "url": "https://www.example.com",
         "width": 1280,
         "height": 820,
         "minWidth": 960,
@@ -35,6 +34,9 @@
     "macOS": {
       "minimumSystemVersion": "10.15"
     },
-    "resources": ["../../release/nexus-runtime/"]
+    "resources": [
+      "../../release/nexus-runtime/",
+      "frontend-dist/"
+    ]
   }
 }

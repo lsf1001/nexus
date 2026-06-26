@@ -16,6 +16,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# 加载 rust env(cargo/rustc 不在默认 PATH)
+if [ -f "$HOME/.cargo/env" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.cargo/env"
+fi
+
 VERSION="${VERSION:-1.1.0}"
 ARCH="${ARCH:-$(uname -m)}"  # arm64 或 x86_64
 APP_NAME="Nexus"
@@ -26,12 +32,15 @@ echo ">>> step 1: build sidecar..."
 bash "$ROOT_DIR/scripts/build_sidecar.sh"
 
 # 2. cargo tauri build(tauri.conf.json 的 targets=["app"],只产 .app 不打 DMG)
+#    不传 --target:让 cargo 用 host default target,产物在 target/release/bundle/macos/
+#    之前用 --target aarch64-apple-darwin 时 cargo 把 host default 写到了
+#    target/release/ 而不是 target/aarch64-apple-darwin/release/,反而绕远了
 echo ">>> step 2: cargo tauri build..."
 cd "$ROOT_DIR/desktop/src-tauri"
-cargo tauri build --target "${ARCH}-apple-darwin"
+cargo tauri build
 
 # 3. 找 .app 产物
-APP_BUNDLE="$ROOT_DIR/desktop/src-tauri/target/${ARCH}-apple-darwin/release/bundle/macos/${APP_NAME}.app"
+APP_BUNDLE="$ROOT_DIR/desktop/src-tauri/target/release/bundle/macos/${APP_NAME}.app"
 
 if [ ! -d "$APP_BUNDLE" ]; then
   echo "ERROR: app bundle not found at $APP_BUNDLE"
