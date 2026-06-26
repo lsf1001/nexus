@@ -94,6 +94,11 @@ rm -rf "$TMP_STAGE"
 echo ">>> DMG: $DMG_OUT"
 ls -lh "$DMG_OUT"
 
+# 6. 给缓存里的 .app 做完整自签名(cargo tauri build 默认 linker-signed 不 seal resources,
+#    启动会抛 'The operation is insecure')
+echo ">>> step 4: sign .app with entitlements..."
+bash "$ROOT_DIR/scripts/sign_app.sh" "$CACHE_DIR/${APP_NAME}.app"
+
 echo ">>> release/ 内容:"
 ls -la "$ROOT_DIR/release/"
 echo ">>> 提示: 把 release/${DMG_NAME}.dmg 分发给用户,用户拖到 /Applications 安装"
