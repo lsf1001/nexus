@@ -4,17 +4,28 @@ Nexus 是夜小白科技有限公司开发的 AI Gateway，支持智能对话、
 
 ## 快速开始
 
-```bash
-# 一键安装
-curl -fsSL https://raw.githubusercontent.com/lsf1001/nexus/main/install.sh | bash
+**终端用户**：下载 `Nexus.dmg` 拖到 `/Applications/`，双击 `Nexus.app` 启动。数据全部在 `~/.nexus/`。
 
-# 启动服务
-nexus start
+**开发者**：从 git clone 跑起来：
+
+```bash
+git clone https://github.com/lsf1001/nexus.git
+cd nexus
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+(cd frontend && npm install)
+
+# 起后端（一个 terminal）
+python nexus/backend/run.py    # 监听 30000
+
+# 起前端（另一个 terminal）
+(cd frontend && npm run dev)   # 监听 30077
 ```
 
-访问 http://localhost:30077/
+浏览器开 http://localhost:30077/ 。配置 API Key 见下方 [配置](#配置)。
 
-> **macOS 用户**：v0.1.0 release 暂未挂 DMG 安装包（网络上传限制），可在本地构建：`cd desktop && npm install && npm run pack`，产物在 `desktop/dist/`。详见下方 [macOS 桌面端（DMG）](#macos-桌面端dmg)。
+> **macOS DMG 用户**：v0.1.0 release 暂未挂 DMG 安装包（网络上传限制），可在本地构建：`cd desktop && npm install && npm run pack`，产物在 `desktop/dist/`。详见下方 [macOS 桌面端（DMG）](#macos-桌面端dmg)。
 
 ## 功能
 
@@ -30,41 +41,40 @@ nexus start
 
 ## 安装
 
-### 一键安装
+终端用户走 DMG,开发者从源码直跑,**两条路径完全独立**:
+
+### 终端用户（macOS DMG）
+
+下载 `Nexus.dmg` 拖到 `/Applications/`,双击 `Nexus.app` 启动。数据全部在 `~/.nexus/`。
+
+### 开发者（git clone 直跑）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lsf1001/nexus/main/install.sh | bash
-```
+git clone https://github.com/lsf1001/nexus.git
+cd nexus
 
-### 源码安装
-
-```bash
-git clone https://github.com/lsf1001/nexus.git ~/.nexus
-cd ~/.nexus
-python3 -m venv .venv && source .venv/bin/activate
+# 后端
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
-nexus install && nexus start
+
+# 前端
+(cd frontend && npm install)
+
+# 起后端（一个 terminal,30000 端口）
+python nexus/backend/run.py
+
+# 起前端（另一个 terminal,30077 端口）
+(cd frontend && npm run dev)
 ```
 
-> **交付包说明**：仓库不包含 `node_modules/`、`frontend/dist/`、`.venv/`、构建产物（`dist/*.whl` / `dist/*.tar.gz`）与 `__pycache__/` 等运行时缓存。
-> 首次拉取后请先执行：
-> ```bash
-> # 后端依赖
-> python3 -m venv .venv && source .venv/bin/activate
-> pip install -e .
-> # 前端依赖（如需本地构建）
-> cd frontend && npm install
-> ```
+浏览器开 http://localhost:30077/。配置 API Key 见 [配置](#配置)。
 
-### pip 安装（待 PyPI 发布）
+> 仓库不包含 `node_modules/`、`frontend/dist/`、`.venv/`、构建产物（`dist/*.whl` / `dist/*.tar.gz`）与 `__pycache__/` 等运行时缓存。首次拉取后请按上面命令装依赖。
 
-```bash
-pip install nexus && nexus install && nexus start
-```
+### macOS 桌面端（DMG）本地构建
 
-### macOS 桌面端（DMG）
-
-> v0.1.0 release 暂未挂预构建 DMG（网络上传限制）。本地构建：
+> 终端用户也可本地构建 DMG（v0.1.0 release 暂未挂预构建 DMG,网络上传限制）。
 
 ```bash
 cd desktop && npm install && npm run pack
@@ -89,20 +99,6 @@ cd desktop && npm install && npm run pack
 > ```bash
 > xattr -dr com.apple.quarantine /Applications/Nexus.app
 > ```
-```
-
-## CLI
-
-```bash
-nexus install    # 注册服务（开机自启）
-nexus start      # 启动
-nexus stop       # 停止
-nexus restart    # 重启
-nexus status     # 状态
-nexus logs       # 日志
-nexus uninstall  # 卸载
-nexus doctor     # 诊断
-```
 
 ## API
 
