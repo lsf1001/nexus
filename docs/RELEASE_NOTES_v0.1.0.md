@@ -170,3 +170,6 @@ cd desktop && npm install && npm run dev
 ## 🙏 致谢
 
 本次发布由 Claude Sonnet 协助完成代码实现、测试、文档与发布流程。
+---
+
+> **更新提示(2026-06-26)**:本快照中提到的 `nexus install` / `nexus start` 命令已于 2026-06 清理随 `nexus/cli/` 整包删除。终端用户请改用 macOS DMG APP(见 [README.md](../../README.md) 顶部"快速开始"),开发者从 git clone 走 `python nexus/backend/run.py` + `npm run dev`。详见 [CHANGELOG.md](../../CHANGELOG.md) `[Unreleased]` 段。

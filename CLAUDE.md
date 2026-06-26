@@ -36,7 +36,8 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
 # CLI 服务管理
-nexus install|start|stop|restart|status|logs|doctor|uninstall
+# (2026-06 清理: nexus/cli/ 整包删除,产品不再提供 CLI;
+# 终端用户走 /Applications/Nexus.app,开发者直接启后端)
 
 # 后端开发与测试
 source .venv/bin/activate

@@ -143,13 +143,19 @@ session_stats(session_id, message_count, total_tokens, last_active_at)
 
 ## CLI
 
+2026-06 清理：产品不再提供 CLI（`nexus/cli/` 整包删除）。终端用户走 macOS DMG APP（`/Applications/Nexus.app`，Electron 拉起后端），开发者从 git clone 走源码直跑：
+
 ```bash
-nexus install    # launchd/systemd
-nexus start/stop/restart
-nexus status/logs
-nexus uninstall
-nexus setup/doctor
+# 后端（一个 terminal，30000 端口）
+source .venv/bin/activate
+python nexus/backend/run.py
+
+# 前端（另一个 terminal，30077 端口）
+(cd frontend && npm run dev)
 ```
+
+历史 `nexus install/start/stop/status/logs/doctor/setup/config` 全部失效。
+
 
 ## 环境变量
 

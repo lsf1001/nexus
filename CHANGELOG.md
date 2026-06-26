@@ -5,6 +5,35 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [Unreleased] — CLI 清理(产品不再提供 CLI,终端用户走 DMG)
+
+### Removed
+
+- **`nexus/cli/` 整包删除** — `install/uninstall/start/stop/restart/status/logs/doctor/setup/config/gateway/ppt` 全部命令失效
+  - 历史背景：dev 期 `install()` 写 launchd plist + `shutil.copytree(nexus, ~/.nexus/nexus/)` + 重建 venv,模拟"装机",但产品用户拿到的是 DMG,源码复制路径在用户机器上不存在,plist 启动失败
+  - 终端用户路径：**macOS DMG APP**(`/Applications/Nexus.app`,Electron 拉起 PyInstaller onedir 后端)
+  - 开发者路径：git clone 后 `python nexus/backend/run.py` + `(cd frontend && npm run dev)`,见 [README.md](./README.md)
+- **`nexus/pptmaster/` 整包删除** — `nexus ppt` 命令 + runner 子进程边界,与产品核心(AI Gateway + 长期记忆 + 微信通道)无关
+- **`nexus/backend/rubrics/_cli_helpers.py` 删** — 仅被已删 CLI 引用
+- **`nexus/backend/rubrics/exporter.register_export_command()` 删** — CLI 注册逻辑,函数无调用方
+- **`tests/test_cli_commands.py` / `test_config_loading.py` / `test_pptmaster.py` / `test_rubric_exporter.py::test_register_export_command_is_callable` 删** — 对应失效 CLI 的测试
+- **`pyproject.toml` `[project.scripts]` 删** — `nexus` console script 入口
+
+### Changed
+
+- **README.md** 重写顶部"快速开始":终端用户走 DMG,开发者走 git clone,删失效 CLI/一键安装/pip install 段
+- **CLAUDE.md** 命令列表删 CLI,加 2026-06 清理说明
+- **SPEC.md** `## CLI` 段改写为开发者 git clone 步骤
+- **`.claude/settings.local.json`** 删 `nexus gateway status` 权限白名单
+
+### Verified
+
+- ruff check 0 error, format 109 files 0 diff
+- pytest **443 passed / 12 skipped**(原 456,减 13 个失效 CLI 测试)
+- E2E 5/5 通过:简单闲聊 / 长期记忆+身份 / 联网搜索 / 澄清 / 跨 session 隔离(脚本在 `/tmp/e2e_dmg_user.py`,模拟 DMG APP WS 帧)
+
+---
+
 ## [Unreleased] — 记忆子系统重构(对齐 deepagents 框架)
 
 ### Changed
