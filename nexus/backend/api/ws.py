@@ -1000,6 +1000,12 @@ async def handle_websocket(
             # ``Command(resume={"decisions": [...]})`` 续流。如果又触发
             # 新的 HITL,pending2 非空 → 回到 while True 顶部继续等待。
             if data.get("type") == _EVT_CONFIRMATION_RESPONSE:
+                logger.info(
+                    "WS confirmation_response 接收: session=%s event_id=%s interrupt_id=%s",
+                    session_id,
+                    data.get("event_id"),
+                    data.get("interrupt_id"),
+                )
                 if session_id is None:
                     await websocket.send_json(
                         {
@@ -1024,6 +1030,11 @@ async def handle_websocket(
                 except Exception as gs_exc:  # noqa: BLE001
                     logger.warning("WS confirmation_response get_state 失败: %s", gs_exc)
                     pending_interrupts_for_resume = ()
+                logger.info(
+                    "WS confirmation_response aget_state: session=%s pending=%d",
+                    session_id,
+                    len(pending_interrupts_for_resume),
+                )
                 if not pending_interrupts_for_resume:
                     await websocket.send_json(
                         {
