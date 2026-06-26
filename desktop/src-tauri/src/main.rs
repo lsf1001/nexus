@@ -60,6 +60,7 @@ fn main() {
 
             // 用户 cmd+Q → 关闭 sidecar
             if let RunEvent::ExitRequested { .. } = event {
+                log::info!("ExitRequested — shutdown sidecar");
                 runtime::shutdown_sidecar(app_handle);
             }
         });
