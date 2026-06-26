@@ -16,9 +16,6 @@ verdict）转成 LLM 蒸馏训练用的偏好数据。
     （由调用方从 DB / quality_scores 拉取），不直接绑定 DB schema。
   - **score gap 过滤**：默认仅保留 ``|accepted.score - rejected.score| >= 0.3``
     的 pair（plan 强制），保证训练信号强。
-  - **CLI 子命令**：通过 :mod:`nexus.cli.main` 暴露
-    ``nexus export preferences --format dpo --output ...``，便于人工
-    一键导出（见 :func:`register_export_command`）。
   - **不可变**（CLAUDE.md §11）：records 在写入时转 tuple。
   - **类型注解**：完整标注。
   - **无 LLM 依赖**：本模块是纯数据转换 + 文件 IO。
@@ -31,7 +28,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
 __all__ = [
     "PreferenceRecord",
@@ -210,44 +207,6 @@ class PreferenceExporter:
 
 
 # ==================== CLI 注册 ====================
-
-
-def register_export_command(app: Any) -> None:
-    """把 ``nexus export preferences`` 子命令注册到 typer app。
-
-    Args:
-        app: typer.Typer 实例（``nexus.cli.main.app``）。
-    """
-    try:
-        import typer
-    except ImportError:
-        logger.warning("typer 不可用，跳过 CLI 注册")
-        return
-
-    export_app = typer.Typer(help="偏好数据导出")
-
-    @export_app.command("preferences")
-    def _export_preferences(
-        output: str = typer.Option(..., "--output", "-o", help="输出文件路径"),
-        fmt: str = typer.Option("dpo", "--format", "-f", help="格式：dpo / kto"),
-        min_gap: float = typer.Option(DEFAULT_MIN_SCORE_GAP, "--min-gap", help="score gap 阈值"),
-    ) -> None:
-        """从 quality_scores 表导出 DPO / KTO 偏好数据。
-
-        使用示例：
-            nexus export preferences --format dpo --output ./data/prefs.jsonl
-            nexus export preferences --format kto --output ./data/kto.jsonl --min-gap 0.5
-        """
-        from . import _cli_helpers  # 局部 import 避免循环
-
-        records = _cli_helpers.load_preference_records()
-        exporter = PreferenceExporter(min_score_gap=min_gap)
-        if fmt == "dpo":
-            count = exporter.export_dpo(records, output, min_score_gap=min_gap)
-        elif fmt == "kto":
-            count = exporter.export_kto(records, output, min_score_gap=min_gap)
-        else:
-            raise typer.BadParameter(f"未知格式 {fmt}，仅支持 dpo / kto")
-        typer.echo(f"已导出 {count} 条 → {output}")
-
-    app.add_typer(export_app, name="export")
+# 历史: register_export_command() 2026-06 随 nexus/cli/ 整体删除。
+# 偏好导出请直接调 PreferenceExporter.export_dpo / export_kto,或走
+# 未来 APP 端 UI。

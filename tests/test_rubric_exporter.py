@@ -224,34 +224,3 @@ def test_preference_record_is_frozen():
     rec = _make_record()
     with pytest.raises((AttributeError, Exception)):
         rec.accepted = "篡改"  # type: ignore[misc]
-
-
-# ==================== CLI 注册 ====================
-
-
-def test_register_export_command_is_callable():
-    """register_export_command 函数存在且可调用。
-
-    测试环境无 typer（Nexus 顶层 dep），用 mock 模拟 typer 模块验证
-    子 app 正确注册。
-    """
-    from unittest.mock import MagicMock, patch
-
-    from nexus.backend.rubrics.exporter import register_export_command
-
-    # 模拟 typer 模块：Typer() 返回 fake，command() 返装饰器，BadParameter 可抛
-    fake_typer = MagicMock()
-    fake_export_app = MagicMock()
-    fake_typer.Typer.return_value = fake_export_app
-    fake_typer.BadParameter = Exception
-
-    with patch.dict("sys.modules", {"typer": fake_typer}):
-        fake_app = MagicMock()
-        register_export_command(fake_app)
-        # 调用了 fake_app.add_typer，且 name="export"
-        fake_app.add_typer.assert_called_once()
-        call_args = fake_app.add_typer.call_args
-        assert call_args.kwargs.get("name") == "export" or call_args.args == (
-            fake_export_app,
-            "export",
-        )

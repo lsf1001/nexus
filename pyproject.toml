@@ -50,9 +50,6 @@ pythonpath = ["."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 
-[project.scripts]
-nexus = "nexus.cli.main:app"
-
 [tool.hatch.build.targets.wheel]
 packages = ["nexus"]
 
