@@ -47,10 +47,15 @@ if [ ! -d "$APP_BUNDLE" ]; then
   exit 1
 fi
 
-# 4. 移到 release/(统一位置)
-mkdir -p "$ROOT_DIR/release"
-rm -rf "$ROOT_DIR/release/${APP_NAME}.app" 2>/dev/null || true
-cp -R "$APP_BUNDLE" "$ROOT_DIR/release/${APP_NAME}.app"
+# 4. 移到 release/.build/(隐藏子目录,避免 Spotlight/Launchpad 索引产生额外图标)
+#    按 docs/operations/e2e-2026-06-27.md 经验,放家目录根级 release/ 会被 Launchpad 当独立 app 显示
+mkdir -p "$ROOT_DIR/release/.build"
+rm -rf "$ROOT_DIR/release/.build/${APP_NAME}.app" 2>/dev/null || true
+cp -R "$APP_BUNDLE" "$ROOT_DIR/release/.build/${APP_NAME}.app"
+
+# 4b. 删 cargo tauri build 留在 target/ 里的 bundle,避免同样的 Launchpad 重复图标
+#     target/ 在 .gitignore 里但 Spotlight/Launchpad 仍会索引
+rm -rf "$ROOT_DIR/desktop/src-tauri/target/release/bundle/macos/${APP_NAME}.app" 2>/dev/null || true
 
 # 5. 用 hdiutil 打 DMG(避开 tauri 2 的 AppleScript,后者在非交互 shell 必挂)
 echo ">>> step 3: create DMG with hdiutil..."
