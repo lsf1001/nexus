@@ -17,14 +17,23 @@
   --color-thinking-text: #4a5d42;
 }
 
-/* 默认浅色森林主题 */
+/* 默认背景跟随系统外观,避免 macOS Dark Mode 下标题栏(深)和 body(浅)
+   颜色不一致产生"黑色横条"违和感。主题 JS 加载完会按用户偏好切换。 */
 html, body {
   height: 100%;
   overflow: hidden;
 }
-body {
-  background: #f5f7f2;
-  color: #1a1a1a;
+@media (prefers-color-scheme: dark) {
+  html, body {
+    background: #0f0f12;
+    color: #e8e8ea;
+  }
+}
+@media (prefers-color-scheme: light) {
+  html, body {
+    background: #f5f7f2;
+    color: #1a1a1a;
+  }
 }
 
 /* 滚动条样式 - 加强可见性 */
