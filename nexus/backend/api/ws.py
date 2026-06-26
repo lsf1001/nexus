@@ -648,6 +648,14 @@ async def _run_agent_streaming(
                     full_response = end_content
             elif event_type == "on_tool_start":
                 tool_name = event.get("name", "未知工具")
+                tool_input = event.get("data", {}).get("input") or {}
+                logger.info(
+                    "WS on_tool_start: session=%s tool=%s event_id=%s input=%s",
+                    session_id,
+                    tool_name,
+                    event_id,
+                    str(tool_input)[:200],
+                )
                 if tool_name == _CLARIFY_TOOL_NAME:
                     # === 澄清挂起 ===
                     # LLM 决定追问用户:把工具入参(问题 + 候选项)作为
@@ -703,7 +711,15 @@ async def _run_agent_streaming(
                         }
                     )
             elif event_type == "on_tool_end":
+                tool_name = event.get("name", "未知工具")
                 output = event.get("data", {}).get("output")
+                logger.info(
+                    "WS on_tool_end: session=%s tool=%s event_id=%s output_chars=%d",
+                    session_id,
+                    tool_name,
+                    event_id,
+                    len(str(output)) if output else 0,
+                )
                 await websocket.send_json(
                     {
                         "type": "thinking",
@@ -1213,8 +1229,13 @@ async def handle_websocket(
                 get_quality_pipeline=get_quality_pipeline,
             )
 
-    except WebSocketDisconnect:
-        logger.info("客户端断开连接")
+    except WebSocketDisconnect as wsd:
+        logger.info(
+            "客户端断开连接: session=%s code=%s reason=%s",
+            session_id,
+            getattr(wsd, "code", "?"),
+            getattr(wsd, "reason", "?"),
+        )
         with _clients_lock:
             if websocket in _ws_clients:
                 _ws_clients.remove(websocket)
