@@ -18,7 +18,17 @@ import { openHome, messageInput, sendButton } from './helpers';
  * 之前用 addInitScript 重写 window.WebSocket 构造器,会污染浏览器 ws 内部
  * 行为(抓包到 close 1006 / 0 帧收到),3/3 跑失败。Playwright 原生事件
  * 监听器是浏览器层外的,不影响 ws 自身实现,稳定可靠。
+ *
+ * mock LLM 模式 (NEXUS_E2E_MOCK=1) 下,默认场景 allow_nexus_write 写
+ * `.nexus/outputs/`,不会触发 HITL 卡片 → 整个 spec 跳
+ *  跳过。要在 mock 模式测 HITL 走 NEXUS_E2E_SCENARIO=interrupt_agents_md
+ * 的独立 spec (hitl-confirm-mock.spec.ts)。
  */
+test.skip(
+  process.env.NEXUS_E2E_MOCK === '1',
+  'HITL 真 LLM 路径,mock 模式默认场景不触发 → skip。改用 interrupt_agents_md mock 场景跑 hitl-confirm-mock.spec.ts'
+);
+
 test('HITL 确认卡片:触发 → 批准 → 流完成', async ({ page }) => {
   test.setTimeout(180_000);
 

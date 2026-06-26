@@ -1,9 +1,16 @@
 /**
  * Playwright 原生 websocket 事件诊断:在 page.on('websocket') 层级看真实状态。
  * 不在浏览器内重写 WebSocket(避免污染 useWebSocket 行为)。
+ *
+ * 这是诊断 spec,只在真 LLM 路径有意义(mock 模式下 ws 不会真的 1006) → mock 模式 skip。
  */
 import { test, expect } from '@playwright/test';
 import { openHome, messageInput, sendButton } from './helpers';
+
+test.skip(
+  process.env.NEXUS_E2E_MOCK === '1',
+  '诊断 spec,只在真 LLM 路径有意义;mock 模式不模拟 ws 1006 异常'
+);
 
 test('HITL 1006 真实 close 原因', async ({ page }) => {
   test.setTimeout(180_000);

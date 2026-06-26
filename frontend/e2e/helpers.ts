@@ -34,9 +34,12 @@ export type QuickPromptTitle = '写代码' | '分析数据' | '知识问答' | '
 export async function openHome(page: Page): Promise<void> {
   await page.goto('/app/');
 
-  // 首选信号:ChatView 4 个快捷 prompt 按钮之一,这是 ChatView 渲染完成的标志
-  // "整理今天的待办" 是 ChatArea.tsx QUICK_PROMPTS[0].title。
-  const readyPrompt = page.getByRole('button', { name: /整理今天的待办/ });
+  // 首选信号:ChatView 4 个快捷 prompt 按钮之一(.prompt-card),
+  // 这是 ChatView 渲染完成的标志。"整理今天的待办" 是 ChatArea.tsx
+  // QUICK_PROMPTS[0].title。
+  // 必须用 .prompt-card class 限定,不能用 role=button + name= 模糊匹配
+  // (Sidebar 历史会话的 task-item 也会匹配,strict mode 会冲突)。
+  const readyPrompt = page.locator('button.prompt-card', { hasText: '整理今天的待办' });
   await expect(readyPrompt).toBeVisible({ timeout: 30_000 });
 
   // 输入框必须可点 —— 发送消息前 sendMessageAndWaitForReply 也会再等一次

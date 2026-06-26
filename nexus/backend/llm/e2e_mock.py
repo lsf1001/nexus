@@ -147,11 +147,10 @@ class E2EMockChatModel(BaseChatModel):
         return "e2e-mock"
 
     def _generate(self, messages: list, stop=None, run_manager=None, **kwargs: Any) -> ChatResult:
-        self.call_count += 1
         return ChatResult(
             generations=[
                 ChatGeneration(
-                    message=self._build_message(),
+                    message=self._build_message(messages),
                 )
             ]
         )
@@ -168,22 +167,43 @@ class E2EMockChatModel(BaseChatModel):
         """
         return self
 
-    def _build_message(self) -> AIMessage:
-        # 第 1 次返回预设 tool_calls;后续返回反思文本(让 deepagents 进入收尾)
-        if self.call_count == 1:
-            tool_calls_spec = _SCENARIOS.get(self.scenario, _SCENARIOS["allow_nexus_write"])
-            tool_calls = [
-                {
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
-                    "name": spec["name"],
-                    "args": spec["args"],
-                }
-                for spec in tool_calls_spec
-            ]
-            return AIMessage(content="", tool_calls=tool_calls)
-        # 反思:第 2 次后
-        reflection = _REFLECTION_TEXTS.get(self.scenario, _REFLECTION_TEXTS["default"])
-        return AIMessage(content=reflection)
+    def _build_message(self, messages: list | None = None) -> AIMessage:
+        """根据当前消息上下文决定返回 tool_calls 还是反思文本。
+
+        历史实现用 ``call_count`` 计数,问题是 mock instance 进程级单例,
+        多 e2e spec 顺序跑会共享 call_count,只有第一个 spec 看到 tool_calls,
+        后续全部走反思 → 第二个 spec 期待 HITL 永远不出现。
+
+        改成"context-aware":
+          - 历史消息里**有** ToolMessage(无论成功失败)→ 上一轮工具已被
+            deepagents 消费,LLM 该反思/收尾
+          - 没有 ToolMessage → 首次进入,返回预设 tool_calls
+
+        这样每个新 user prompt 都会触发 tool_calls,HITL/reject/allow
+        各种路径都能在多 spec 顺序跑时各自触发。
+        """
+        has_tool_result = False
+        if messages:
+            from langchain_core.messages import ToolMessage
+
+            has_tool_result = any(isinstance(m, ToolMessage) for m in messages)
+
+        if has_tool_result:
+            # 上一轮工具被消费(可能成功/失败/interrupt resume 后),LLM 收尾
+            reflection = _REFLECTION_TEXTS.get(self.scenario, _REFLECTION_TEXTS["default"])
+            return AIMessage(content=reflection)
+
+        # 首次进入:返回预设 tool_calls
+        tool_calls_spec = _SCENARIOS.get(self.scenario, _SCENARIOS["allow_nexus_write"])
+        tool_calls = [
+            {
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "name": spec["name"],
+                "args": spec["args"],
+            }
+            for spec in tool_calls_spec
+        ]
+        return AIMessage(content="", tool_calls=tool_calls)
 
 
 def make_e2e_mock_llm() -> E2EMockChatModel:

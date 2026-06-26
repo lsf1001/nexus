@@ -68,6 +68,13 @@ export default defineConfig({
         ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL ?? '',
         MODEL_NAME: process.env.MODEL_NAME ?? 'MiniMax-M3',
         NEXUS_HOME: e2eNexusHome,
+        // 透传 mock LLM 开关。NEXUS_E2E_MOCK=1 时 nexus.backend.agent 加载
+        // e2e_mock.py 替代真实 LLM(场景由 NEXUS_E2E_SCENARIO 决定),
+        // 决定性触发 write_file 工具,无 LLM 行为不稳定问题,CI 100% 稳跑。
+        // hitl-confirm.spec.ts 等期待 HITL 的 spec 在 mock 下会 skip 自己
+        // (mock 默认 allow_nexus_write 不触发 HITL)。
+        NEXUS_E2E_MOCK: process.env.NEXUS_E2E_MOCK ?? '0',
+        NEXUS_E2E_SCENARIO: process.env.NEXUS_E2E_SCENARIO ?? 'allow_nexus_write',
       },
     },
     {

@@ -28,11 +28,17 @@ concurrency:
 
 jobs:
   e2e:
-    name: Playwright E2E (real backend + real LLM)
+    name: Playwright E2E (mock LLM, deterministic)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      # LLM 凭据：从仓库 Secrets 注入
+      # 启用 mock LLM:让 nexus.backend.agent 加载 nexus.backend.llm.e2e_mock
+      # 替代真实 LLM。默认 scenario=allow_nexus_write 写到
+      # `.nexus/outputs/e2e_allow.md`,无害、不触发 HITL、决定性 100% 触发。
+      # 真 LLM 路径覆盖靠 workflow_dispatch 触发的 e2e-realm 单独 job。
+      NEXUS_E2E_MOCK: '1'
+      NEXUS_E2E_SCENARIO: 'allow_nexus_write'
+      # LLM 凭据保留以备真 LLM job 使用;mock 模式下不读这些
       MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
@@ -84,5 +90,84 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: playwright-test-results
+          path: frontend/test-results/
+          retention-days: 7
+
+  # 真 LLM 路径冒烟 job — 只 workflow_dispatch 触发(因为真实 LLM 行为
+  # 不稳,LLM 决定时间 / 路径变化大,不适合做 push 阻断门)。
+  # 跑 NEXUS_E2E_MOCK=0 走真实模型,只跑 hitl-confirm + chat-happy-path。
+  e2e-realm:
+    name: Playwright E2E (real LLM, manual trigger)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch'
+    env:
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+      NEXUS_E2E_MOCK: '0'
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python deps
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Backup ~/.nexus/AGENTS.md (hitl-confirm 可能改写)
+        run: |
+          mkdir -p /tmp/agents-backup
+          if [ -f "$HOME/.nexus/AGENTS.md" ]; then
+            cp "$HOME/.nexus/AGENTS.md" /tmp/agents-backup/AGENTS.md
+          fi
+
+      - name: Run Playwright tests (real LLM path)
+        working-directory: frontend
+        run: npx playwright test e2e/hitl-confirm.spec.ts e2e/chat-happy-path.spec.ts
+
+      - name: Restore ~/.nexus/AGENTS.md
+        if: always()
+        run: |
+          if [ -f /tmp/agents-backup/AGENTS.md ]; then
+            mkdir -p "$HOME/.nexus"
+            cp /tmp/agents-backup/AGENTS.md "$HOME/.nexus/AGENTS.md"
+          fi
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-report-realm
+          path: frontend/playwright-report/
+          retention-days: 14
+
+      - name: Upload test results (traces + videos)
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-test-results-realm
           path: frontend/test-results/
           retention-days: 7
