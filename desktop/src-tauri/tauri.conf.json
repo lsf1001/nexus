@@ -4,10 +4,10 @@
   "version": "1.1.0",
   "identifier": "cn.yexiaobai.nexus",
   "build": {
-    "beforeDevCommand": "cd ../../frontend && npm run dev",
-    "beforeBuildCommand": "cd ../../frontend && npm run build",
+    "beforeDevCommand": "npm --prefix /Users/yxb/projects/nexus/frontend run dev",
+    "beforeBuildCommand": "npm --prefix /Users/yxb/projects/nexus/frontend run build",
     "devUrl": "http://localhost:30077",
-    "frontendDist": "../../frontend/dist"
+    "frontendDist": "/Users/yxb/projects/nexus/frontend/dist"
   },
   "app": {
     "windows": [

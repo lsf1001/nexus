@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { DesktopShell } from './components/desktop/DesktopShell';
-import { SplashView, RuntimeStatus } from './components/desktop/SplashView';
+import { SplashView, type RuntimeStatus } from './components/desktop/SplashView';
 
 /**
  * Tauri 模式下:监听 runtime-status 事件,sidecar 起来前显示 Splash。

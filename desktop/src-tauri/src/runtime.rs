@@ -70,14 +70,14 @@ pub async fn start_sidecar(app: &AppHandle) -> Result<(), String> {
 fn resolve_sidecar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     use tauri::path::BaseDirectory;
 
-    // 先尝试 Resource 目录(打包模式)
-    if let Ok(p) = app.path().resolve("nexus-runtime", BaseDirectory::Resource) {
+    // 1. 打包模式:Resource 目录(整个 onedir 目录被 externalBin 复制到 .app/Contents/Resources/)
+    if let Ok(p) = app.path().resolve("nexus-runtime/nexus-runtime", BaseDirectory::Resource) {
         if p.exists() {
             return Ok(p);
         }
     }
 
-    // 再尝试 .app/Contents/MacOS/(Tauri 2 习惯)
+    // 2. 再尝试 .app/Contents/MacOS/(Tauri 2 习惯)
     if let Ok(resource) = app.path().resource_dir() {
         let macos_path = resource
             .parent()
@@ -89,17 +89,28 @@ fn resolve_sidecar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         }
     }
 
-    // 开发模式:src-tauri/binaries/nexus-runtime-{arch}-{platform}
+    // 3. dev 模式:用 onedir 完整 bundle(release/nexus-runtime/nexus-runtime)
+    //    PyInstaller onedir 需要 _internal/ 目录里的 Python stdlib
+    let dev_bundle = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("release")
+        .join("nexus-runtime")
+        .join("nexus-runtime");
+    if dev_bundle.exists() {
+        return Ok(dev_bundle);
+    }
+
+    // 4. 兜底:src-tauri/binaries/nexus-runtime-{arch}-{platform}(单文件,可能缺 _internal)
     let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("binaries")
         .join(format!("nexus-runtime-{}", std::env::consts::ARCH));
-
     if dev_path.exists() {
         return Ok(dev_path);
     }
 
     Err(format!(
-        "sidecar binary not found. tried: resource dir, .app/Contents/MacOS/, dev: {dev_path:?}"
+        "sidecar binary not found. tried: resource dir, .app/Contents/MacOS/, dev bundle: {dev_bundle:?}, dev single: {dev_path:?}"
     ))
 }
 
