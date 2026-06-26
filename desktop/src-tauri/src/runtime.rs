@@ -1,11 +1,33 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use once_cell::sync::Lazy;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::{Child, Command};
 use tokio::sync::RwLock;
 use tokio::time::Instant;
+
+/// 全局 sidecar PID:主进程任何路径退出(cmd+Q / SIGTERM / panic)都靠这个杀子进程
+/// 不依赖 Tauri RunEvent,因为 macOS terminateApp 直接 SIGTERM 主进程,不走 ExitRequested
+static SIDECAR_PID: Lazy<std::sync::Mutex<Option<u32>>> =
+    Lazy::new(|| std::sync::Mutex::new(None));
+
+/// atexit 钩子:主进程退出前同步杀 sidecar
+fn kill_sidecar_at_exit() {
+    if let Ok(mut guard) = SIDECAR_PID.lock() {
+        if let Some(pid) = guard.take() {
+            unsafe {
+                libc::kill(pid as i32, libc::SIGKILL);
+            }
+            eprintln!("[nexus] atexit: SIGKILL sidecar pid={pid}");
+        }
+    }
+}
+
+pub fn set_sidecar_pid(pid: u32) {
+    *SIDECAR_PID.lock().unwrap() = Some(pid);
+}
 
 pub struct AppState {
     pub sidecar: Arc<RwLock<Option<Child>>>,
@@ -17,6 +39,17 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
+        // 安装 atexit 兜底,主进程任何路径退出都先杀 sidecar
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            // libc::atexit 需 unsafe extern "C" fn
+            extern "C" fn atexit_handler() {
+                kill_sidecar_at_exit();
+            }
+            unsafe {
+                libc::atexit(atexit_handler);
+            }
+        });
         Self {
             sidecar: Arc::new(RwLock::new(None)),
             api_base: "http://127.0.0.1:30000".into(),
@@ -57,6 +90,11 @@ pub async fn start_sidecar(app: &AppHandle) -> Result<(), String> {
     let child = cmd
         .spawn()
         .map_err(|e| format!("spawn failed: {e} (path: {sidecar_path:?})"))?;
+
+    // 把 PID 写到全局,atexit 兜底
+    if let Some(pid) = child.id() {
+        set_sidecar_pid(pid);
+    }
 
     *state.sidecar.write().await = Some(child);
 
@@ -176,19 +214,27 @@ pub async fn supervise_sidecar(app: AppHandle) {
 }
 
 pub fn shutdown_sidecar(app: &tauri::AppHandle) {
+    eprintln!("[nexus] shutdown_sidecar called");
     let state: tauri::State<AppState> = app.state();
     let child_opt = {
         let Ok(mut guard) = state.sidecar.try_write() else {
+            eprintln!("[nexus] shutdown_sidecar: try_write failed");
             return;
         };
         guard.take()
     };
-    if let Some(mut child) = child_opt {
-        log::info!("killing sidecar");
-        tokio::spawn(async move {
-            if let Err(e) = child.kill().await {
-                log::error!("kill sidecar failed: {e}");
-            }
-        });
+    let Some(mut child) = child_opt else {
+        eprintln!("[nexus] shutdown_sidecar: no child to kill");
+        return;
+    };
+    eprintln!("[nexus] killing sidecar");
+    if let Some(pid) = child.id() {
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
+        eprintln!("[nexus] sent SIGKILL to sidecar pid={pid}");
+    } else {
+        eprintln!("[nexus] child.id() returned None");
     }
+    drop(child);
 }
