@@ -1,0 +1,10 @@
+{
+  "name": "nexus-desktop",
+  "version": "1.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "cargo tauri dev",
+    "build": "cargo tauri build",
+    "build:debug": "cargo tauri build --debug"
+  }
+}
