@@ -1,16 +1,16 @@
 """Nexus CLI 主入口。
 
 用法:
-    nexus install    # 安装/注册 launchd（常驻）
-    nexus start      # 启动服务
-    nexus stop       # 停止服务
-    nexus restart    # 重启服务
-    nexus status     # 查看状态
-    nexus logs       # 查看日志
-    nexus uninstall  # 卸载服务
+    nexus status     # 查看 backend 是否在 30000 端口
+    nexus logs       # 跟踪 backend 日志
     nexus setup      # 交互式设置向导
     nexus doctor     # 环境诊断
-    nexus gateway    # 网关子命令（向后兼容）
+    nexus gateway    # 网关子命令(只含 run,前台 dev)
+    nexus config     # 配置管理
+
+设计:Nexus 产品 = DMG APP,后端随 Electron 启停,数据走 ~/.nexus/。
+本 CLI 只保留**只读诊断 + dev 辅助**命令,不再提供后台服务管理
+(launchd / systemd / pid 文件这套 dev 期残留全部移除)。
 """
 
 from pathlib import Path
@@ -28,119 +28,50 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-app.add_typer(gateway_app, name="gateway", help="网关子命令（向后兼容）")
+app.add_typer(gateway_app, name="gateway", help="网关子命令(前台 dev)")
 app.add_typer(config_app, name="config", help="配置管理")
 
 
-@app.command()
-def install() -> None:
-    """注册为系统服务（launchd/systemd），实现开机自启和常驻运行。"""
-    from rich.console import Console
+def _check_port(port: int) -> tuple[bool, str]:
+    """检查端口是否在监听(只读,不启停)。
 
-    from .daemon import get_daemon_manager
+    Returns:
+        (is_listening, detail): is_listening=True 时 detail 是进程信息。
+    """
+    import subprocess
 
-    console = Console()
-    console.print("[cyan]注册系统服务...[/cyan]")
-
-    manager = get_daemon_manager()
-    manager.install()
-
-    console.print("[green]✔ 已注册为系统服务[/green]")
-    console.print("使用 [cyan]nexus start[/cyan] 启动服务")
-
-
-@app.command()
-def uninstall() -> None:
-    """移除系统服务注册。"""
-    from rich.console import Console
-
-    from .daemon import get_daemon_manager
-
-    console = Console()
-    manager = get_daemon_manager()
-
-    if manager.is_running():
-        console.print("[yellow]先停止服务...[/yellow]")
-        manager.stop()
-
-    manager.uninstall()
-    console.print("[green]✔ 已移除系统服务注册[/green]")
-
-
-@app.command()
-def start(
-    replace: bool = typer.Option(False, "--replace", help="替换已有实例"),
-) -> None:
-    """启动 Nexus Gateway 服务（后台运行）。"""
-    from rich.console import Console
-
-    from .daemon import get_daemon_manager
-
-    console = Console()
-    manager = get_daemon_manager()
-
-    if manager.is_running():
-        if replace:
-            console.print("[yellow]停止旧实例...[/yellow]")
-            manager.stop()
-        else:
-            console.print(f"[yellow]网关已在运行中 (PID: {manager.get_pid()})[/yellow]")
-            console.print("使用 [cyan]nexus restart[/cyan] 重启")
-            return
-
-    manager.start()
-    console.print(f"[green]✔ 网关已启动 (PID: {manager.get_pid()})[/green]")
-
-
-@app.command()
-def stop() -> None:
-    """停止 Nexus Gateway 服务。"""
-    from rich.console import Console
-
-    from .daemon import get_daemon_manager
-
-    console = Console()
-    manager = get_daemon_manager()
-
-    if not manager.is_running():
-        console.print("[yellow]网关未运行[/yellow]")
-        return
-
-    manager.stop()
-    console.print("[green]✔ 网关已停止[/green]")
-
-
-@app.command()
-def restart() -> None:
-    """重启 Nexus Gateway 服务。"""
-    from rich.console import Console
-
-    from .daemon import get_daemon_manager
-
-    console = Console()
-    manager = get_daemon_manager()
-    manager.restart()
-    console.print("[green]✔ 网关已重启[/green]")
+    result = subprocess.run(
+        ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return False, "无监听"
+    # 取第一行进程信息
+    lines = [ln for ln in result.stdout.splitlines() if ln and not ln.startswith("COMMAND")]
+    if not lines:
+        return False, "无监听"
+    first = lines[0].split()
+    cmd = first[0] if len(first) > 0 else "?"
+    pid = first[1] if len(first) > 1 else "?"
+    return True, f"{cmd} (PID: {pid})"
 
 
 @app.command()
 def status() -> None:
-    """查看 Nexus Gateway 运行状态。"""
+    """查看 Nexus backend 状态(查 30000 端口是否在监听)。"""
     import platform
 
     from rich.console import Console
     from rich.panel import Panel
 
-    from .daemon import get_daemon_manager
-
     console = Console()
-    manager = get_daemon_manager()
-    pid = manager.get_pid()
+    running, detail = _check_port(30000)
 
-    if manager.is_running():
+    if running:
         console.print(
             Panel(
-                f"[green]● 运行中[/green]\n\nPID: [cyan]{pid}[/cyan]\n平台: [cyan]{platform.system()}[/cyan]\n端口: [cyan]30000[/cyan]",
+                f"[green]● 运行中[/green]\n\n进程: [cyan]{detail}[/cyan]\n平台: [cyan]{platform.system()}[/cyan]\n端口: [cyan]30000[/cyan]",
                 title="Nexus Gateway",
                 border_style="green",
             )
@@ -148,7 +79,9 @@ def status() -> None:
     else:
         console.print(
             Panel(
-                "[red]● 未运行[/red]\n\n使用 [cyan]nexus start[/cyan] 启动服务",
+                f"[red]● 未运行[/red]\n\n[dim]{detail}[/dim]\n\n启动方式:\n"
+                "  dev  : [cyan].venv/bin/python nexus/backend/run.py[/cyan]\n"
+                "  prod : 启动 [cyan]/Applications/Nexus.app[/cyan]",
                 title="Nexus Gateway",
                 border_style="red",
             )
@@ -160,21 +93,17 @@ def logs(
     lines: int = typer.Option(50, "-n", "--lines", help="显示最近 N 行"),
     follow: bool = typer.Option(False, "-f", "--follow", help="实时跟踪日志"),
 ) -> None:
-    """查看 Nexus Gateway 日志。"""
-    from pathlib import Path
-
+    """查看 Nexus backend 日志(读 ~/.nexus/logs/nexus.log)。"""
     from rich.console import Console
 
     console = Console()
-    nexus_home = Path.home() / ".nexus"
-    log_file = nexus_home / "logs" / "stdout.log"
+    log_file = Path.home() / ".nexus" / "logs" / "nexus.log"
 
     if not log_file.exists():
         console.print(f"[yellow]日志文件不存在: {log_file}[/yellow]")
         return
 
     if follow:
-        # 实时跟踪
         console.print("[cyan]实时跟踪日志 (Ctrl+C 退出)[/cyan]")
         console.print(f"[dim]文件: {log_file}[/dim]\n")
 
@@ -192,7 +121,6 @@ def logs(
             except KeyboardInterrupt:
                 pass
     else:
-        # 显示最后 N 行
         with open(log_file, encoding="utf-8") as f:
             all_lines = f.readlines()
             tail_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines

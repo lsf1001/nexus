@@ -11,7 +11,6 @@ from rich.console import Console
 from rich.panel import Panel
 
 from .config_store import NEXUS_CONFIG_PATH, NEXUS_MODELS_PATH, load_nexus_config
-from .daemon import get_daemon_manager
 
 console = Console()
 
@@ -116,13 +115,18 @@ def _check_port_available() -> CheckResult:
 
 
 def _check_gateway_status() -> CheckResult:
-    """检查网关运行状态。"""
+    """检查网关运行状态(查 30000 端口是否在监听)。"""
     try:
-        manager = get_daemon_manager()
-        pid = manager.get_pid()
-        if manager.is_running():
-            return CheckResult("网关状态", CheckStatus.PASS, f"运行中 (PID: {pid})")
-        return CheckResult("网关状态", CheckStatus.WARN, "未运行")
+        result = subprocess.run(
+            ["lsof", "-nP", "-iTCP:30000", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            lines = [ln for ln in result.stdout.splitlines() if ln and not ln.startswith("COMMAND")]
+            detail = lines[0] if lines else "?"
+            return CheckResult("网关状态", CheckStatus.PASS, f"运行中 ({detail})")
+        return CheckResult("网关状态", CheckStatus.WARN, "未运行 (30000 端口无监听)")
     except Exception as e:
         return CheckResult("网关状态", CheckStatus.WARN, f"无法检查: {e}")
 

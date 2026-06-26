@@ -11,7 +11,6 @@ from .config_store import (
     get_default_config,
     save_nexus_config,
 )
-from .daemon import get_daemon_manager
 
 console = Console()
 
@@ -32,11 +31,6 @@ def _prompt_port() -> int:
         pass
     console.print("[yellow]无效的端口号，使用默认值 30000[/yellow]")
     return 30000
-
-
-def _prompt_install_daemon() -> bool:
-    """询问是否注册为系统服务。"""
-    return Confirm.ask("是否注册为开机自启的系统服务？", default=True)
 
 
 def _migrate_models_json() -> dict | None:
@@ -71,11 +65,11 @@ def run_setup() -> None:
             return
 
     # 1. 选择模型提供商
-    console.print("\n[cyan]步骤 1/4: 选择模型提供商[/cyan]")
+    console.print("\n[cyan]步骤 1/3: 选择模型提供商[/cyan]")
     console.print("当前支持: MiniMax (兼容 OpenAI API)")
 
     # 2. 输入 API Key
-    console.print("\n[cyan]步骤 2/4: 配置 API Key[/cyan]")
+    console.print("\n[cyan]步骤 2/3: 配置 API Key[/cyan]")
     api_key = _prompt_api_key()
 
     if not api_key:
@@ -83,12 +77,8 @@ def run_setup() -> None:
         raise typer.Exit(code=1)
 
     # 3. 配置端口
-    console.print("\n[cyan]步骤 3/4: 配置服务端口[/cyan]")
+    console.print("\n[cyan]步骤 3/3: 配置服务端口[/cyan]")
     port = _prompt_port()
-
-    # 4. 是否注册为系统服务
-    console.print("\n[cyan]步骤 4/4: 系统服务注册[/cyan]")
-    install_daemon = _prompt_install_daemon()
 
     # 生成配置
     config = get_default_config()
@@ -108,27 +98,15 @@ def run_setup() -> None:
     save_nexus_config(config)
     console.print(f"\n[green]✔ 配置已保存到 {NEXUS_CONFIG_PATH}[/green]")
 
-    # 注册系统服务
-    if install_daemon:
-        console.print("\n[cyan]注册系统服务...[/cyan]")
-        try:
-            manager = get_daemon_manager()
-            manager.install()
-            console.print("[green]✔ 系统服务已注册[/green]")
-            console.print("使用 [cyan]nexus gateway start[/cyan] 启动服务")
-        except Exception as e:
-            console.print(f"[yellow]注册系统服务失败: {e}[/yellow]")
-            console.print("你可以稍后运行 [cyan]nexus gateway install[/cyan] 手动注册")
-
     # 完成
     console.print(
         Panel(
             "[bold green]设置完成！[/bold green]\n\n"
-            "使用方式:\n"
-            "  [cyan]nexus[/cyan]              # 启动网关（向前兼容）\n"
-            "  [cyan]nexus gateway run[/cyan]  # 前台运行\n"
-            "  [cyan]nexus gateway start[/cyan] # 后台启动\n"
-            "  [cyan]nexus config list[/cyan]  # 查看配置\n",
+            "启动方式:\n"
+            "  dev  : [cyan].venv/bin/python nexus/backend/run.py[/cyan]\n"
+            "  prod : 启动 [cyan]/Applications/Nexus.app[/cyan]\n\n"
+            "查看状态: [cyan]nexus status[/cyan]\n"
+            "查看配置: [cyan]nexus config list[/cyan]\n",
             title="完成",
             border_style="green",
         )
