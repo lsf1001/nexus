@@ -2,6 +2,7 @@
 src-tauri/target/
 src-tauri/Cargo.lock
 src-tauri/gen/
+src-tauri/frontend-dist/   # beforeBuildCommand 拷贝的前端产物
 src-tauri/binaries/*-apple-darwin
 !src-tauri/binaries/.gitkeep
 
