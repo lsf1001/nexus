@@ -222,8 +222,7 @@ def create_session(session_id: str, title: str | None = None, channel: str = "ma
     now = datetime.now().isoformat()
     with get_db() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO sessions (id, title, created_at, updated_at, channel) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO sessions (id, title, created_at, updated_at, channel) VALUES (?, ?, ?, ?, ?)",
             (session_id, title, now, now, channel),
         )
         row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
