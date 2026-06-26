@@ -3,7 +3,7 @@
 夜小白科技有限公司开发的 AI Gateway（智能对话 / 会话管理 / 记忆系统 / MCP 插件 / 微信通道）。
 
 > **回复语言**：简体中文。
->
+> 
 > **硬性约束**：见 `@python_project.md`（违规 CI 阻断）。
 
 @python_project.md
@@ -68,15 +68,15 @@ npm run build:frontend|build:dmg|build:all
 
 ## 环境变量
 
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `MINIMAX_API_KEY` / `MINIMAX_API_BASE` | — | 首选（兼容 `MINIMAX_API_KEY` / `MiniMax_API_KEY`） |
-| `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` | — | Anthropic 风格兼容 |
-| `NEXUS_WS_TOKEN` | `nexus-default-token` | 后端 WebSocket 认证 |
-| `VITE_NEXUS_WS_TOKEN` | 同上 | 前端编译期 env，Vite 只暴露 `VITE_*` 给客户端；必须与 `NEXUS_WS_TOKEN` 一致，否则 WS 鉴权失败 |
-| `NEXUS_PORT` | `30000` | 后端端口 |
-| `NEXUS_ENABLE_MCP` | `true` | 启用 MCP |
-| `NEXUS_ALLOWED_ORIGINS` | `*` (dev) | CORS 白名单，逗号分隔 |
+| 变量                                            | 默认                    | 说明                                                                  |
+| --------------------------------------------- | --------------------- | ------------------------------------------------------------------- |
+| `MINIMAX_API_KEY` / `MINIMAX_API_BASE`        | —                     | 首选（兼容 `MINIMAX_API_KEY` / `MiniMax_API_KEY`）                        |
+| `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` | —                     | Anthropic 风格兼容                                                      |
+| `NEXUS_WS_TOKEN`                              | `nexus-default-token` | 后端 WebSocket 认证                                                     |
+| `VITE_NEXUS_WS_TOKEN`                         | 同上                    | 前端编译期 env，Vite 只暴露 `VITE_*` 给客户端；必须与 `NEXUS_WS_TOKEN` 一致，否则 WS 鉴权失败 |
+| `NEXUS_PORT`                                  | `30000`               | 后端端口                                                                |
+| `NEXUS_ENABLE_MCP`                            | `true`                | 启用 MCP                                                              |
+| `NEXUS_ALLOWED_ORIGINS`                       | `*` (dev)             | CORS 白名单，逗号分隔                                                       |
 
 API Key 解析顺序：`MINIMAX_API_KEY` → `MiniMax_API_KEY` → `ANTHROPIC_AUTH_TOKEN` → `ANTHROPIC_API_KEY`，**首次匹配胜出**。
 
