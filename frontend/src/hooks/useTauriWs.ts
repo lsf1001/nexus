@@ -95,17 +95,12 @@ export function useTauriWs<T = unknown>({
     const sessionId = sessionRef.current;
     if (!sessionId) throw new Error('ws not connected');
 
-    // 每次 send 都新建 Channel,Rust 端会启动一个新 rx task
-    // 直到收到 type:"done" 自动 break
-    const onChunk = new Channel<T>();
-    onChunk.onmessage = (msg) => {
-      onMessageRef.current(msg);
-    };
-
+    // ws_relay.rs 简化版:ws_open 时一次性绑 channel + 长期 rx_task,
+    // ws_send 只发 payload,响应统一从 onChunk 进 onMessage。
+    // 不再每次 send 新建 Channel — 生命周期 = ws session。
     await invoke('ws_send', {
       sessionId,
       payload: data,
-      onChunk,
     });
   };
 

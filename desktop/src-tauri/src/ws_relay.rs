@@ -39,13 +39,13 @@ impl RelayState {
 
 pub struct WsSession {
     pub tx: WsTx,
-    pub rx: Option<WsRx>,
     pub rx_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 #[tauri::command]
 pub async fn ws_open(
     url: String,
+    on_chunk: Channel<Value>,
     state: tauri::State<'_, RelayState>,
 ) -> Result<String, String> {
     let (ws, _) = tokio_tungstenite::connect_async(&url)
@@ -53,14 +53,50 @@ pub async fn ws_open(
         .map_err(|e| format!("ws connect failed: {e}"))?;
 
     let session_id = uuid::Uuid::new_v4().to_string();
-    let (tx, rx) = ws.split();
+    let (tx, mut rx) = ws.split();
+
+    let session_id_for_task = session_id.clone();
+    let rx_task = tokio::spawn(async move {
+        while let Some(msg) = rx.next().await {
+            match msg {
+                Ok(Message::Text(text)) => match serde_json::from_str::<Value>(&text) {
+                    Ok(value) => {
+                        if on_chunk.send(value).is_err() {
+                            log::warn!("channel send failed, frontend disconnected");
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("json parse failed: {e}, raw: {text}");
+                    }
+                },
+                Ok(Message::Close(_)) => {
+                    log::info!("ws closed by server: {session_id_for_task}");
+                    break;
+                }
+                Ok(_) => {} // Ping/Pong/Frame 等忽略,避免把非业务帧转成 JSON。
+                Err(e) => {
+                    log::error!("ws error: {e}");
+                    on_chunk
+                        .send(serde_json::json!({
+                            "type": "error",
+                            "error_code": "ws_relay_error",
+                            "content": e.to_string(),
+                            "retryable": true
+                        }))
+                        .ok();
+                    break;
+                }
+            }
+        }
+        log::info!("ws rx task ended: {session_id_for_task}");
+    });
 
     state.sessions.write().await.insert(
         session_id.clone(),
         WsSession {
             tx,
-            rx: Some(rx),
-            rx_task: None,
+            rx_task: Some(rx_task),
         },
     );
 
@@ -72,84 +108,8 @@ pub async fn ws_open(
 pub async fn ws_send(
     session_id: String,
     payload: Value,
-    on_chunk: Channel<Value>,
     state: tauri::State<'_, RelayState>,
 ) -> Result<(), String> {
-    // 1. 取出 session,把 rx 从 Option 里搬出来给 task
-    let (rx, old_task) = {
-        let mut sessions = state.sessions.write().await;
-        let session = sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| format!("session not found: {session_id}"))?;
-
-        let rx = session
-            .rx
-            .take()
-            .ok_or_else(|| "rx already consumed".to_string())?;
-        let old_task = session.rx_task.take();
-
-        (rx, old_task)
-    };
-
-    // 取消之前的 task(如果有,通常是 reconnect)
-    if let Some(task) = old_task {
-        task.abort();
-    }
-
-    // 2. 启动接收 task
-    let on_chunk_clone = on_chunk.clone();
-    let session_id_for_task = session_id.clone();
-    let rx_task = tokio::spawn(async move {
-        let mut rx = rx;
-        while let Some(msg) = rx.next().await {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    match serde_json::from_str::<Value>(&text) {
-                        Ok(value) => {
-                            let is_done = value
-                                .get("type")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s == "done")
-                                .unwrap_or(false);
-                            if on_chunk_clone.send(value).is_err() {
-                                log::warn!("channel send failed, frontend disconnected");
-                                break;
-                            }
-                            if is_done {
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            log::warn!("json parse failed: {e}, raw: {text}");
-                        }
-                    }
-                }
-                Ok(Message::Close(_)) => {
-                    log::info!("ws closed by server: {session_id_for_task}");
-                    break;
-                }
-                Ok(_) => {} // Ping/Pong/Frame 等忽略
-                Err(e) => {
-                    log::error!("ws error: {e}");
-                    on_chunk_clone
-                        .send(serde_json::json!({"type": "error", "data": e.to_string()}))
-                        .ok();
-                    break;
-                }
-            }
-        }
-        log::info!("ws rx task ended: {session_id_for_task}");
-    });
-
-    // 3. 存回 task handle(保留 tx 给后续 send)
-    {
-        let mut sessions = state.sessions.write().await;
-        if let Some(session) = sessions.get_mut(&session_id) {
-            session.rx_task = Some(rx_task);
-        }
-    }
-
-    // 4. 发送 payload
     let mut sessions = state.sessions.write().await;
     let session = sessions
         .get_mut(&session_id)
