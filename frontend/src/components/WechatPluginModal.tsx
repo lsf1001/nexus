@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { apiFetch } from '../lib/api';
+import { apiFetch, getApiBase } from '../lib/api';
 
 interface WechatPluginModalProps {
   isOpen: boolean;
@@ -31,7 +31,7 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
   const pollTimerRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const apiUrl = `${window.location.protocol}//${window.location.host}/api`;
+  const apiUrl = `${getApiBase()}/api`;
 
   useEffect(() => {
     if (!isOpen) {

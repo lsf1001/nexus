@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import type { Model } from '../types';
-import { apiFetch } from '../lib/api';
+import { apiFetch, getApiBase } from '../lib/api';
 import { openContextMenuAt } from '../lib/useContextMenuTrigger';
 
 interface ModelConfigModalProps {
@@ -25,7 +25,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const apiUrl = `${window.location.protocol}//${window.location.host}/api`;
+  const apiUrl = `${getApiBase()}/api`;
 
   useEffect(() => {
     if (isOpen) {

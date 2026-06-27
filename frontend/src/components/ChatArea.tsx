@@ -6,7 +6,7 @@ import { useTauriWs } from '../hooks/useTauriWs';
 import { useLoadingWatchdog } from '../hooks/useLoadingWatchdog';
 import ChatBubble from './ChatBubble';
 import type { StreamEvent, WSMessage, Message, ConfirmationResponseFrame } from '../types';
-import { getRuntimeToken } from '../lib/api';
+import { getRuntimeToken, getApiBase } from '../lib/api';
 
 interface ChatAreaProps {
   resetTrigger?: number;
@@ -273,9 +273,11 @@ function ChatArea({
 
   // Tauri 模式:WS 走 Rust relay(useTauriWs)
   // 浏览器 dev 模式:WS 直连后端(useWebSocket)
+  // Tauri webview 内 window.location.protocol === 'tauri:',不能用 location.host 拼 URL,
+  // 必须用 getApiBase() 拿绝对地址(http://127.0.0.1:30000)再 http→ws 替换。
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${wsProtocol}//${window.location.host}/api/ws?token=${encodeURIComponent(getRuntimeToken())}`;
+  const wsBase = getApiBase().replace(/^http/, 'ws');
+  const wsUrl = `${wsBase}/api/ws?token=${encodeURIComponent(getRuntimeToken())}`;
   const tauriWs = useTauriWs<StreamEvent>({ url: wsUrl, onMessage: handleWsMessage });
   const browserWs = useWebSocket<StreamEvent>({ url: wsUrl, onMessage: handleWsMessage });
   const { connected: wsHookConnected, send: wsSend, getReadyState } = isTauri ? tauriWs : browserWs;
