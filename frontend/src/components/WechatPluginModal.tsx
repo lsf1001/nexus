@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch, getApiBase } from '../lib/api';
 
 interface WechatPluginModalProps {
@@ -63,7 +63,7 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
       .catch(() => {
         setStep('idle');
       });
-  }, [isOpen]);
+  }, [apiUrl, isOpen]);
 
   // 轮询绑定状态：scanning 时启用，离开时自动清理
   useEffect(() => {
@@ -129,13 +129,13 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
   };
 
   // 关闭弹窗
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
     onClose();
-  };
+  }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -144,7 +144,7 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen]);
+  }, [handleClose, isOpen]);
 
   // 重新获取二维码
   const handleRetry = () => {

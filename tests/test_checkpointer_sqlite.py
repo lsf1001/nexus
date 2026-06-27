@@ -63,6 +63,23 @@ class TestCreateAgentCheckpointer:
             kwargs = mock_create.call_args.kwargs
             assert isinstance(kwargs["checkpointer"], MemorySaver)
 
+    def test_default_database_follows_nexus_home(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """未显式设置 DB 路径时，checkpointer 必须写入 NEXUS_HOME。"""
+        nexus_home = tmp_path / "custom-home"
+        fallback_home = tmp_path / "fallback-home"
+        monkeypatch.setenv("NEXUS_HOME", str(nexus_home))
+        monkeypatch.delenv("NEXUS_DB_PATH", raising=False)
+        monkeypatch.delenv("NEXUS_CHECKPOINTER", raising=False)
+        monkeypatch.setattr("pathlib.Path.home", lambda: fallback_home)
+
+        from nexus.backend.agent import _create_checkpointer
+
+        _create_checkpointer()
+
+        assert (nexus_home / "nexus.db").exists()
+
 
 class TestSqliteSaverPersistence:
     """SqliteSaver 真持久化:两个实例读同一 DB 能共享 checkpoint。"""

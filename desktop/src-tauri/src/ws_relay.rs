@@ -13,12 +13,6 @@ type WsTx = futures_util::stream::SplitSink<
     Message,
 >;
 
-type WsRx = futures_util::stream::SplitStream<
-    tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
->;
-
 pub struct RelayState {
     pub sessions: RwLock<HashMap<String, WsSession>>,
 }

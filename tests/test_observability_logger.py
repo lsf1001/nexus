@@ -52,12 +52,13 @@ def reset_root_logger():
 
 
 def test_default_log_path_is_under_nexus_home(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    nexus_home = tmp_path / "custom-nexus-home"
+    monkeypatch.setenv("NEXUS_HOME", str(nexus_home))
     monkeypatch.delenv(ENV_LOG_FORMAT, raising=False)
     monkeypatch.delenv(ENV_LOG_FILE, raising=False)
     monkeypatch.delenv(ENV_LOG_LEVEL, raising=False)
     setup_logging()
-    expected = tmp_path / ".nexus" / "logs" / "nexus.log"
+    expected = nexus_home / "logs" / "nexus.log"
     # 父目录一定存在;文件本身可能在 setup_logging 的 info log 之后才落地
     assert expected.parent.exists()
 

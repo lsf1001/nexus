@@ -223,7 +223,7 @@ pub fn shutdown_sidecar(app: &tauri::AppHandle) {
         };
         guard.take()
     };
-    let Some(mut child) = child_opt else {
+    let Some(child) = child_opt else {
         eprintln!("[nexus] shutdown_sidecar: no child to kill");
         return;
     };

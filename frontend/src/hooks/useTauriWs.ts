@@ -4,6 +4,7 @@ import { invoke, Channel } from '@tauri-apps/api/core';
 interface UseTauriWsOptions<T> {
   url: string;
   onMessage: (data: T) => void;
+  enabled?: boolean;
 }
 
 interface UseTauriWsResult {
@@ -29,6 +30,7 @@ const WS_CLOSED = 3;
 export function useTauriWs<T = unknown>({
   url,
   onMessage,
+  enabled = true,
 }: UseTauriWsOptions<T>): UseTauriWsResult {
   const [connected, setConnected] = useState(false);
   const sessionRef = useRef<string | null>(null);
@@ -36,6 +38,11 @@ export function useTauriWs<T = unknown>({
   onMessageRef.current = onMessage;
 
   useEffect(() => {
+    if (!enabled) {
+      setConnected(false);
+      return;
+    }
+
     let cancelled = false;
 
     (async () => {
@@ -89,7 +96,7 @@ export function useTauriWs<T = unknown>({
         invoke('ws_close', { sessionId }).catch(() => {});
       }
     };
-  }, [url]);
+  }, [url, enabled]);
 
   const send = async (data: unknown): Promise<void> => {
     const sessionId = sessionRef.current;

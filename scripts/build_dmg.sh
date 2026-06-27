@@ -74,8 +74,13 @@ xattr -w com.apple.metadata:com_apple_metadata_never_index true "$RELEASE_BUILD/
 $LSREG -u "$APP_BUNDLE" 2>/dev/null || true
 rm -rf "$APP_BUNDLE" 2>/dev/null || true
 
-# 5. 用 hdiutil 打 DMG(避开 tauri 2 的 AppleScript,后者在非交互 shell 必挂)
-echo ">>> step 3: create DMG with hdiutil..."
+# 5. 在写入 DMG 前完成签名。签名必须发生在 staging copy 之前，否则
+#    DMG 内仍是 cargo 产出的未 seal App，只有缓存副本被签名。
+echo ">>> step 3: sign .app with entitlements..."
+bash "$ROOT_DIR/scripts/sign_app.sh" "$CACHE_DIR/${APP_NAME}.app"
+
+# 6. 用 hdiutil 打 DMG(避开 tauri 2 的 AppleScript,后者在非交互 shell 必挂)
+echo ">>> step 4: create DMG with hdiutil..."
 DMG_OUT="$ROOT_DIR/release/${DMG_NAME}.dmg"
 rm -f "$DMG_OUT"
 rm -f /tmp/rw.*.dmg 2>/dev/null || true
@@ -94,11 +99,6 @@ rm -rf "$TMP_STAGE"
 
 echo ">>> DMG: $DMG_OUT"
 ls -lh "$DMG_OUT"
-
-# 6. 给缓存里的 .app 做完整自签名(cargo tauri build 默认 linker-signed 不 seal resources,
-#    启动会抛 'The operation is insecure')
-echo ">>> step 4: sign .app with entitlements..."
-bash "$ROOT_DIR/scripts/sign_app.sh" "$CACHE_DIR/${APP_NAME}.app"
 
 echo ">>> release/ 内容:"
 ls -la "$ROOT_DIR/release/"

@@ -165,6 +165,10 @@ def verify_token(
     except (ValueError, TypeError, base64.binascii.Error) as err:  # type: ignore[attr-defined]
         # base64 模块在不同版本下抛不同的异常类；都归为格式错。
         raise InvalidResumeToken("token 签名段无法 base64url 解码") from err
+    if not sig_b64 or _b64url_encode(sig) != sig_b64:
+        # Base64URL 最后一组的未使用 padding bits 必须为 0。否则不同文本可
+        # 解码成同一签名字节，形成 token 可塑性并让文本篡改绕过校验。
+        raise InvalidResumeToken("token 签名编码非规范")
 
     payload = f"{session_id}:{last_event_id}:{exp}"
     secret = _get_secret()

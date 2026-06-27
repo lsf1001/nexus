@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import type { Model } from '../types';
 import { apiFetch, getApiBase } from '../lib/api';
@@ -27,22 +27,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
 
   const apiUrl = `${getApiBase()}/api`;
 
-  useEffect(() => {
-    if (isOpen) {
-      loadModels();
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen]);
-
-  const loadModels = async () => {
+  const loadModels = useCallback(async () => {
     try {
       const res = await apiFetch(`${apiUrl}/models`);
       const data = await res.json();
@@ -50,9 +35,9 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
     } catch {
       console.error('加载模型失败');
     }
-  };
+  }, [apiUrl, setModels]);
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setFormData({
       id: `model-${Date.now()}`,
       name: '',
@@ -63,12 +48,27 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
     setEditingModel(null);
     setIsCreating(false);
     setError(null);
-  };
+  }, []);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     resetForm();
     onClose();
-  };
+  }, [onClose, resetForm]);
+
+  useEffect(() => {
+    if (isOpen) {
+      void loadModels();
+    }
+  }, [isOpen, loadModels]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleClose, isOpen]);
 
   const handleCreateNew = () => {
     setIsCreating(true);

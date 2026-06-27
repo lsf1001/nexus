@@ -8,14 +8,14 @@ import { SplashView, type RuntimeStatus } from './components/desktop/SplashView'
  * 非 Tauri 环境(浏览器 dev):直接进入主界面(此时无 runtime 监听,splash 不显示)。
  */
 function App() {
-  const [runtimeReady, setRuntimeReady] = useState(false);
+  const [runtimeReady, setRuntimeReady] = useState(
+    () => typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window),
+  );
 
   useEffect(() => {
     // 检测是否在 Tauri 环境中
     const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
     if (!isTauri) {
-      // 浏览器 dev 模式:直接进入主界面
-      setRuntimeReady(true);
       return;
     }
 

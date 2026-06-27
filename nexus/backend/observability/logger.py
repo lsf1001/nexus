@@ -59,7 +59,8 @@ def _resolve_log_path() -> Path:
     raw = os.environ.get(ENV_LOG_FILE)
     if raw:
         return Path(raw).expanduser()
-    return Path.home() / ".nexus" / "logs" / "nexus.log"
+    nexus_home = Path(os.environ.get("NEXUS_HOME", str(Path.home() / ".nexus"))).expanduser()
+    return nexus_home / "logs" / "nexus.log"
 
 
 def _resolve_level() -> int:

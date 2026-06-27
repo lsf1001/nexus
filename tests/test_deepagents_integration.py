@@ -62,6 +62,25 @@ class TestCreateStore:
         # InMemoryStore 来自 langgraph.store.memory,类名固定
         assert "Memory" in type(store).__name__
 
+    def test_store_is_reused_until_runtime_reset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """同一配置反复构造 Agent 时必须复用 Store，避免连接与状态泄漏。"""
+        monkeypatch.setenv("NEXUS_STORE", "memory")
+
+        first_store = agent_module._create_store()
+        second_store = agent_module._create_store()
+
+        assert second_store is first_store
+
+    def test_runtime_reset_closes_cached_store(self) -> None:
+        """统一重置必须显式关闭 Store 连接，不能依赖进程退出钩子。"""
+        closed_keys: list[str] = []
+        agent_module._STORE_CACHE["fake"] = (object(), lambda: closed_keys.append("fake"))
+
+        agent_module._reset_checkpointer_cache()
+
+        assert closed_keys == ["fake"]
+        assert not agent_module._STORE_CACHE
+
 
 # ============================================================================
 # _select_filesystem_backend

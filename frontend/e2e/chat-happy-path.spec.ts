@@ -15,7 +15,12 @@ import { openHome, sendMessageAndWaitForReply, messageCount } from './helpers';
  *   - 快捷 prompt 按钮属 DMG 阶段 2 待办，本测试暂不校验
  */
 test('WS 聊天主流程：发问题收到完整回复', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
   await openHome(page);
+
+  expect(pageErrors).toEqual([]);
+  await expect(page.getByText('暂时不可用', { exact: true })).toHaveCount(0);
 
   // 从 SetupView / 欢迎页切到 ChatView。
   // 优先点击侧栏固定"新任务"按钮（始终可见），回退到欢迎页 CTA。

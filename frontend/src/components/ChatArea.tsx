@@ -278,8 +278,16 @@ function ChatArea({
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   const wsBase = getApiBase().replace(/^http/, 'ws');
   const wsUrl = `${wsBase}/api/ws?token=${encodeURIComponent(getRuntimeToken())}`;
-  const tauriWs = useTauriWs<StreamEvent>({ url: wsUrl, onMessage: handleWsMessage });
-  const browserWs = useWebSocket<StreamEvent>({ url: wsUrl, onMessage: handleWsMessage });
+  const tauriWs = useTauriWs<StreamEvent>({
+    url: wsUrl,
+    onMessage: handleWsMessage,
+    enabled: isTauri,
+  });
+  const browserWs = useWebSocket<StreamEvent>({
+    url: wsUrl,
+    onMessage: handleWsMessage,
+    enabled: !isTauri,
+  });
   const { connected: wsHookConnected, send: wsSend, getReadyState } = isTauri ? tauriWs : browserWs;
 
   const sendRef = useRef(wsSend);

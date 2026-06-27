@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 interface UseWebSocketOptions<T> {
   url: string;
   onMessage: (data: T) => void;
+  /** 当前运行环境是否启用浏览器 WebSocket。 */
+  enabled?: boolean;
   /** 指数退避基数（毫秒），默认 1000 */
   baseDelay?: number;
   /** 指数退避上限（毫秒），默认 30000 */
@@ -20,6 +22,7 @@ export function useWebSocket<T = unknown>({
   maxDelay = 30000,
   heartbeatInterval = 25000,
   reconnect = true,
+  enabled = true,
 }: UseWebSocketOptions<T>): {
   connected: boolean;
   send: (data: unknown) => void;
@@ -35,6 +38,11 @@ export function useWebSocket<T = unknown>({
   onMessageRef.current = onMessage;
 
   useEffect(() => {
+    if (!enabled) {
+      setConnected(false);
+      return;
+    }
+
     cancelledRef.current = false;
 
     const clearTimers = () => {
@@ -97,7 +105,7 @@ export function useWebSocket<T = unknown>({
       clearTimers();
       wsRef.current?.close();
     };
-  }, [url, baseDelay, maxDelay, heartbeatInterval, reconnect]);
+  }, [url, baseDelay, maxDelay, heartbeatInterval, reconnect, enabled]);
 
   const send = (data: unknown) => {
     const ws = wsRef.current;

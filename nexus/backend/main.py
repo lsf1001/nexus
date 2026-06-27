@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .agent import create_agent
+from .agent import _reset_checkpointer_cache, create_agent
 from .api.ws import (
     _clients_lock,
     _ws_clients,
@@ -167,6 +167,7 @@ async def lifespan(app: FastAPI):
     logger.info("Nexus Backend 已就绪 (Gateway 接管路由, Agent 懒构造)")
     yield
     logger.info("Nexus Backend 关闭中")
+    _reset_checkpointer_cache()
 
 
 def _ensure_agent_ready(app) -> None:

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import base64
 import time
 
 import pytest
@@ -122,13 +123,28 @@ def test_token_expiration(fixed_secret: str) -> None:
 
 
 def test_tampered_signature_raises(fixed_secret: str) -> None:
-    """签名段被改（最后一位替换）应抛 InvalidResumeToken。"""
+    """签名段有效位被改应抛 InvalidResumeToken。"""
     token = make_token("sess-1", 42, ttl_seconds=60)
     parts = token.split(".")
-    # 改签名的最后一个字符（'A' 在 base64url 范围内，原字符被替换）
-    tampered = ".".join([parts[0], parts[1], parts[2][:-1] + "A"])
+    replacement = "A" if parts[2][0] != "A" else "B"
+    tampered = ".".join([parts[0], parts[1], replacement + parts[2][1:]])
     with pytest.raises(InvalidResumeToken, match="签名"):
         verify_token(tampered, "sess-1", now=int(time.time()) + 1)
+
+
+def test_noncanonical_signature_encoding_raises(fixed_secret: str) -> None:
+    """解码字节相同但文本不同的 Base64URL 签名也必须拒绝。"""
+    token = make_token("sess-1", 42, ttl_seconds=60)
+    exp, event_id, signature = token.split(".")
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    replacement = alphabet[alphabet.index(signature[-1]) ^ 1]
+    noncanonical = signature[:-1] + replacement
+
+    padding = "=" * (-len(signature) % 4)
+    assert base64.urlsafe_b64decode(signature + padding) == base64.urlsafe_b64decode(noncanonical + padding)
+
+    with pytest.raises(InvalidResumeToken, match="签名"):
+        verify_token(f"{exp}.{event_id}.{noncanonical}", "sess-1", now=int(time.time()) + 1)
 
 
 def test_tampered_event_id_raises(fixed_secret: str) -> None:
