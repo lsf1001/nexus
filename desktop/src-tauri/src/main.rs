@@ -4,7 +4,34 @@
 mod runtime;
 mod ws_relay;
 
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
+
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+
+/// 把 webview ErrorBoundary 抓到的错误堆栈写到 ~/.nexus/logs/webview-error.log
+/// 诊断用:用户报告"应用出现错误"时我能直接读到真错误而不是猜。
+#[tauri::command]
+fn log_webview_error(payload: String) -> Result<(), String> {
+    let log_path = PathBuf::from(format!(
+        "{}/.nexus/logs/webview-error.log",
+        std::env::var("HOME").unwrap_or_default()
+    ));
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {parent:?}: {e}"))?;
+    }
+    let mut f = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| format!("open {log_path:?}: {e}"))?;
+    f.write_all(payload.as_bytes())
+        .and_then(|_| f.write_all(b"\n"))
+        .map_err(|e| format!("write: {e}"))?;
+    log::error!("[webview-error] {payload}");
+    Ok(())
+}
 
 fn main() {
     env_logger::init();
@@ -21,6 +48,7 @@ fn main() {
             ws_relay::ws_open,
             ws_relay::ws_send,
             ws_relay::ws_close,
+            log_webview_error,
         ])
         .setup(|app| {
             // 异步起 sidecar,不阻塞窗口出现

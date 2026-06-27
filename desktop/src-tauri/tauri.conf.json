@@ -32,7 +32,10 @@
     "icon": ["icons/icon.icns"],
     "category": "DeveloperTool",
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "entitlements": "entitlements.plist",
+      "signingIdentity": null,
+      "providerShortName": null
     },
     "resources": [
       "../../release/nexus-runtime/",

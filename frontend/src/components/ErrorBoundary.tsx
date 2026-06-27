@@ -1,4 +1,5 @@
 import React from 'react';
+import { invoke } from '@tauri-apps/api/core';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -22,6 +23,23 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
+    // 把完整错误堆栈写到 ~/.nexus/logs/webview-error.log,下次用户报告
+    // "应用出现错误"时我能直接读到真错误,不用猜。
+    const payload = {
+      at: new Date().toISOString(),
+      message: error?.message ?? '(no message)',
+      stack: error?.stack ?? '(no stack)',
+      componentStack: errorInfo?.componentStack ?? '(none)',
+      name: error?.name ?? 'Error',
+    };
+    // Tauri 环境才写文件,浏览器 dev 模式跳过
+    const isTauri =
+      typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    if (isTauri) {
+      invoke('log_webview_error', { payload: JSON.stringify(payload) }).catch(
+        () => {},
+      );
+    }
   }
 
   render(): React.ReactNode {
