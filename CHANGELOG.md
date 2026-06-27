@@ -141,6 +141,34 @@ export NEXUS_CONTEXT_WINDOW=2000000
 
 ---
 
+## [Unreleased] — deepagents 依赖升级(0.6.8 → 0.6.12)
+
+### Changed
+
+- **`deepagents` 从 `0.6.8` 升级到 `0.6.12`**,连带 `langchain-core` `>=1.4.0` → `>=1.4.8` / `langchain` `>=1.3.4` → `>=1.3.11` / `langchain-anthropic` `>=1.4.3` → `>=1.4.7`:
+  - **驱动原因**:研究 4 个 patch 版本(0.6.9 → 0.6.12)源码 + release notes,确认 4 个核心 API(`compute_summarization_defaults` / `create_summarization_middleware` / `_DeepAgentsSummarizationMiddleware.wrap_model_call` / `_should_summarize`)跨 5 版本签名零变化,Codex 删除显式 SummarizationMiddleware 的 dedup 推理(`serialized_name="SummarizationMiddleware"`)继续成立。
+  - **行为兼容**:`ResilientRunnable._resolve_model_profile()` → `model.profile["max_input_tokens"]` → deepagents 0.85 fraction 的链不变。
+
+### Added(自动获得,零代码改动)
+
+- **0.6.9 性能优化**:`summarization middleware` 改成 "Count tokens once per model call"(PR #3877),引入 `_token_counter_accepts_tools()` helper 探测 `tools=` 参数签名,工具 schema 现在参与 token 计数。ResilientRunnable 没传 custom counter,走默认 → 自动生效。
+- **0.6.9 性能**:`filesystem system prompts` + `grep/glob matchers` 加缓存(PR #3889 / #3887 / #3886)。与我们 agent 行为无关,但会降低 cold-start 工具调用延迟。
+- **0.6.9 子能力**:`subagent response format` 可配置(PR #3882)。我们暂未用,留作未来扩展点。
+
+### Notes
+
+- **0.6.12 新增 `deepagents[aws]` extra**(Bedrock 自动 prompt caching,PR #4108)与 **media references 保留**(PR #3990)对我们**零影响**:不用 Bedrock、不处理 image / file URL。如未来切 Bedrock,`pip install deepagents[aws]` 即可启用。
+- **0.6.10 / 0.6.11 各自一个 bug fix**:`model_matches_spec` 比较 provider 字段(#3943)、`BaseSandbox async` helpers 走 `aexecute`(#3996)。我们未触这两条路径,无回归风险。
+
+### Verified
+
+- `pip install --upgrade deepagents==0.6.12`:成功,连带 langchain 全家桶升到 1.3.11+
+- `pytest tests/test_llm_profile.py test_estimate_tokens.py test_agent_memory.py test_checkpointer_sqlite.py test_deepagents_integration.py test_resume_token.py test_observability_logger.py test_run_coro_sync.py`:**88 passed in 3.79s**
+- `pytest tests/`: **497 passed, 8 failed**(8 个失败全在 `test_e2e_features.py`,需 backend 运行 + 真实 LLM API key,pre-existing 基础设施依赖,跟升级无关)
+- `ruff check nexus/`:5 个 pre-existing 错(launcher.py 的 Objective-C 桥接 N802/N806 + runtime_main.py 一个 trailing newline),**未引入新 lint**
+
+---
+
 ## [v0.1.0] — 2026-06-21 — 首次内测交付
 
 **核心**: 把 Nexus 从「能跑」推进到「能装能用」。AI Gateway 全栈接通(后端 + 前端 + **桌面端 DMG 安装包**)、质量门上线、可观测性落地、意图识别路由、CI/CD 双线。
