@@ -302,6 +302,106 @@ def test_ask_user_dict_options_normalized_to_labels(monkeypatch) -> None:
     assert clarify["options"] == ["经典必玩", "美食探店", "休闲度假"]
 
 
+def test_ask_user_content_field_options(monkeypatch) -> None:
+    """MiniMax LLM 用 [{content: "..."}] 字典(MiniMax 默认字段名)。
+    之前只认 label/text/value/name,content 被忽略 → options=0,
+    前端看到空 options 走自由输入框。
+    修复后 content 也加入字段白名单。
+    """
+    _authed_token(monkeypatch)
+
+    async def astream_events_factory(input, **kwargs):  # noqa: ARG001
+        yield {
+            "event": "on_tool_start",
+            "name": "ask_user",
+            "data": {
+                "input": {
+                    "question": "这次去海口是哪种出行情况?",
+                    "options": [
+                        {"content": "情侣/夫妻度假"},
+                        {"content": "家庭出游(带老人/小孩)"},
+                        {"content": "朋友/同学结伴"},
+                        {"content": "独自旅行"},
+                    ],
+                }
+            },
+        }
+
+    with TestClient(app) as client:
+        with patch("nexus.backend.main._agent") as mock_agent:
+            mock_agent.astream_events = astream_events_factory
+
+            with client.websocket_connect("/api/ws?token=test-token") as ws:
+                ws.send_json({"content": "海口 3 日游", "title": "content-field-test"})
+
+                events: list[dict] = []
+                for _ in range(20):
+                    try:
+                        msg = ws.receive_json()
+                    except Exception:
+                        break
+                    events.append(msg)
+                    if msg.get("type") == "clarification_request":
+                        break
+
+    clarify = next(e for e in events if e.get("type") == "clarification_request")
+    assert clarify["options"] == [
+        "情侣/夫妻度假",
+        "家庭出游(带老人/小孩)",
+        "朋友/同学结伴",
+        "独自旅行",
+    ]
+
+
+def test_ask_user_key_only_dict_fallback(monkeypatch) -> None:
+    """LLM 用 [{key: "本周末", description: "..."}] 字典(无 label/content/text/value/name)。
+    之前 elif 分支错位,label 永远 None → options=0,用户看不到候选。
+    修复后 dict 字段白名单 + key 兜底 + str(opt) 兜底,总能抽出可读字符串。
+    """
+    _authed_token(monkeypatch)
+
+    async def astream_events_factory(input, **kwargs):  # noqa: ARG001
+        yield {
+            "event": "on_tool_start",
+            "name": "ask_user",
+            "data": {
+                "input": {
+                    "question": "出行日期大概在什么时候?",
+                    "options": [
+                        {"key": "本周末(近期)", "description": "按当前季节气候推荐,3-5 天内出发"},
+                        {"key": "下个月", "description": "关注天气预报和台风季"},
+                        {"key": "春节/国庆长假", "description": "人流大,行程需要错峰"},
+                    ],
+                }
+            },
+        }
+
+    with TestClient(app) as client:
+        with patch("nexus.backend.main._agent") as mock_agent:
+            mock_agent.astream_events = astream_events_factory
+
+            with client.websocket_connect("/api/ws?token=test-token") as ws:
+                ws.send_json({"content": "海口 3 日游", "title": "key-only-test"})
+
+                events: list[dict] = []
+                for _ in range(20):
+                    try:
+                        msg = ws.receive_json()
+                    except Exception:
+                        break
+                    events.append(msg)
+                    if msg.get("type") == "clarification_request":
+                        break
+
+    clarify = next(e for e in events if e.get("type") == "clarification_request")
+    # 关键:key 字段兜底,用户能看到候选按钮
+    assert clarify["options"] == [
+        "本周末(近期)",
+        "下个月",
+        "春节/国庆长假",
+    ]
+
+
 def test_ask_user_mixed_options(monkeypatch) -> None:
     """options 同时含字符串、字典、空串、None → 只保留有效项。"""
     _authed_token(monkeypatch)

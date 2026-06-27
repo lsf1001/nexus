@@ -683,22 +683,33 @@ async def _run_agent_streaming(
                         # LLM 既可能传 ["火锅","烧烤"] 纯字符串列表,
                         # 也可能传 [{key:"classic",label:"经典必玩",description:"..."}]
                         # 字典列表(更丰富)。前端只展示纯文本按钮,所以这里
-                        # 把字典规范化为 label 字符串 — 优先 label/text/value/name,
-                        # 都缺再 str() 兜底。空字符串 / 纯空白丢弃。
+                        # 把字典规范化为 label 字符串 — 优先 label/content/text/
+                        # value/name(覆盖各家 LLM 命名习惯;content 是 MiniMax
+                        # 默认风格,label 是 OpenAI/Anthropic 风格),都缺再 str()
+                        # 兜底。空字符串 / 纯空白丢弃。
                         for opt in raw_options:
                             label: str | None = None
                             if isinstance(opt, str):
-                                label = opt
+                                label = opt if opt.strip() else None
                             elif isinstance(opt, dict):
-                                for key in ("label", "text", "value", "name"):
+                                # 优先 label/content/text/value/name 字段
+                                for key in ("label", "content", "text", "value", "name"):
                                     v = opt.get(key)
                                     if isinstance(v, str) and v.strip():
                                         label = v
                                         break
-                            elif opt is not None:
-                                label = str(opt)
-                            if label and label.strip():
-                                options.append(label.strip())
+                                # 都没匹配 → 退化到 key 字段(MiniMax 习惯用
+                                # {key: "本周末", description: "..."})
+                                if label is None:
+                                    key_field = opt.get("key")
+                                    if isinstance(key_field, str) and key_field.strip():
+                                        label = key_field
+                                # 仍没找到可读字段 → 跳过(避免把 "{'label': ''}"
+                                # 这种噪音字典转字符串塞给用户,宁可让前端走自由输入)
+                            # None / 空字符串 / 字典无有效字段 → 不追加
+                            if label is None:
+                                continue
+                            options.append(label.strip())
                             if len(options) >= 6:
                                 break
 
