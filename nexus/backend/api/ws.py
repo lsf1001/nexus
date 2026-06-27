@@ -387,7 +387,7 @@ def _serialize_hitl_request(
     }
 
 
-def _estimate_tokens(text: str, context_window: int = 32000) -> tuple[int, int]:
+def _estimate_tokens(text: str, context_window: int = 200000) -> tuple[int, int]:
     """估算 token 数量和上下文使用率。
 
     字符 → token 换算（与 OpenAI 经验值对齐）：
@@ -399,7 +399,8 @@ def _estimate_tokens(text: str, context_window: int = 32000) -> tuple[int, int]:
         text: 文本内容（通常是被估算的"已用上下文"——累积 prompt 或本轮回复）。
         context_window: 模型的上下文窗口（token 数）。
             主流模型：GPT-3.5-turbo 16K, GPT-4 8K/32K, Claude 200K,
-            MiniMax-M3 32K。默认 32000，可通过 CONFIG['context_window'] 覆盖。
+            MiniMax-M3 200K（Nexus 项目当前假设的默认上下文窗口）。
+            默认 200000，可通过 CONFIG['context_window'] 或 NEXUS_CONTEXT_WINDOW 覆盖。
 
     Returns:
         ``(token_count, context_usage_percent)``：
@@ -413,7 +414,7 @@ def _estimate_tokens(text: str, context_window: int = 32000) -> tuple[int, int]:
     estimated_tokens = int(chinese_chars * 2.5 + english_chars * 0.25 + other_chars * 0.5)
     # 防 0 除
     if context_window <= 0:
-        context_window = 32000
+        context_window = 200000
     # 保留 1 位小数，让"用了 0.5%"也能显示
     context_usage = round(estimated_tokens / context_window * 100, 1)
     return estimated_tokens, min(context_usage, 100.0)
@@ -848,9 +849,7 @@ async def _run_agent_streaming(
         normalized = full_response.replace("<think>", "<thinking>").replace("</think>", "</thinking>")
 
         # 2) token_usage：估算 token + context 占用率
-        estimated_tokens, context_usage = _estimate_tokens(
-            normalized, context_window=CONFIG.get("context_window", 32000)
-        )
+        estimated_tokens, context_usage = _estimate_tokens(normalized, context_window=CONFIG["context_window"])
         token_usage_event_id = last_event_id + 1
         await websocket.send_json(
             {

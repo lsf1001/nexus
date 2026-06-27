@@ -27,12 +27,18 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models.model_profile import ModelProfile
 from tenacity import (
     AsyncRetrying,
     retry_base,
     stop_after_attempt,
 )
 
+# 注意:用 ``import module`` 而非 ``from module import CONFIG``,否则测试
+# 用 ``monkeypatch.setattr(nexus.backend.config, "CONFIG", fresh)`` 替换模块
+# 属性时,wrapper 持有的 CONFIG 引用仍是旧 dict(绑定时拍快照)。
+# 通过 ``nexus.backend.config.CONFIG`` 在调用时访问属性,才能拿到 monkeypatch 后的新值。
+import nexus.backend.config as _config_mod
 from nexus.backend.llm.errors import ClassifiedError, LLMErrorKind, classify
 from nexus.backend.llm.policies import (
     FallbackPolicy,
@@ -139,6 +145,26 @@ class ResilientRunnable(BaseChatModel):
     def _get_ls_params(self, **kwargs: Any) -> dict[str, Any]:
         """透传到底层 primary：让 langsmith tracing 看到真实的 provider/model。"""
         return self._primary._get_ls_params(**kwargs)
+
+    def _resolve_model_profile(self) -> ModelProfile | None:
+        """驱动 deepagents SummarizationMiddleware 的 trigger 计算。
+
+        WHY:deepagents ``compute_summarization_defaults`` 在 ``model.profile``
+        含 ``max_input_tokens`` 时,固定用 ``trigger=("fraction", 0.85)``;
+        无 profile 则 fallback 到 ``("tokens", 170000)``(对 200K 模型来说
+        几乎不触发)。Nexus 把"总上下文大小"作为单一可配变量
+        (NEXUS_CONTEXT_WINDOW,默认 200000),让 deepagents 自动按 0.85
+        fraction 计算实际触发阈值 = ``context_window × 0.85``(默认 170K)。
+
+        切换模型(200K / 1M / 32K)只需改 ``NEXUS_CONTEXT_WINDOW``,
+        不用动代码;触发阈值自动按比例缩放。
+
+        Returns:
+            含 ``max_input_tokens`` 的 profile 字典(``ModelProfile`` 是
+            ``TypedDict, total=False``,直接返回 ``dict`` 即可)。
+            底层 primary 也能 override profile;此处只兜底提供 Nexus 假设值。
+        """
+        return {"max_input_tokens": int(_config_mod.CONFIG.get("context_window"))}
 
     def _generate(self, messages: list, stop=None, run_manager=None, **kwargs: Any):
         """同步 generate 路径：委托给底层 primary。公开入口走 ``ainvoke``。"""

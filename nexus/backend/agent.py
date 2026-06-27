@@ -219,10 +219,11 @@ def get_project_root() -> Path:
 # value 是 (saver, close_fn) 元组 — close_fn 负责同步释放 saver 持有的资源
 # (aiosqlite connection),没有 close_fn 的(如 MemorySaver)用 None 占位。
 _CHECKPOINTER_CACHE: dict[str, tuple[Any, Any | None]] = {}
+_STORE_CACHE: dict[str, tuple[Any, Any | None]] = {}
 
 
 def _reset_checkpointer_cache() -> None:
-    """清空 checkpointer 单例缓存 + 显式释放每个 saver 的底层连接(测试用)。
+    """清空持久化资源缓存，并显式释放底层连接。
 
     WHY 1:pytest 跑多个 case 时如果用同一个 tmp db,旧 SqliteSaver 的 connection
     还拿着文件锁,新实例开不进去。给 fixture teardown 调一下,确保每个 case 独立。
@@ -238,6 +239,13 @@ def _reset_checkpointer_cache() -> None:
             except Exception:  # noqa: BLE001 - 测试隔离,失败不致命
                 pass
     _CHECKPOINTER_CACHE.clear()
+    for _key, (_store, close_fn) in list(_STORE_CACHE.items()):
+        if close_fn is not None:
+            try:
+                close_fn()
+            except Exception:  # noqa: BLE001 - 关闭阶段尽力清理全部资源
+                pass
+    _STORE_CACHE.clear()
 
 
 def _ensure_sqlite_checkpoint_tables(db_path: str) -> None:
@@ -268,12 +276,51 @@ def _close_async_conn_sync(conn: Any) -> None:
     创建个未 await 的协程对象(会 RuntimeWarning)。在主线程里 ``asyncio.run``
     跑它的 close,触发后台线程退出 → 进程能正常结束。
     """
-    import asyncio as _asyncio
-
     try:
-        _asyncio.run(conn.close())
+        _run_coro_sync(conn.close())
     except Exception:  # noqa: BLE001 - atexit 兜底,失败不致命
         pass
+
+
+def _run_coro_sync(coro: Any) -> Any:
+    """在 sync 上下文跑一个协程,兼容"已在 event loop 里"和"无 loop"两种场景。
+
+    WHY:``asyncio.run(coro)`` 在已运行 loop 里调会抛
+    ``RuntimeError: asyncio.run() cannot be called from a running event loop``。
+    Nexus 的 ``_create_checkpointer`` / ``_create_store`` 既要在 lifespan 启动期
+    (无 loop,daemon 线程)调,也要在 HTTP 端点 ``POST /api/models/switch`` 里调
+    (已在 uvicorn 的 loop 中)。两条路径必须共用同一段代码,所以统一用本 helper:
+
+      - 有运行 loop → 在线程池工作线程中用 ``asyncio.run`` 执行，避免重入
+        当前 loop。
+      - 无运行 loop → ``asyncio.run`` 自建 loop,跑完即销毁。
+
+    后者复用于 lifespan 启动 + 测试 fixture(都跑在 daemon 线程或 sync 测试里),
+    前者复用于 HTTP 端点的 lazy 重建 agent(``switch_model`` / ``create_model`` /
+    ``update_model`` 都触发)。
+
+    Returns:
+        协程的返回值。
+
+    Raises:
+        透传协程内部抛出的异常。
+    """
+    import asyncio as _asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        running_loop = _asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if running_loop is None:
+        return _asyncio.run(coro)
+
+    # 同一线程不能对正在运行的 loop 调 run_until_complete。这里仅作为同步
+    # 边界的防御性兼容；生产路由会把完整 Agent 构造推入 executor，通常不会
+    # 进入此分支。
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="nexus-async-init") as executor:
+        return executor.submit(_asyncio.run, coro).result()
 
 
 def _make_async_saver_close_fn(conn: Any) -> Any:
@@ -303,21 +350,27 @@ def _create_store() -> Any:
     import os as _os
 
     backend = _os.environ.get("NEXUS_STORE", "sqlite").lower()
+    nexus_home = Path(_os.environ.get("NEXUS_HOME", str(Path.home() / ".nexus"))).expanduser()
+    db_path = _os.environ.get("NEXUS_DB_PATH") or str(nexus_home / "nexus.db")
+    cache_key = f"{backend}::{db_path if backend == 'sqlite' else ''}"
+    if cache_key in _STORE_CACHE:
+        cached_store, _close_fn = _STORE_CACHE[cache_key]
+        return cached_store
+
     if backend == "memory":
         from langgraph.store.memory import InMemoryStore
 
-        return InMemoryStore()
+        store = InMemoryStore()
+        _STORE_CACHE[cache_key] = (store, None)
+        return store
 
     from langgraph.store.sqlite.aio import AsyncSqliteStore
 
-    db_path = _os.environ.get("NEXUS_DB_PATH") or str(Path.home() / ".nexus" / "nexus.db")
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
     # AsyncSqliteStore.__init__ 调 ``asyncio.get_running_loop()`` 捕获循环
     # → 必须在 loop 内实例化。把 connect + 实例化都包进 ``asyncio.run`` 闭包,
     # loop 退出时 store 已持有 ``loop`` 引用(跟 AsyncSqliteSaver 一致)。
-    import asyncio as _asyncio
-
     import aiosqlite
 
     async def _build_async_store() -> Any:
@@ -332,11 +385,12 @@ def _create_store() -> Any:
         await c.commit()
         return store, c
 
-    store, conn = _asyncio.run(_build_async_store())
+    store, conn = _run_coro_sync(_build_async_store())
     # 注册 atexit 关连接(aiosqlite.Connection.close 是 async,走 asyncio.run)
     import atexit  # noqa: PLC0415 - 延迟到函数内 import,跟随 _create_checkpointer 风格
 
     atexit.register(_close_async_conn_sync, conn)
+    _STORE_CACHE[cache_key] = (store, lambda: _close_async_conn_sync(conn))
     return store
 
 
@@ -356,7 +410,9 @@ def _create_checkpointer() -> Any:
     import os as _os
 
     backend = _os.environ.get("NEXUS_CHECKPOINTER", "sqlite").lower()
-    cache_key = f"{backend}::{_os.environ.get('NEXUS_DB_PATH', '')}"
+    nexus_home = Path(_os.environ.get("NEXUS_HOME", str(Path.home() / ".nexus"))).expanduser()
+    db_path = _os.environ.get("NEXUS_DB_PATH") or str(nexus_home / "nexus.db")
+    cache_key = f"{backend}::{db_path if backend == 'sqlite' else ''}"
     if cache_key in _CHECKPOINTER_CACHE:
         cached_saver, _close_fn = _CHECKPOINTER_CACHE[cache_key]
         return cached_saver
@@ -374,7 +430,6 @@ def _create_checkpointer() -> Any:
         # 跟 SqliteSaver 共享 sqlite 文件(同 schema)。
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-        db_path = _os.environ.get("NEXUS_DB_PATH") or str(Path.home() / ".nexus" / "nexus.db")
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         # 走 ``SqliteSaver.setup()``(同步版)做 DDL 建表,跟 AsyncSqliteSaver
         # 共享同一 schema。这样我们能保持 ``_create_checkpointer`` 同步签名
@@ -383,15 +438,13 @@ def _create_checkpointer() -> Any:
         # AsyncSqliteSaver.__init__ 调 ``asyncio.get_running_loop()`` 捕获
         # 事件循环 → 必须在 loop 内实例化。把 connect + 实例化都包进
         # ``asyncio.run`` 闭包,loop 退出时 saver 已持有 ``loop`` 引用。
-        import asyncio as _asyncio
-
         import aiosqlite
 
         async def _build_async_saver() -> Any:
             c = await aiosqlite.connect(db_path)
             return AsyncSqliteSaver(c), c
 
-        saver, conn = _asyncio.run(_build_async_saver())
+        saver, conn = _run_coro_sync(_build_async_saver())
         # 进程退出时关连接(aiosqlite.Connection.close 是 async,走 asyncio.run)
         atexit.register(_close_async_conn_sync, conn)
         close_fn: Any | None = _make_async_saver_close_fn(conn)
@@ -862,20 +915,22 @@ def create_agent(
         protected_paths=tuple(str(p) for p in resolve_protected_paths(project_root)),
     )
 
-    # 上下文自动压缩:deepagents 0.6.8 默认把 SummarizationMiddleware 加进 base
-    # stack,但 trigger=None → ``_should_summarize`` 第一行 ``if not trigger_conditions:
-    # return False``,**永远不触发**。Nexus 必须显式构造并设 trigger。
-    # 阈值:token 数 ≥ 4000 OR 消息数 ≥ 50(任一即压缩);压缩后保留最近 20 条消息。
-    # 4K tokens 大约是 MiniMax-M3 32K 上下文的 12%,触发早 + 留够缓冲,避免
-    # 单次压缩后仍超限的雪崩。20 条保留下限是 deepagents 默认,覆盖"最近对话"
-    # 短时上下文足够。
-    from langchain.agents.middleware import SummarizationMiddleware
-
-    summarization = SummarizationMiddleware(
-        model=llm,
-        trigger=[("tokens", 4000), ("messages", 50)],
-        keep=("messages", 20),
-    )
+    # 上下文自动压缩:由 deepagents 0.6.8 主 agent stack 自动注入
+    # ``create_summarization_middleware(model, backend)``,trigger 通过
+    # ``ResilientRunnable._resolve_model_profile()`` 暴露的 profile 计算:
+    #   1. profile 含 max_input_tokens → deepagents 用 ``("fraction", 0.85)``,
+    #      实际触发阈值 = max_input_tokens × 0.85
+    #   2. profile 缺 max_input_tokens → fallback 到 ``("tokens", 170000)``,
+    #      对 200K 模型几乎不触发,要避免
+    # Nexus 当前 profile.max_input_tokens = NEXUS_CONTEXT_WINDOW(默认 200K),
+    # 实际触发阈值 = 200000 × 0.85 = 170000 tokens。
+    # **不要**自己再传一个 SummarizationMiddleware —— 两个同名 middleware
+    # 会让 langchain factory 抛 ``AssertionError: Please remove duplicate
+    # middleware instances``,E2E 2026-06-27 ``test_e2e_04_models_crud`` 暴露
+    # (触发场景:``POST /api/models/switch`` 重建 agent 时炸 500)。
+    # 旧 commit ``c6d6f56`` 基于"deepagents 默认 trigger=None"错误前提,
+    # 实际是 ``compute_summarization_defaults`` 会按 model profile 给出
+    # 非空 trigger,完全够用。
 
     # ``checkpointer`` 已在上面 _create_store() 之前构造(顺序敏感,见那段注释)。
 
@@ -888,7 +943,7 @@ def create_agent(
         permissions=permissions,
         memory=memory_files,
         store=store,
-        middleware=[summarization, quality_gate],
+        middleware=[quality_gate],
         checkpointer=checkpointer,
         skills=[
             ".nexus/skills",

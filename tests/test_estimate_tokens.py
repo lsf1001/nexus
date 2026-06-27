@@ -62,12 +62,12 @@ def test_context_window_affects_percentage():
 
 
 def test_zero_context_window_falls_back_to_default():
-    """context_window=0 应触发兜底（用 32000）避免 0 除。"""
+    """context_window=0 应触发兜底（用 200000）避免 0 除。"""
     text = "a" * 1000  # 250 tokens
     tokens, usage = _estimate_tokens(text, context_window=0)
     assert tokens == 250
-    # 250 / 32000 * 100 = 0.78125 → 0.8
-    assert usage == 0.8
+    # 250 / 200000 * 100 = 0.125 → 0.1
+    assert usage == 0.1
 
 
 def test_negative_context_window_falls_back_to_default():
@@ -75,17 +75,33 @@ def test_negative_context_window_falls_back_to_default():
     text = "a" * 1000
     tokens, usage = _estimate_tokens(text, context_window=-100)
     assert tokens == 250
-    assert usage == 0.8
+    assert usage == 0.1
 
 
 def test_max_percent_clamped_to_100():
-    """超长文本（tokens > window）占比不超过 100%。"""
-    # 200K 字符 × 0.25 = 50000 tokens > 32000 window → 50000/32000*100 = 156.25%
-    # clamp 到 100.0
-    text = "a" * 200000
-    tokens, usage = _estimate_tokens(text, context_window=32000)
-    assert tokens == 50000  # 200000 * 0.25
-    assert usage == 100.0  # clamp 生效
+    """超长文本(tokens > window)占比 clamp 到 100,不被放大。
+
+    三种 window 对照,验证 clamp 在 tokens > window 时生效,
+    且不会破坏"tokens > window"以外的正常计算。
+    """
+    # 1M 字符 × 0.25 = 250K tokens
+    text = "a" * 1_000_000
+    assert len(text) * 0.25 == 250_000  # 锚定文本规模
+
+    # 1. 默认 200K: 250K > 200K → clamp 100
+    tokens_default, usage_default = _estimate_tokens(text)
+    assert tokens_default == 250_000
+    assert usage_default == 100.0
+
+    # 2. 显式 100K: 250K > 100K → clamp 100
+    tokens_100k, usage_100k = _estimate_tokens(text, context_window=100_000)
+    assert tokens_100k == 250_000
+    assert usage_100k == 100.0
+
+    # 3. 显式 300K: 250K < 300K → 不 clamp,真实占比 83.3%
+    tokens_300k, usage_300k = _estimate_tokens(text, context_window=300_000)
+    assert tokens_300k == 250_000
+    assert usage_300k == 83.3  # 250000/300000*100 = 83.333... → round 1 = 83.3
 
 
 def test_thinking_tags_ignored_in_estimate():
@@ -96,10 +112,10 @@ def test_thinking_tags_ignored_in_estimate():
     assert tokens > 0
 
 
-def test_default_context_window_is_32000():
-    """不传 context_window 时默认 32000。"""
+def test_default_context_window_is_200000():
+    """不传 context_window 时默认 200000(NEXUS 项目当前假设)。"""
     text = "a" * 1000  # 250 tokens
     tokens_default, usage_default = _estimate_tokens(text)
-    tokens_explicit, usage_explicit = _estimate_tokens(text, context_window=32000)
+    tokens_explicit, usage_explicit = _estimate_tokens(text, context_window=200000)
     assert tokens_default == tokens_explicit
     assert usage_default == usage_explicit

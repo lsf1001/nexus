@@ -73,7 +73,7 @@ def load_config() -> dict:
             "NEXUS_WS_TOKEN", file_config.get("security", {}).get("ws_token", "nexus-default-token")
         ),
         "resume_secret": os.environ.get("NEXUS_RESUME_SECRET", ""),
-        "context_window": int(os.environ.get("NEXUS_CONTEXT_WINDOW", "32000")),
+        "context_window": int(os.environ.get("NEXUS_CONTEXT_WINDOW", "200000")),
         # 工作区目录
         "workspace_root": str(nexus_home / "workspace"),
         "memory_dir": str(nexus_home / "workspace" / "memory"),
