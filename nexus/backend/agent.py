@@ -862,6 +862,21 @@ def create_agent(
         protected_paths=tuple(str(p) for p in resolve_protected_paths(project_root)),
     )
 
+    # 上下文自动压缩:deepagents 0.6.8 默认把 SummarizationMiddleware 加进 base
+    # stack,但 trigger=None → ``_should_summarize`` 第一行 ``if not trigger_conditions:
+    # return False``,**永远不触发**。Nexus 必须显式构造并设 trigger。
+    # 阈值:token 数 ≥ 4000 OR 消息数 ≥ 50(任一即压缩);压缩后保留最近 20 条消息。
+    # 4K tokens 大约是 MiniMax-M3 32K 上下文的 12%,触发早 + 留够缓冲,避免
+    # 单次压缩后仍超限的雪崩。20 条保留下限是 deepagents 默认,覆盖"最近对话"
+    # 短时上下文足够。
+    from langchain.agents.middleware import SummarizationMiddleware
+
+    summarization = SummarizationMiddleware(
+        model=llm,
+        trigger=[("tokens", 4000), ("messages", 50)],
+        keep=("messages", 20),
+    )
+
     # ``checkpointer`` 已在上面 _create_store() 之前构造(顺序敏感,见那段注释)。
 
     agent = create_deep_agent(
@@ -873,7 +888,7 @@ def create_agent(
         permissions=permissions,
         memory=memory_files,
         store=store,
-        middleware=[quality_gate],
+        middleware=[summarization, quality_gate],
         checkpointer=checkpointer,
         skills=[
             ".nexus/skills",

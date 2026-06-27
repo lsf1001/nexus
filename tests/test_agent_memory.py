@@ -132,6 +132,49 @@ class TestCreateAgentWiresDeepAgentsMemory:
                 "QualityGateMiddleware 必须装到 middleware 里拦截 edit_file"
             )
 
+    def test_middleware_kwarg_contains_summarization_with_trigger(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``SummarizationMiddleware`` 必须显式构造且 ``trigger`` 非空。
+
+        WHY:deepagents 0.6.8 默认把 ``SummarizationMiddleware`` 加进 base stack,
+        但 ``trigger=None`` → ``_should_summarize`` 第一行
+        ``if not trigger_conditions: return False`` → **永远不压缩**。
+        Nexus 必须显式设 trigger=("tokens", 4000) / ("messages", 50),否则
+        用户报告的"上下文没自动压缩了"复现。
+        """
+        from langchain.agents.middleware import SummarizationMiddleware
+
+        monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
+        from nexus.backend.agent import create_agent
+
+        with patch("deepagents.create_deep_agent") as mock_create:
+            mock_create.return_value = MagicMock()
+            create_agent(model_name="m", api_key="k", api_base="https://x")
+
+            kwargs = mock_create.call_args.kwargs
+            middleware = kwargs["middleware"]
+            summarization_mws = [m for m in middleware if isinstance(m, SummarizationMiddleware)]
+            assert summarization_mws, (
+                "SummarizationMiddleware 必须显式装到 middleware(默认 trigger=None 不触发压缩)"
+            )
+            # 至少有一个 SummarizationMiddleware,且 trigger 非空
+            smw = summarization_mws[0]
+            assert smw.trigger is not None, "trigger 不能是 None,否则 _should_summarize 永远 False"
+            # trigger 是 list(tuple)或 tuple;normalize 成 list 检查
+            triggers = smw.trigger if isinstance(smw.trigger, list) else [smw.trigger]
+            assert triggers, "trigger 列表不能空"
+            # 每个 trigger 必须是 ('tokens', N>=4000) 或 ('messages', N>=50) 或 ('fraction', 0<..<=1)
+            for kind, value in triggers:
+                if kind == "tokens":
+                    assert value >= 4000, f"token trigger 太低({value}),长对话没等就压,容易丢上下文"
+                elif kind == "messages":
+                    assert value >= 50, f"message trigger 太低({value}),压太勤影响 LLM 推理"
+                elif kind == "fraction":
+                    assert 0 < value <= 1, f"fraction trigger 必须在 (0, 1] 之间,实际 {value}"
+                else:
+                    pytest.fail(f"未知的 trigger kind: {kind}")
+
     def test_backend_is_composite_with_store_route(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
         from deepagents.backends.composite import CompositeBackend
