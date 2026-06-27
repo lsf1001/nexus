@@ -26,11 +26,17 @@ if [ ! -f "$ENTITLEMENTS" ]; then
 fi
 
 echo ">>> signing $APP_PATH with entitlements..."
-codesign --force --deep \
+# 只签顶层 .app(不 --deep),内部 binary / WKWebView WebContent 的
+# 沙盒 profile 由 Tauri 2 build 时写入,自己重签会破坏嵌套签名。
+codesign --force \
   --options runtime \
   --entitlements "$ENTITLEMENTS" \
   --sign - \
   "$APP_PATH"
 
-echo ">>> verifying signature..."
+echo ">>> verifying top-level signature..."
 codesign -dv "$APP_PATH" 2>&1 | head -8
+
+echo ""
+echo ">>> verifying all nested binaries..."
+codesign --verify --deep --strict "$APP_PATH" 2>&1 | head -5
