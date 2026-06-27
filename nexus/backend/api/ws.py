@@ -220,7 +220,19 @@ async def _finalize_after_stream(
     if clarification is not None:
         clarify_question, _clarify_options = clarification
         placeholder = f"[澄清中] {clarify_question}"
-        add_message(str(uuid.uuid4()), session_id, "assistant", placeholder)
+        # 占位消息是"会话回放时让用户看到 AI 刚才问了 X"的可选辅助,
+        # 写失败(典型:deepagents aiosqlite 后台持 WAL 锁 > busy_timeout)
+        # 不应让 ws 主循环崩 —— clarify_request 帧已经发出去了,
+        # 前端已经显示澄清表单,业务侧已经在等用户回答。OperationalError
+        # 降级为 warning log,不影响协议层。
+        try:
+            add_message(str(uuid.uuid4()), session_id, "assistant", placeholder)
+        except Exception as persist_exc:  # noqa: BLE001 — 持久化失败不影响协议
+            logger.warning(
+                "WS 澄清占位消息入库失败,降级跳过 (session=%s, exc=%s)",
+                session_id,
+                persist_exc,
+            )
         return
 
     # HITL 挂起：``_run_agent_streaming`` 已经发了 ``confirmation_request`` +
@@ -668,9 +680,25 @@ async def _run_agent_streaming(
                     raw_options = tool_input.get("options") or []
                     options: list[str] = []
                     if isinstance(raw_options, list):
+                        # LLM 既可能传 ["火锅","烧烤"] 纯字符串列表,
+                        # 也可能传 [{key:"classic",label:"经典必玩",description:"..."}]
+                        # 字典列表(更丰富)。前端只展示纯文本按钮,所以这里
+                        # 把字典规范化为 label 字符串 — 优先 label/text/value/name,
+                        # 都缺再 str() 兜底。空字符串 / 纯空白丢弃。
                         for opt in raw_options:
-                            if isinstance(opt, str) and opt.strip():
-                                options.append(opt.strip())
+                            label: str | None = None
+                            if isinstance(opt, str):
+                                label = opt
+                            elif isinstance(opt, dict):
+                                for key in ("label", "text", "value", "name"):
+                                    v = opt.get(key)
+                                    if isinstance(v, str) and v.strip():
+                                        label = v
+                                        break
+                            elif opt is not None:
+                                label = str(opt)
+                            if label and label.strip():
+                                options.append(label.strip())
                             if len(options) >= 6:
                                 break
 

@@ -249,3 +249,190 @@ def test_ask_user_tool_basic_invoke() -> None:
     assert "options=" in result_mixed  # 至少 options= 字符串还在
     # 空字符串不出现
     assert "' '" not in result_mixed  # 纯空白被 trim 后跳过
+
+
+# ============== 5. ask_user options 字典形式 → 序列化为 label 字符串 ==============
+
+
+def test_ask_user_dict_options_normalized_to_labels(monkeypatch) -> None:
+    """LLM 传 [{key, label, description}] 字典列表 → 客户端收到 label 字符串列表。
+
+    背景:LLM 调 ask_user 工具时,有时会用更结构化的形式给选项
+    (key+label+description),而 ws.py 之前只接 str,导致选项被全过滤
+    掉、前端只能看到空 options 自由输入框。修复后规范化成 label 字符串。
+    """
+    _authed_token(monkeypatch)
+
+    async def astream_events_factory(input, **kwargs):  # noqa: ARG001
+        yield {
+            "event": "on_tool_start",
+            "name": "ask_user",
+            "data": {
+                "input": {
+                    "question": "这次海口 3 日游你更倾向哪种风格?",
+                    "options": [
+                        {"key": "classic", "label": "经典必玩", "description": "骑楼老街、万绿园等"},
+                        {"key": "food", "label": "美食探店", "description": "早茶、海鲜大排档"},
+                        {"key": "leisure", "label": "休闲度假", "description": "海边发呆 + 温泉"},
+                    ],
+                }
+            },
+        }
+
+    with TestClient(app) as client:
+        with patch("nexus.backend.main._agent") as mock_agent:
+            mock_agent.astream_events = astream_events_factory
+
+            with client.websocket_connect("/api/ws?token=test-token") as ws:
+                ws.send_json({"content": "海口 3 日游", "title": "dict-options-test"})
+
+                events: list[dict] = []
+                for _ in range(20):
+                    try:
+                        msg = ws.receive_json()
+                    except Exception:
+                        break
+                    events.append(msg)
+                    if msg.get("type") == "clarification_request":
+                        break
+
+    clarify = next(e for e in events if e.get("type") == "clarification_request")
+    assert clarify["content"] == "这次海口 3 日游你更倾向哪种风格?"
+    # 关键:字典被规范化为 label 字符串,前端按钮才能正常显示
+    assert clarify["options"] == ["经典必玩", "美食探店", "休闲度假"]
+
+
+def test_ask_user_mixed_options(monkeypatch) -> None:
+    """options 同时含字符串、字典、空串、None → 只保留有效项。"""
+    _authed_token(monkeypatch)
+
+    async def astream_events_factory(input, **kwargs):  # noqa: ARG001
+        yield {
+            "event": "on_tool_start",
+            "name": "ask_user",
+            "data": {
+                "input": {
+                    "question": "选哪个?",
+                    "options": [
+                        "纯字符串",
+                        {"label": "字典label"},
+                        {"text": "字典text"},
+                        "",  # 空字符串
+                        {"label": ""},  # 字典但 label 空
+                        None,  # None
+                    ],
+                }
+            },
+        }
+
+    with TestClient(app) as client:
+        with patch("nexus.backend.main._agent") as mock_agent:
+            mock_agent.astream_events = astream_events_factory
+
+            with client.websocket_connect("/api/ws?token=test-token") as ws:
+                ws.send_json({"content": "选", "title": "mixed-options-test"})
+
+                events: list[dict] = []
+                for _ in range(20):
+                    try:
+                        msg = ws.receive_json()
+                    except Exception:
+                        break
+                    events.append(msg)
+                    if msg.get("type") == "clarification_request":
+                        break
+
+    clarify = next(e for e in events if e.get("type") == "clarification_request")
+    # 关键:有效项保留,空串/None 跳过
+    assert clarify["options"] == ["纯字符串", "字典label", "字典text"]
+
+
+# ============== 6. clarification 占位入库失败不影响 ws 协议 ==============
+
+
+def test_clarification_placeholder_persist_failure_does_not_kill_ws(monkeypatch) -> None:
+    """add_message 在 clarification 占位写入失败(模拟 aiosqlite 持 WAL 锁)
+    → ws 不应崩,后续消息能继续处理。
+
+    背景:deepagents 的 AsyncSqliteStore/AsyncSqliteSaver 持有 WAL 写锁时
+    busy_timeout=30s 仍然不够,OperationalError("database is locked") 抛
+    到 handle_websocket 外层,导致 ws 连接进入死循环("WS 收到非 JSON 帧"
+    每 15s 重现)。修复后:_finalize_after_stream 的 clarification 分支
+    包 try/except,失败降级为 warning log。
+    """
+    from unittest.mock import patch as _patch
+
+    _authed_token(monkeypatch)
+
+    call_count = {"n": 0}
+
+    async def astream_events_factory(input, **kwargs):  # noqa: ARG001
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # 第一次 turn:LLM 决定追问
+            yield {
+                "event": "on_tool_start",
+                "name": "ask_user",
+                "data": {
+                    "input": {
+                        "question": "需要什么?",
+                        "options": ["A", "B"],
+                    }
+                },
+            }
+        else:
+            # 第二次 turn:LLM 给正常回复
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": MagicMock(content="done reply")},
+            }
+
+    from nexus.backend.api import ws as ws_module
+
+    real_add_message = ws_module.add_message
+
+    def fake_add_message(*args, **kwargs):
+        # add_message(message_id, session_id, role, content, ...)
+        role = args[2] if len(args) > 2 else kwargs.get("role")
+        content = args[3] if len(args) > 3 else kwargs.get("content", "")
+        if role == "assistant" and str(content).startswith("[澄清中]"):
+            raise Exception("database is locked")
+        return real_add_message(*args, **kwargs)
+
+    with TestClient(app) as client:
+        with patch("nexus.backend.main._agent") as mock_agent:
+            mock_agent.astream_events = astream_events_factory
+
+            with client.websocket_connect("/api/ws?token=test-token") as ws:
+                # 第一次 turn → 触发 clarification；只模拟 clarification 占位入库失败。
+                with _patch("nexus.backend.api.ws.add_message", side_effect=fake_add_message):
+                    ws.send_json({"content": "Q1", "title": "lock-test"})
+                    first_events: list[dict] = []
+                    for _ in range(20):
+                        try:
+                            msg = ws.receive_json()
+                        except Exception:
+                            break
+                        first_events.append(msg)
+                        if msg.get("type") == "clarification_request":
+                            break
+
+                # 关键断言 1:仍然收到 clarification_request(add_message 失败不阻断协议)
+                assert any(e.get("type") == "clarification_request" for e in first_events), (
+                    f"未收到 clarification_request: {first_events}"
+                )
+
+                # 第二次 turn → LLM 正常回复(ws 没被第一次锁异常打死)
+                ws.send_json({"content": "Q2", "title": "lock-test-2"})
+                second_events: list[dict] = []
+                for _ in range(20):
+                    try:
+                        msg = ws.receive_json()
+                    except Exception:
+                        break
+                    second_events.append(msg)
+                    if msg.get("type") == "done":
+                        break
+
+                # 关键断言 2:第二次 turn 仍能收到 done(ws 没被锁异常打死)
+                assert any(e.get("type") == "done" for e in second_events), f"第二次 turn 未完成: {second_events}"
