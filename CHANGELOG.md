@@ -169,6 +169,56 @@ export NEXUS_CONTEXT_WINDOW=2000000
 
 ---
 
+## [Unreleased] — 修复 UI 上下文占比误报
+
+### Problem
+
+用户实际场景:UI 显示"上下文 █████████░ 89% (178k/200k)",但
+deepagents 自动压缩没触发(实际 trigger 阈值是 200K × 0.85 = 170K)。
+根因:`_estimate_tokens` 用的字符系数(中 ×2.5 / 英 ×0.25 / 其他 ×0.5)
+跟 deepagents 内部 `count_tokens_approximately` 差 ~10×。同时该函数
+只统计"本轮响应",不算整个对话上下文。
+
+实测对照(71200 中文字符):
+  | 估算方式 | tokens | 占比 |
+  |---|---|---|
+  | 旧字符系数 | 178,000 | 89%(误导) |
+  | langchain `count_tokens_approximately` | ~17,950 | 9%(真实) |
+
+### Changed
+
+- **`nexus/backend/api/ws.py::_estimate_tokens` 改用
+  `:func:langchain_core.messages.utils.count_tokens_approximately`**:
+  - 函数签名从 `(text: str, context_window: int)` 改为
+    `(content: str | list, context_window: int)` — 接受字符串(测试/降级用)
+    或 messages 列表(生产用整个会话上下文)
+  - 底层委托给 langchain 启发式,跟 deepagents `SummarizationMiddleware.
+    _should_summarize` 用**同一套** token 估算
+  - 空内容短路:空 str / 空 list 直接返回 `(0, 0.0)`,避免空消息被算成
+    ~4 tokens(per-message overhead)
+- **WS caller 范围扩展**:`_run_agent_streaming` 里调
+  `_estimate_tokens(prompt["messages"] + [新 assistant 响应], ...)`,
+  传**整个对话上下文**而不是只传本轮响应。这样 UI 显示的 % 才是
+  "会话占比",不是"响应占比"。
+
+### Tests
+
+- `tests/test_estimate_tokens.py` 全面重写:
+  - 去掉依赖字符系数的固定值断言(旧测试 4字中文 = 10 tokens 之类)
+  - 加 str / list 两种输入的覆盖
+  - 加核心回归保护:`test_long_chinese_conversation_realistic_usage`
+    验证 50 轮 × 240 中文字符的真实长对话估出 < 5%(旧系数会算成 ~30%)
+  - 加 `test_calls_count_tokens_approximately` 用 mock 锁定底层实现,
+    防止有人改回字符系数
+
+### Verified
+
+- `pytest tests/test_estimate_tokens.py`:**13/13 通过**
+- `pytest test_estimate_tokens + test_llm_profile + test_agent_memory +
+  test_resume_token + test_ws_resilience`:**65/65 通过,无回归**
+
+---
+
 ## [v0.1.0] — 2026-06-21 — 首次内测交付
 
 **核心**: 把 Nexus 从「能跑」推进到「能装能用」。AI Gateway 全栈接通(后端 + 前端 + **桌面端 DMG 安装包**)、质量门上线、可观测性落地、意图识别路由、CI/CD 双线。

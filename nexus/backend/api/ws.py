@@ -387,37 +387,60 @@ def _serialize_hitl_request(
     }
 
 
-def _estimate_tokens(text: str, context_window: int = 200000) -> tuple[int, int]:
+def _estimate_tokens(
+    content: str | list,
+    context_window: int = 200000,
+) -> tuple[int, int]:
     """估算 token 数量和上下文使用率。
 
-    字符 → token 换算（与 OpenAI 经验值对齐）：
-      - 中文字符 × 2.5（中文 token 化比英文密）
-      - 英文字符 × 0.25（GPT-style BPE 约 4 字符 1 token）
-      - 其他字符 × 0.5（标点/数字/混合）
+    委托给 :func:`langchain_core.messages.utils.count_tokens_approximately` —
+    与 deepagents 内部 ``_should_summarize`` 用**同一套** token 估算。
+    这样 UI 显示的"上下文用量 %"和"自动压缩触发阈值"在**同一基准**上,
+    不会出现 UI 说 89% 但实际才 8% 那种"误以为快压缩了"的错位。
+
+    WHY 不再用字符系数(中 2.5 / 英 0.25 / 其他 0.5):
+      实测 71200 中文字符:旧系数 = 178k tokens(89%),新计数 = ~18k(9%),差 10×。
+      字符系数高估,误导用户以为快触顶了。改用 langchain 启发式更接近 deepagents
+      实际决策。
 
     Args:
-        text: 文本内容（通常是被估算的"已用上下文"——累积 prompt 或本轮回复）。
-        context_window: 模型的上下文窗口（token 数）。
-            主流模型：GPT-3.5-turbo 16K, GPT-4 8K/32K, Claude 200K,
-            MiniMax-M3 200K（Nexus 项目当前假设的默认上下文窗口）。
-            默认 200000，可通过 CONFIG['context_window'] 或 NEXUS_CONTEXT_WINDOW 覆盖。
+        content: 估算对象,两种形式:
+            - ``str``: 单段文本(测试/降级用,内部包成 HumanMessage)
+            - ``list``: 整个会话的 messages(BaseMessage 或 ``{"role":..., "content":...}``
+              dict 都可)。**生产场景必传 list**,让 UI 显示的是"整个对话
+              占比",不是"本轮响应占比"。
+        context_window: 上下文窗口 token 数。默认 200000,
+            匹配 :envvar:`NEXUS_CONTEXT_WINDOW` 默认值。
 
     Returns:
-        ``(token_count, context_usage_percent)``：
-          - ``token_count``：估算的 token 数
-          - ``context_usage_percent``：相对 ``context_window`` 的占用百分比
-            （0.0-100.0，保留 1 位小数）
+        ``(token_count, context_usage_percent)``:
+          - ``token_count``:估算的 token 数(可能含 per-message overhead,
+            ``count_tokens_approximately`` 的语义)
+          - ``context_usage_percent``:相对 ``context_window`` 的占用百分比
+            (0.0-100.0,保留 1 位小数,clamp 到 100)
     """
-    chinese_chars = len(re.findall(r"[一-鿿]", text))
-    english_chars = len(re.findall(r"[a-zA-Z]", text))
-    other_chars = len(text) - chinese_chars - english_chars
-    estimated_tokens = int(chinese_chars * 2.5 + english_chars * 0.25 + other_chars * 0.5)
-    # 防 0 除
+    # 局部 import:启动时少一个顶层依赖;且 count_tokens_approximately 在 ws
+    # 端点热路径,延迟到调用时再 resolve,符合 Pylance 的"用时导入"建议。
+    from langchain_core.messages.utils import count_tokens_approximately
+
+    # 空内容短路:count_tokens_approximately 对空 HumanMessage 仍返回 ~4
+    # tokens(per-message overhead),但语义上空内容应 0 token。否则前端
+    # "用了 0.0%" 在用户没说话时会被显示成"用了 0.002%",误导。
+    if isinstance(content, str):
+        if not content:
+            return 0, 0.0
+        from langchain_core.messages import HumanMessage
+
+        token_count = count_tokens_approximately([HumanMessage(content=content)])
+    else:
+        if not content:
+            return 0, 0.0
+        token_count = count_tokens_approximately(content)
+
     if context_window <= 0:
         context_window = 200000
-    # 保留 1 位小数，让"用了 0.5%"也能显示
-    context_usage = round(estimated_tokens / context_window * 100, 1)
-    return estimated_tokens, min(context_usage, 100.0)
+    context_usage = round(token_count / context_window * 100, 1)
+    return token_count, min(context_usage, 100.0)
 
 
 def _extract_request_token(request: Request) -> str:
@@ -849,7 +872,19 @@ async def _run_agent_streaming(
         normalized = full_response.replace("<think>", "<thinking>").replace("</think>", "</thinking>")
 
         # 2) token_usage：估算 token + context 占用率
-        estimated_tokens, context_usage = _estimate_tokens(normalized, context_window=CONFIG["context_window"])
+        # 范围:累积 prompt["messages"] + 本轮 assistant 响应 = 整个对话上下文,
+        # 而不是只看本轮响应 —— UI 显示的 % 才跟 deepagents 实际 trigger
+        # 决策用的 token 计数同源(都是 count_tokens_approximately)。
+        # prompt 是 _run_agent_streaming 入参(line 484),自带 system 段
+        # + 历史 + 本轮 user 消息;这里再 append 一个 assistant 角色 dict
+        # 模拟刚生成的回复入库后的样子(下游 add_message 也是 assistant
+        # role,所以格式对齐)。
+        full_context_messages: list[dict[str, Any]] = list(prompt["messages"]) + [
+            {"role": "assistant", "content": normalized}
+        ]
+        estimated_tokens, context_usage = _estimate_tokens(
+            full_context_messages, context_window=CONFIG["context_window"]
+        )
         token_usage_event_id = last_event_id + 1
         await websocket.send_json(
             {
