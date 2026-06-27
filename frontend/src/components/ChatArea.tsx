@@ -108,12 +108,19 @@ function ChatArea({
     // 通过 ref 调 disarm,避免 ChatArea render 期间因 TDZ 抛错
     const disarm = disarmWatchdogRef.current;
 
-    // 容错：若流式事件先于 client 提交到达（罕见竞态：用户在
-    // handleSend 之前 useEffect 还没跑，ws onmessage 已触发），
-    // messagesRef 可能为空。补一个 assistant 占位消息，避免
-    // chunk/thinking 被静默丢弃。
+    // 容错：流式事件到达时确保最后一条是 assistant 占位。
+    //
+    // 触发场景:
+    //   1. 流式事件先于 client 提交到达(罕见竞态:ws onmessage 比
+    //      handleSend 的 setState 先跑)— messagesRef 为空
+    //   2. 用户刚发完消息,user 消息已在 messagesRef 里,流式事件到达
+    //      时最后一条是 user — 必须 push 一个 assistant 占位,否则
+    //      thinking 会被附加到 user 消息上,chunk 因 role 校验失败
+    //      被静默丢弃,final 帧把 user.content 覆盖成助手回复
+    //      (实测:thinking 卡在 user 气泡、整段对话只剩一条消息)
     const ensureAssistantPlaceholder = () => {
-      if (messagesRef.current.length === 0) {
+      const last = messagesRef.current[messagesRef.current.length - 1];
+      if (!last || last.role !== 'assistant') {
         messagesRef.current.push({
           id: crypto.randomUUID(),
           role: 'assistant',
