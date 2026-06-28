@@ -63,3 +63,37 @@ def test_unclosed_thinking_emitted_at_flush() -> None:
     p.feed("<thinking>推理过程")
     out = p.flush()
     assert out == [("thinking", "推理过程")]
+
+
+def test_stray_close_tag_in_chunk_drops_close_and_keeps_text() -> None:
+    """</thinking> 在 chunk 状态出现无意义,前缀和 close 一起被丢弃。
+
+    合同:游离 close 标签(无对应 open)整段连同前缀一并丢弃,
+    残留 tail 继续作为 chunk 解析。这是保守策略 — 防止"前缀中恰好
+    含有用户可见的恶意 close 标签"导致误切。
+    """
+    p = ThinkingParser()
+    out = p.feed("hello</thinking>world")
+    assert out == [("chunk", "world")]
+
+
+def test_empty_thinking_block_emits_no_thinking_frame() -> None:
+    """空标签 <thinking></thinking> 不应产生 thinking 帧(无内容,close 收尾后无 chunk 前缀)。"""
+    p = ThinkingParser()
+    out = p.feed("<thinking></thinking>")
+    assert out == []
+
+
+def test_nested_thinking_closes_at_first_close_tag() -> None:
+    """嵌套 thinking: 在第一个 </thinking> 处关闭,残余文本走 chunk。
+
+    合同:parser 不识别真正的嵌套 — 第一个 close 关闭 thinking 块,
+    余下 `<thinking>b</thinking>c</thinking>` 走 chunk 状态解析:
+    第二个 `<thinking>` 进入 thinking 块,第二个 `</thinking>` 关闭 thinking,
+    第三个 `</thinking>` 视为游离,前缀 "c" 丢弃,只剩空输出。
+    """
+    p = ThinkingParser()
+    out = p.feed("<thinking>a<thinking>b</thinking>c</thinking>")
+    # 第一个 </thinking> 关闭外层:thinking = "a<thinking>b"
+    # 剩余 "c</thinking>" 在 chunk 状态:close 视为游离,前缀 "c" 也丢弃
+    assert out == [("thinking", "a<thinking>b")]

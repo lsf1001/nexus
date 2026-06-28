@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+__all__ = ["ThinkingParser"]
+
 _Kind = Literal["chunk", "thinking"]
 _Emission = tuple[_Kind, str]
 
@@ -52,17 +54,13 @@ class ThinkingParser:
         text = self._hold + content
         self._hold = ""
 
-        while text:
-            if self._state == "chunk":
-                self._consume_in_response(text, emissions)
-                if self._hold:
-                    return emissions
-                return emissions
-            else:
-                self._consume_in_thinking(text, emissions)
-                if self._hold:
-                    return emissions
-                return emissions
+        # NOTE:两个 consume 方法内含"状态切换后递归 re-feed 残余"的尾递归,
+        # 外层只调一次 — 若 self._hold 非空说明末尾留半截标签,下次 feed 再合并;
+        # 否则 consume 已把整段 text 消化完。
+        if self._state == "chunk":
+            self._consume_in_response(text, emissions)
+        else:
+            self._consume_in_thinking(text, emissions)
 
         return emissions
 
@@ -77,6 +75,8 @@ class ThinkingParser:
         return emissions
 
     def _consume_in_response(self, text: str, emissions: list[_Emission]) -> None:
+        # 尾式递归:状态切换(open 进入 thinking)时把残余重新投递 —
+        # 递归深度受单 chunk 内标签切换次数限制(典型个位数)。
         idx = self._find_open_tag(text)
         if idx == -1:
             # WHY 优先看 close 标签:chunk 状态下 close 标签没有匹配的 open,
@@ -117,6 +117,8 @@ class ThinkingParser:
             self._consume_in_thinking(rest, emissions)
 
     def _consume_in_thinking(self, text: str, emissions: list[_Emission]) -> None:
+        # 尾式递归:状态切换(close 退出 thinking)时把残余重新投递 —
+        # 递归深度受单 chunk 内标签切换次数限制(典型个位数)。
         idx = self._find_close_tag(text)
         if idx == -1:
             partial = self._longest_partial_close(text)
@@ -153,6 +155,7 @@ class ThinkingParser:
         i2 = text.find(self._ALT_OPEN)
         if i2 != -1:
             candidates.append(i2)
+        # 取最早出现的那个 — find() 返回首个匹配下标,min() 即最早位置
         return min(candidates) if candidates else -1
 
     def _find_close_tag(self, text: str) -> int:
@@ -163,6 +166,7 @@ class ThinkingParser:
         i2 = text.find(self._ALT_CLOSE)
         if i2 != -1:
             candidates.append(i2)
+        # 取最早出现的那个 — find() 返回首个匹配下标,min() 即最早位置
         return min(candidates) if candidates else -1
 
     def _advance_open(self, text: str, idx: int) -> int:
@@ -207,7 +211,12 @@ class ThinkingParser:
         return ""
 
     def _pick_partial(self, open: str, close: str) -> str:
-        """从 open / close partial 中选更靠右的那个(更长的 hold)。"""
+        """从 open / close partial 中选更长的那个(优先级:open 候选 ≥ close 候选)。
+
+        WHY 用长度而非位置:partial 都在文本末尾,位置等价于"已经
+        离 `<` 更远"。长度 > 位置,因为后续 partial 拼接时,更长的
+        片段代表模型输出离完整标签更近,值得保留更久的 hold 状态。
+        """
         if not open and not close:
             return ""
         if not open:
