@@ -5,6 +5,86 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [Unreleased] — 修复切到 Agnes 后 26s 转圈 + 思考过程不显示
+
+### Problem
+
+用户反馈:切换到 Agnes 模型后,前端一直 spinner 转圈,也不显示思考过程。
+
+实测(`~/.nexus/logs/nexus.log` 2026-06-28 21:18):
+  | 时点 | 事件 | 累计 |
+  |---|---|---|
+  | 21:18:05 | 用户发"hi" | 0s |
+  | 21:18:22 | intent 分类返回 | **+16.8s**(超时 8s 配置未生效) |
+  | 21:18:33 | LLM 流结束 | +28.3s |
+  | 21:18:33 | 客户端 code=1006 断开 | (用户放弃等待) |
+
+对比:MiniMax intent 4s + LLM 2.6s = 7s 收到首帧;Agnes 路径全链路 ≥ 26s 零反馈,用户体感"卡死"。
+
+### Root Cause (三层叠加)
+
+1. **chunk 全部缓存**:`ws.py::_run_agent_streaming` 把 `on_chat_model_stream` 每个 chunk 累加到 `full_response`,等 LLM 跑完才按 16 字符切碎发出去。期间前端零帧。
+2. **intent 分类无心跳**:`_classify_and_record` 在调 LLM 分类前不发任何 WS 帧;分类阻塞 16s+ 期间,前端 `isLoading=true` 但收不到任何东西。
+3. **`<thinking>` 标签流末抽取**:原 `re.findall` 在 `full_response` 上提取 — LLM 不主动输出 `<thinking>` 标签时,UI 永远看不到"思考过程"。
+4. **额外**:`asyncio.wait_for(8)` 对 agnes httpx connection 挂起不可靠,cancel 未传播,实际 latency 16821ms。
+
+### Changed
+
+- **`nexus/backend/api/ws.py::_run_agent_streaming` 实时 emit**:
+  - 删 `full_response += content` 缓存 + 16 字符后处理切块 + `re.findall` thinking 抽取
+  - `on_chat_model_stream` 每 chunk 立即 `parser.feed(content)` → 每个 `(kind, text)` 立刻 `send_json`
+  - `on_chat_model_end` 兜底走同路径(非流式 LLM,带 `not emitted_chunk_text` 守卫防 mock 双发)
+  - 流末 `parser.flush()` 把残留 hold / thinking 全部发完
+  - `final` 帧改用实时累积的 `emitted_chunk_text`(替换 `full_response` 字符串)
+  - `token_usage` / `done` 帧逻辑保持不变(下游契约不动)
+- **`nexus/backend/api/ws.py::_classify_and_record` 加心跳**:
+  - 函数签名加 `websocket` + `last_event_id: int = 0` 参数
+  - 入口先发一个 `type=thinking` 帧 `"正在识别你的意图…"`(`event_id = last_event_id + 1`,保证跨 turn resume token 单调)
+  - `send_json` 包 `try/except Exception` — WS 已断开场景记 WARNING + 继续分类,不让网络抖动阻塞主路径
+  - 调用方 `handle_websocket` 在外层声明模块级 `last_event_id = 0` 跨 turn cursor,`_run_agent_streaming` 返回值续传
+- **`nexus/backend/intent/router.py::classify_intent` 超时硬限**:
+  - `asyncio.wait_for(8.0)` → `async with asyncio.timeout(5.0):` 上下文管理器(Python 3.11+ 替代 API,对 httpx 挂起 cancel 更可靠)
+  - 显式 `except TimeoutError` 分支排在 `except Exception` 之前,日志带超时值
+  - 兜底全部返回 `DEFAULT_INTENT`(`"chitchat"`)
+  - 模块 docstring 从 "< 8s 超时" 更新为 "5s 硬限超时"
+
+### Added
+
+- **`nexus/backend/api/thinking_parser.py`** — 226 行纯逻辑状态机(无 IO、无 asyncio):
+  - 公开 API:`feed(content: str) -> list[tuple[Literal["chunk", "thinking"], str]]` + `flush()`
+  - 状态:`"chunk"` ↔ `"thinking"`,转移由 open/close tag 触发
+  - hold 缓冲:处理 `<thin` / `</think` 跨 chunk 分片
+  - 归一化:`<think>` ↔ `<thinking>` 视为同义,统一归一为 `<thinking>`
+  - `flush()` 兜底:未闭合的 thinking 累积按 thinking 帧发,未识别的部分标签按 chunk 发
+- **`tests/test_thinking_parser.py`** — 10 单元测试,覆盖正常 / 分片 / 嵌套 / 空标签 / `<think>` 与 `<thinking>` 混用 / stray close / unclosed at flush
+- **`tests/test_ws_realtime_streaming.py`** — 3 集成测试(mock LLM 逐 token 验证实时发帧 + thinking 跨分片识别 + final 顺序)
+- **`tests/test_intent_heartbeat.py`** — 3 回归测试(慢 LLM 路径发心跳 / `llm=None` 路径发心跳 / `event_id=last_event_id+1` 单调契约)
+- **`tests/test_intent_timeout.py`** — 3 超时测试(30s 挂起 LLM 5s 兜底 / 正常路径 task / 源码契约:必须 `asyncio.timeout` 且禁止 `asyncio.wait_for`)
+- **`tests/test_use_tauri_ws_placeholder.py::test_ws_emit_chunk_realtime_not_buffered`** — 反向 grep 断言:ws.py 必须 import ThinkingParser + on_chat_model_stream 分支含 `parser.feed` + `send_json` + **禁止** `full_response +=`。回潮立即 CI 红。
+- **`frontend/e2e/debug-agnes-message.spec.ts`** — Playwright 8s 首帧断言(实际期望 5s 内),`waitForFunction` 查 `.message-row.is-assistant` 是否有内容或 `.thinking-block`,超时 throw `"Agnes 转圈 bug 复发:8s 内未收到任何内容帧"` + 截图。
+
+### Removed
+
+- **`ws.py` 内的 `import re`** — 已无 `re.findall` 调用
+- **`ws.py::_STREAM_CHUNK_SIZE`** — 16 字符切块常量已删
+- **`tests/test_ws_resilience.py::test_ws_chunks_response_in_16_char_groups`** 重命名为 `test_ws_chunks_emitted_realtime_no_post_split` — 30 字符响应现在是 1 帧,不再是 2 帧
+
+### Notes
+
+- **`_emit_chat_end.chunks_count` 改为 `len(response_text)` 粗估**:精确计数需要 `_run_agent_streaming` 多返回一个元组元素,留作后续可观测性 PR。本次修复不阻塞。
+- **pre-existing 80 行函数上限违规**:`_run_agent_streaming` 现 483 行(原 ~300 + 本次 +180)。本次 fix 不拆函数,留作独立 refactor PR。python_project.md §1.2 要求单函数 ≤ 80 行,差距 6 倍,后续必须处理。
+- **`emitted_chunk_text` 与 `last_event_id` 作用域**:两者都是 `handle_websocket` 函数内 module-level 局部变量(非全局),保证 WS 断开后状态自然 GC,跨连接不污染。
+
+### Verified
+
+- `ruff check nexus/` — All checks passed
+- `ruff format --check nexus/` — 0 diff
+- `pytest tests/ -q` — **527 passed, 12 skipped** in 32s(基线 508 → +19 新测试,零回归)
+- 6 次 spec review + 5 次 code quality review,全部通过(含 3 次 fix amend 循环)
+- 5 个 task 6 个 commit(每 task 一个,Task 1 多 1 个 refactor amend),Conventional Commits 格式,中文主题 ≤ 50 字符
+
+---
+
 ## [Unreleased] — 桌面 APP 架构简化(electron+pyinstaller 双运行时 → pywebview+pyinstaller 单运行时)
 
 ### Changed
