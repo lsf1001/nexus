@@ -1,6 +1,6 @@
 """意图识别路由:复用主 ChatModel 做 1-shot 工具调用分类。
 
-零新依赖、零新 API key。每条 user message 多 1 次轻量 LLM 调用(< 8s 超时),
+零新依赖、零新 API key。每条 user message 多 1 次轻量 LLM 调用(5s 硬限超时),
 token 成本 < 200,延迟 +200-400ms。失败一律兜底 chitchat(最安全:不影响
 quality gate 的 task 工具链、不影响 deepagents 路径)。
 """
@@ -28,8 +28,8 @@ INTENT_TASK: IntentKind = "task"
 # 反过来 task 兜底 chitchat 才会出问题,所以这里坚持 chitchat 兜底)。
 DEFAULT_INTENT: IntentKind = INTENT_CHITCHAT
 
-# 分类超时:不能阻塞主流程太久
-CLASSIFY_TIMEOUT_S: float = 8.0
+# 分类超时:硬限 5s,不能阻塞主流程太久
+CLASSIFY_TIMEOUT_S: float = 5.0
 
 _CLASSIFIER_SYSTEM = """你是意图分类器。根据用户输入,只调用 1 个最合适的工具。
 - route_chitchat: 闲聊/寒暄/情感陪伴/打招呼
@@ -76,17 +76,22 @@ async def classify_intent(llm: BaseChatModel, message: str) -> IntentKind:
         IntentKind 字面量。所有异常 / 无 tool_call / 未知 tool 名一律
         兜底为 ``DEFAULT_INTENT``(chitchat)并记 WARNING,不抛。
     """
+    # 分类超时:必须硬限,避免 agnes 慢模型阻塞主流程 16s+
+    # WHY 2026-06-28:实测 agnes 响应 16s+,wait_for(8) 偶尔未生效
+    # (httpx connection 挂起无法被 Python cancel 传播),改用 asyncio.timeout
+    # + 显式 TimeoutError catch,确保兜底
     try:
-        resp = await asyncio.wait_for(
-            llm.bind_tools(INTENT_TOOLS).ainvoke(
+        async with asyncio.timeout(CLASSIFY_TIMEOUT_S):
+            resp = await llm.bind_tools(INTENT_TOOLS).ainvoke(
                 [
                     SystemMessage(content=_CLASSIFIER_SYSTEM),
                     HumanMessage(content=message),
                 ]
-            ),
-            timeout=CLASSIFY_TIMEOUT_S,
-        )
-    except Exception as exc:  # noqa: BLE001 — 边界统一兜底
+            )
+    except TimeoutError:
+        logger.warning("意图分类超时 %ss,兜底 chitchat", CLASSIFY_TIMEOUT_S)
+        return DEFAULT_INTENT
+    except Exception as exc:  # noqa: BLE001
         logger.warning("意图分类 LLM 失败,兜底 chitchat: %s", exc)
         return DEFAULT_INTENT
 
