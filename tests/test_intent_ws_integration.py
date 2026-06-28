@@ -29,7 +29,14 @@ async def test_classify_and_record_persists_intent(temp_db):
     sid = "s-test"
     db.create_session(sid, title="t", channel="main")
 
+    # _classify_and_record 第一个参数是 websocket(用于发 intent 心跳);
+    # 本测试关注 DB 入库 + 兜底,不验证 WS 帧,传一个空 recv 的 fake 即可。
+    class _NoopWS:
+        async def send_json(self, data):
+            pass
+
     intent = await _classify_and_record(
+        _NoopWS(),
         get_intent_llm=lambda: None,
         session_id=sid,
         user_content="你好",
@@ -69,7 +76,12 @@ async def test_classify_and_record_uses_llm_intent(temp_db, monkeypatch):
     sid = "s2"
     db.create_session(sid, title="t", channel="main")
 
+    class _NoopWS:
+        async def send_json(self, data):
+            pass
+
     intent = await _classify_and_record(
+        _NoopWS(),
         get_intent_llm=lambda: _TaskLLM(),
         session_id=sid,
         user_content="帮我写代码",

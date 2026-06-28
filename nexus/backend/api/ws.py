@@ -476,14 +476,44 @@ def _is_retryable_error_code(error_code: str) -> bool:
 
 
 async def _classify_and_record(
+    websocket: WebSocket,
     get_intent_llm: Callable[[], Any] | None,
     session_id: str,
     user_content: str,
+    last_event_id: int = 0,
 ) -> IntentKind:
     """调主 LLM 分类 + 把 user 消息(含 intent)写库。
 
     任何异常 / llm=None 一律兜底 chitchat(最安全:不影响 task 工具链)。
+
+    Args:
+        websocket: WS 连接,用于发心跳帧。
+        get_intent_llm: 返回分类用 LLM 的无参可调用;None/抛错 → 跳过分类。
+        session_id: 会话 id,用于把 user 消息入库。
+        user_content: 用户原始消息文本。
+        last_event_id: 上一次流结束的 event_id(供 resume token 续点);心跳帧
+            必须用 ``last_event_id + 1`` 以保持客户端单调计数,让该帧也可作为
+            合法 resume 标记。首轮 / 无历史时传 0。
     """
+    # === 心跳:让前端立刻看到反馈,避免 agnes 慢模型 16s+ spinner ===
+    # WHY 2026-06-28:intent 分类可能要 16s+ (agnes),期间前端 isLoading=true
+    # 但收不到任何 WS 帧,用户体感"卡死"。先发一个 thinking 帧告诉用户
+    # "正在识别意图",哪怕分类慢,用户也知道系统在干活。
+    # event_id=last_event_id+1:与 _run_agent_streaming 的 event_id 计数器
+    # 单调衔接,保证客户端用 event_id 续流时心跳也是合法 resume 标记。
+    intent_classify_event_id = last_event_id + 1
+    try:
+        await websocket.send_json(
+            {
+                "type": "thinking",
+                "content": "正在识别你的意图…",
+                "event_id": intent_classify_event_id,
+            }
+        )
+    except Exception as heartbeat_exc:  # noqa: BLE001
+        # 心跳失败不能让 intent 分类中断(可能 WS 已断但调用链未感知),记日志继续
+        logger.warning("WS intent 心跳发送失败: %s", heartbeat_exc)
+
     intent: IntentKind = DEFAULT_INTENT
     llm: Any = None
     if get_intent_llm is not None:
@@ -1072,6 +1102,12 @@ async def handle_websocket(
 
     session_manager = get_session_manager()
     session_id = None
+    # 本连接的 event_id 跨轮游标:_classify_and_record(心跳)与
+    # _run_agent_streaming(主流)都会发帧,二者的 event_id 必须单调衔接,
+    # 这样客户端用 event_id 续流时心跳也是合法 resume 标记。每轮
+    # _run_agent_streaming 返回后用其 last_event_id 更新本变量,新轮的
+    # 心跳就用本变量+1。
+    last_event_id = 0
 
     try:
         while True:
@@ -1265,7 +1301,17 @@ async def handle_websocket(
 
             # 添加用户消息到历史(intent 由意图识别层落库)
             intent_classified_at = time.monotonic()
-            intent_result = await _classify_and_record(get_intent_llm, session_id, user_content)
+            intent_result = await _classify_and_record(
+                websocket,
+                get_intent_llm,
+                session_id,
+                user_content,
+                last_event_id=last_event_id,
+            )
+            # 心跳发出去的 event_id = last_event_id + 1:与下一轮 _run_agent_streaming
+            # 的流内 event_id 保持单调衔接(让客户端拿 event_id 续流时心跳也是
+            # 合法标记)。last_event_id 本身由 _run_agent_streaming 返回值在下方
+            # 更新,跨轮游标在此维持。
             intent_latency_ms = int((time.monotonic() - intent_classified_at) * 1000)
             emit_chat_event(
                 IntentClassified(
