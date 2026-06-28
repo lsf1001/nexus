@@ -5,6 +5,63 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [Unreleased] — 修复 LLM 自我介绍答错(切到 Agnes 后还说 MiniMax-M3)
+
+### Problem
+
+用户切到 agnes-2.0-flash 后,在 Nexus 里问"你用的什么模型",
+LLM 仍然回答"我用的是 MiniMax-M3 模型,由 MiniMax 公司开发"。
+原因是 system prompt 的【身份】段硬编码了产品身份,没有告诉
+LLM 当前实际驱动模型是哪个,所以 LLM 只能瞎猜 / 退回训练时的默认。
+
+### Root Cause
+
+`_build_system_prompt()` 写死的身份段:
+> 你是 Nexus,夜小白科技有限公司开发的 AI 智能助理。
+
+这条 prompt 不含任何关于"当前驱动模型"的信息。LLM 被问"你用的什么
+模型"时没有任何上下文 introspection,只能默认回答训练时常见的 MiniMax-M3。
+
+### Changed
+
+- **`nexus/backend/agent.py::_build_system_prompt` 接受 ``model_name``**:
+  - 签名 `_build_system_prompt() -> _build_system_prompt(model_name: str = "")`
+  - 身份段改为"夜小白科技有限公司基于 {driver_label} 打造的 AI 智能助理"
+  - 回答规则第 2 条改为"问你是谁 / 你用的什么模型,必须回答'我是 Nexus,由 {driver_label} 驱动'"
+  - 空字符串兜底为"当前驱动模型"占位措辞(防御性,不阻塞启动)
+- **`get_system_prompt` / `reload_system_prompt` 按 model_name 分桶缓存**:
+  - `_CACHED_PROMPT` 由 `str | None` 改为 `dict[str, str]`,键 = model_name(`""` 用 `"__default__"` 占位)
+  - `reload_system_prompt("")` 清空整个缓存;`reload_system_prompt("agnes-2.0-flash")` 只清该桶
+  - WHY:模型切换瞬间旧 agent 仍持有旧 system_prompt,分桶避免"切到 agnes 还显示 minimax" 串味
+- **`create_agent` 把 model_name 传给 get_system_prompt**:
+  - `system_prompt=get_system_prompt(model_name or CONFIG.get("model_name", ""))`
+  - `model_name` 参数缺省时回退到 `CONFIG["model_name"]`,跟 `get_llm` 默认对齐
+
+### Added
+
+- **`tests/test_agent_memory.py::TestBuildSystemPromptIsModelAware`** — 4 个回归测试:
+  - `test_identity_section_includes_model_name_agnes` — agnes 名进身份段
+  - `test_identity_section_includes_model_name_minimax` — MiniMax 名进身份段
+  - `test_identity_section_changes_with_model_name` — 两个 model_name 产出不同 prompt(防"挂羊头卖狗肉"反模式)
+  - `test_other_rules_kept_when_model_name_provided` — 加 model_name 参数后其他规则段不丢
+
+### Verified
+
+- `ruff check nexus/ tests/`:All checks passed
+- `ruff format --check nexus/ tests/`:122 files already formatted
+- `pytest tests/test_agent_memory.py`:14/14 通过(原 10 + 新 4)
+- `pytest tests/`:541 passed,2 pre-existing e2e 失败(infra 依赖,非本次回归)
+
+### Notes
+
+- **完整标准话术示例**(active = MiniMax-M3):
+  > 我用的是 MiniMax-M3 模型,由 MiniMax 公司开发。我是 Nexus,夜小白科技有限公司基于这个模型打造的 AI 智能助理。
+- **完整标准话术示例**(active = agnes-2.0-flash,假设其 vendor 未知):
+  > 我用的是 agnes-2.0-flash 模型。我是 Nexus,夜小白科技有限公司基于这个模型打造的 AI 智能助理。
+- vendor 公司归属字段需要查模型元数据,未知就只说模型名(可省略"由 X 公司开发")。
+
+---
+
 ## [Unreleased] — 修复切到 Agnes 后 26s 转圈 + 思考过程不显示
 
 ### Problem
