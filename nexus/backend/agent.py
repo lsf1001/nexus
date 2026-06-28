@@ -29,7 +29,7 @@ from .memory import USER_MEMORY_PATH
 logger = logging.getLogger(__name__)
 
 
-def _build_system_prompt() -> str:
+def _build_system_prompt(model_name: str = "") -> str:
     """构建系统提示词。
 
     身份 / 思考格式 / 禁止事项等"产品层规则"由本函数硬编码（对标 OpenClaw 的
@@ -39,16 +39,27 @@ def _build_system_prompt() -> str:
     用户级长期偏好（``~/.nexus/AGENTS.md``）由 deepagents
     :class:`MemoryMiddleware` 加载,以 ``<agent_memory>...</agent_memory>``
     段注入 system prompt —— 与本函数输出**并存**,互不冲突。
+
+    Args:
+        model_name: 当前驱动 LLM 的模型名(例如 ``"MiniMax-M3"`` /
+            ``"agnes-2.0-flash"``)。注入到【身份】段让 LLM introspect
+            实际驱动模型,回答"你用的什么模型"时反映真状态,而不是
+            退回到训练时的默认(MiniMax-M3)。
+
+            为空时(老调用方 / 早期启动路径)回退到 ``"当前驱动模型"`` 占位
+            措辞,避免 prompt 报错,也不假装知道模型名。
     """
-    identity = """【身份】
-你是 Nexus,夜小白科技有限公司开发的 AI 智能助理。
+    driver_label = model_name.strip() if model_name else "当前驱动模型"
+    identity = f"""【身份】
+你是 Nexus,夜小白科技有限公司基于 {driver_label} 打造的 AI 智能助理。
 - 名字:Nexus
 - 开发者:夜小白科技有限公司
+- 当前驱动模型:{driver_label}
 - 定位:个人智能助理,本地常驻 gateway + 多 IM 通道连接(对标 OpenClaw)
 
 【回答规则】
 1. 你是 Nexus —— 不是 Cline、Claude 或任何其他 AI
-2. 直接回答 —— 问你是谁,只说"我是 Nexus"
+2. 直接回答 —— 问你是谁 / 你用的什么模型,必须回答"我是 Nexus,由 {driver_label} 驱动"
 3. 用中文回答 —— 用户用中文提问就用中文
 4. 简洁直接 —— 不要过度铺垫或寒暄
 5. 使用思考标签 —— 所有思考过程必须用 <thinking>...</thinking> 标签包裹,标签内不要包含其他 XML 标签
@@ -107,7 +118,7 @@ ask_user 会暂停当前回合,前端弹出结构化澄清表单(候选项 / 自
     return "\n\n".join([identity, clarification_rule, security])
 
 
-_CACHED_PROMPT: str | None = None
+_CACHED_PROMPT: dict[str, str] = {}
 
 
 def get_llm(
@@ -149,6 +160,8 @@ def get_llm(
     Raises:
         ValueError: 既无 ``model_name`` 也无 ``api_key``，无法决定模型来源。
     """
+    sdk_timeout = getattr(timeout, "per_step", 30.0) if timeout is not None else 30.0
+
     if api_key:
         # 自定义模型路径：保持旧行为
         from langchain_openai import ChatOpenAI
@@ -158,6 +171,8 @@ def get_llm(
             openai_api_key=api_key,
             openai_api_base=api_base,
             temperature=temperature if temperature is not None else 0.7,
+            timeout=sdk_timeout,
+            max_retries=0,
         )
     elif not model_name:
         # 同时缺 model_name 与 api_key：保持旧行为，明确报错
@@ -171,6 +186,8 @@ def get_llm(
             openai_api_key=CONFIG["minimax_api_key"],
             openai_api_base=CONFIG["minimax_api_base"],
             temperature=temperature if temperature is not None else CONFIG["temperature"],
+            timeout=sdk_timeout,
+            max_retries=0,
         )
 
     from .llm.wrapper import build_resilient_llm
@@ -184,18 +201,41 @@ def get_llm(
     )
 
 
-def get_system_prompt() -> str:
-    """获取系统提示词（带缓存）。"""
+def get_system_prompt(model_name: str = "") -> str:
+    """获取系统提示词（带缓存,按 ``model_name`` 分桶）。
+
+    WHY 分桶:
+      Nexus 助理在切换模型(``POST /api/models/switch``)时,旧 agent 实例
+      持有旧 ``system_prompt``,LLM 身份段还是上一个模型名;必须按
+      ``model_name`` 区分缓存键,避免切换瞬间串味。
+
+    Args:
+        model_name: 当前驱动 LLM 的模型名;与 :func:`_build_system_prompt`
+            同义。
+
+    Returns:
+        该 ``model_name`` 对应的 system prompt 字符串(空字符串时也合法,
+        与 ``_build_system_prompt("")`` 等价)。
+    """
     global _CACHED_PROMPT
-    if _CACHED_PROMPT is None:
-        _CACHED_PROMPT = _build_system_prompt()
-    return _CACHED_PROMPT
+    cache_key = model_name or "__default__"
+    cached = _CACHED_PROMPT.get(cache_key)
+    if cached is None:
+        cached = _build_system_prompt(model_name)
+        _CACHED_PROMPT[cache_key] = cached
+    return cached
 
 
-def reload_system_prompt() -> None:
-    """重新加载系统提示词（用于热更新）。"""
+def reload_system_prompt(model_name: str = "") -> None:
+    """重新加载系统提示词（用于热更新）。
+
+    不传 ``model_name`` 时清空整个缓存(全量失效);传具体值时只清该桶。
+    """
     global _CACHED_PROMPT
-    _CACHED_PROMPT = _build_system_prompt()
+    if not model_name:
+        _CACHED_PROMPT.clear()
+        return
+    _CACHED_PROMPT.pop(model_name, None)
 
 
 def get_project_root() -> Path:
@@ -937,7 +977,11 @@ def create_agent(
     agent = create_deep_agent(
         model=llm,
         tools=all_tools,
-        system_prompt=get_system_prompt(),
+        # 把 LLM 实际 model_name 注入身份段(2026-06-29 bug fix):
+        # LLM 被问"你用的什么模型"时,introspect 该值回答真实驱动模型,
+        # 而不是退回到训练时的默认(MiniMax-M3)。
+        # ``model_name`` 为 ``None`` 时回退到 CONFIG["model_name"](跟 get_llm 默认对齐)。
+        system_prompt=get_system_prompt(model_name or CONFIG.get("model_name", "")),
         backend=backend,
         subagents=subagents,
         permissions=permissions,

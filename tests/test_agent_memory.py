@@ -78,6 +78,54 @@ class TestBuildSystemPromptHardcodesIdentity:
         assert "【安全规则】" in prompt
 
 
+class TestBuildSystemPromptIsModelAware:
+    """``_build_system_prompt`` 必须接受 ``model_name`` 并把"驱动模型"塞进身份段。
+
+    WHY(2026-06-29 bug):
+      用户切到 agnes-2.0-flash 后,Nexus 实际由 agnes 驱动回复。被问"你用的什么
+      模型"时,如果 prompt 还 hardcode 写"你是 Nexus,夜小白科技有限公司开发的
+      AI 智能助理"而没有 model_name,LLM 没有任何线索知道当前驱动模型是 agnes,
+      只能瞎猜 / 退回到训练时的默认(MiniMax-M3)→ 回答自相矛盾。
+
+    契约:
+      - 身份段必须显式提"基于 {model_name} 模型打造",让 LLM introspect 实际驱动
+        模型来回答用户的"你什么模型 / 你是谁"问题。
+      - 不传 model_name / 传空串 → 走兜底默认,不抛(防御性,不阻塞启动)。
+    """
+
+    def test_identity_section_includes_model_name_agnes(self) -> None:
+        prompt = _build_system_prompt("agnes-2.0-flash")
+        # 当前驱动模型名必须出现在身份段 —— 用户切到 agnes 后 LLM 才认得自己在 agnes 上跑
+        assert "agnes-2.0-flash" in prompt, (
+            "_build_system_prompt(model_name) 没把 model_name 注入身份段 → "
+            "切换模型后 LLM 不知道自己在哪个模型上跑,会瞎答/minimax 默认。"
+            "这是 2026-06-29 user-feedback bug 的根因。"
+        )
+        # 兜底校验:产品身份段保留
+        assert "夜小白科技有限公司" in prompt
+        assert "Nexus" in prompt
+
+    def test_identity_section_includes_model_name_minimax(self) -> None:
+        prompt = _build_system_prompt("MiniMax-M3")
+        assert "MiniMax-M3" in prompt
+        assert "夜小白科技有限公司" in prompt
+
+    def test_identity_section_changes_with_model_name(self) -> None:
+        """同一函数,两个 model_name → 两个不同 prompt(model_name 必须真影响输出)。"""
+        prompt_agnes = _build_system_prompt("agnes-2.0-flash")
+        prompt_minimax = _build_system_prompt("MiniMax-M3")
+        assert prompt_agnes != prompt_minimax, (
+            "两个 model_name 产出同一个 prompt → model_name 没真影响生成逻辑,签名加 model_name 参数等于挂羊头卖狗肉"
+        )
+
+    def test_other_rules_kept_when_model_name_provided(self) -> None:
+        """加 model_name 参数后,其他规则段不能丢。"""
+        prompt = _build_system_prompt("agnes-2.0-flash")
+        assert "<thinking>" in prompt
+        assert "【主动澄清规则】" in prompt
+        assert "【安全规则】" in prompt
+
+
 class TestCreateAgentWiresDeepAgentsMemory:
     """``create_agent`` 把 ``memory=`` / ``store=`` / ``middleware=`` 正确传给 deepagents。"""
 
@@ -132,9 +180,7 @@ class TestCreateAgentWiresDeepAgentsMemory:
                 "QualityGateMiddleware 必须装到 middleware 里拦截 edit_file"
             )
 
-    def test_middleware_kwarg_does_not_duplicate_summarization(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_middleware_kwarg_does_not_duplicate_summarization(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """``SummarizationMiddleware`` 不应出现在 user-passed middleware 里。
 
         WHY:deepagents 0.6.8 主 agent stack(line 776-781 of graph.py)已经显式
