@@ -10,10 +10,10 @@ Task 1.8：把 StreamGuard 和 resume token 接入 `nexus.backend.main.websocket
   5. 错误鉴权（ws_token 不匹配）→ 客户端连接被 close（HTTP 4001）。
   6. 客户端带 message 帧中的 resume_token → 流结束后服务端签发新 resume_token 帧。
 
-Task 1.8 修复：恢复流结束后处理（thinking 标签归一化、token 估算、16 字符分块）。
+Task 1.8 修复：恢复流结束后处理（thinking 标签归一化、token 估算）。
   7. token_usage 事件携带 token_count + context_usage。
   8. <thinking> 标签被剥离，正文 chunk 和 final.content 不含思考标签。
-  9. 30 字符响应被分成 16+14 字符两块 chunk。
+  9. 30 字符响应 → 单 token → 1 个 chunk 帧（旧 16 字符分块已改为实时 emit，详见 test_ws_realtime_streaming）。
  10. final.content 不含 <thinking> 标签。
 """
 
@@ -281,7 +281,12 @@ def test_ws_unknown_exception_does_not_break_socket(monkeypatch) -> None:
 
 
 def test_ws_emits_token_usage_event(monkeypatch) -> None:
-    """流成功后，WS 收到 type=token_usage 事件，含 token_count + context_usage。"""
+    """流成功后，WS 收到 type=token_usage 事件，含 token_count + context_usage。
+
+    Task 2（实时 emit）调整:chunks 现在是实时发出（流期间）,token_usage
+    在流结束后再发（用于前端在 chunks 累积后给一个快照）。顺序变成
+    chunks → token_usage → final → stats → done。
+    """
     _authed_token(monkeypatch)
 
     async def astream_factory(input, **kwargs):  # noqa: ARG001
@@ -304,13 +309,24 @@ def test_ws_emits_token_usage_event(monkeypatch) -> None:
                 assert "context_usage" in tu
                 assert tu["token_count"] >= 0
                 assert 0 <= tu["context_usage"] <= 100
-                # token_usage 应在 chunks 之前发出（顺序: token_usage → chunks → final → done）
+                # Task 2 实时 emit 后,顺序变为 chunks → token_usage → final → stats → done。
+                # token_usage 必须在首个 chunk 之后(不能再 "先发 token_usage 再发 chunks"
+                # —— 那会与实时 emit 语义矛盾,前端会先看到 0% 再看到 1% 抖动)。
                 tu_idx = events.index(tu)
                 first_chunk_idx = next(
                     (i for i, e in enumerate(events) if e.get("type") == "chunk"),
                     len(events),
                 )
-                assert tu_idx < first_chunk_idx
+                assert first_chunk_idx < tu_idx, (
+                    f"token_usage 必须在 chunks 之后(实时 emit 语义):"
+                    f" first_chunk_idx={first_chunk_idx}, tu_idx={tu_idx}, types={[e.get('type') for e in events]}"
+                )
+                # token_usage 必须在 final 之前
+                final_idx = next(
+                    (i for i, e in enumerate(events) if e.get("type") == "final"),
+                    len(events),
+                )
+                assert tu_idx < final_idx
 
 
 def test_ws_strips_thinking_tags(monkeypatch) -> None:
@@ -361,12 +377,18 @@ def test_ws_strips_thinking_tags(monkeypatch) -> None:
                 assert joined_chunks == "The answer is 42."
 
 
-def test_ws_chunks_response_in_16_char_groups(monkeypatch) -> None:
-    """30 字符响应 → 收到 2 个 chunk 事件（16 + 14）。"""
+def test_ws_chunks_emitted_realtime_no_post_split(monkeypatch) -> None:
+    """Task 2：30 字符响应一次性发 → 1 个 chunk 帧。
+
+    旧实现按 16 字符后处理分块 → 16 + 14 两块；Task 2 改为每个 token 1 个
+    chunk 实时 emit（消除 agnes 慢模型 26s 转圈体感）。这条测试验证：
+      - mock 上游发 1 个完整 30 字符串 → 客户端只看到 1 个 chunk 事件
+      - chunk 内容等于原文（不做任何切碎）
+      - final.content 同样等于原文
+    """
     _authed_token(monkeypatch)
 
-    # 30 字符 = 16 + 14
-    text_30 = "abcdefghijklmnop" + "qrstuvwxyz1234"  # 16 + 14
+    text_30 = "abcdefghijklmnop" + "qrstuvwxyz1234"  # 16 + 14 = 30
     assert len(text_30) == 30
 
     async def astream_factory(input, **kwargs):  # noqa: ARG001
@@ -382,16 +404,13 @@ def test_ws_chunks_response_in_16_char_groups(monkeypatch) -> None:
                 events = _collect_until_done(ws, max_events=200)
 
                 chunks = [e for e in events if e.get("type") == "chunk"]
-                assert len(chunks) == 2
-                assert len(chunks[0]["content"]) == 16
-                assert len(chunks[1]["content"]) == 14
-                assert chunks[0]["content"] == "abcdefghijklmnop"
-                assert chunks[1]["content"] == "qrstuvwxyz1234"
-                # 拼接后等于原文
-                assert "".join(c["content"] for c in chunks) == text_30
-                # chunk event_id 单调递增
-                chunk_ids = [c.get("event_id") for c in chunks]
-                assert chunk_ids == sorted(chunk_ids)
+                # 实时 emit:1 个完整 token → 1 个 chunk 帧
+                assert len(chunks) == 1, f"应为 1 个 chunk 帧,实际 {len(chunks)}: {chunks}"
+                assert chunks[0]["content"] == text_30
+                # final 内容与原文一致
+                final_events = [e for e in events if e.get("type") == "final"]
+                assert len(final_events) == 1
+                assert final_events[0]["content"] == text_30
 
 
 def test_ws_final_content_excludes_thinking(monkeypatch) -> None:

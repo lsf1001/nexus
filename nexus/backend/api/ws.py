@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import threading
 import time
 import uuid
@@ -49,6 +48,7 @@ from ..resilience.resume import (
     verify_token,
 )
 from ..resilience.stream_guard import StreamGuard
+from .thinking_parser import ThinkingParser
 
 logger = logging.getLogger(__name__)
 
@@ -121,11 +121,6 @@ def _emit_quality_verdict(final_response: Any, session_id: str, message_id: str)
     )
 
 
-# _run_agent_streaming 内部 16 字符分块大小(与 ws.py line 390 一致),用于
-# ChatEnd 的 chunks 字段估算。
-_STREAM_CHUNK_SIZE = 16
-
-
 def _emit_chat_end(
     *,
     session_id: str,
@@ -138,14 +133,16 @@ def _emit_chat_end(
     """emit ChatEnd 事件:聚合本次 chat 的关键指标。
 
     字段映射:
-      - chunks: response_text 长度按 16 字符分块数
+      - chunks: 本次响应实际发送的 chunk 帧数。Task 2 之前按 16 字符分块,
+        现在改为每个 token 1 个 chunk — 用 len(response_text) 近似（深
+        度求精确值可由 _run_agent_streaming 透出计数,目前 ChatEnd 仅
+        用于离线分析,粗估足够)。
       - duration_ms: 从 ChatStart 的 monotonic 起点到现在的差
       - retry_count / error_code: 来自 _run_agent_streaming 内部,
         handle_websocket 不可见,这里用 0 / None 占位
-        (后续如需精确值,可扩展 _run_agent_streaming 返回值)
       - intent / verdict: 与前面 emit 的事件关联,便于聚合查询
     """
-    chunks_count = (len(response_text) + _STREAM_CHUNK_SIZE - 1) // _STREAM_CHUNK_SIZE
+    chunks_count = len(response_text)
     duration_ms = int((time.monotonic() - chat_start_monotonic) * 1000)
     verdict_obj = getattr(final_response, "verdict", None) if final_response else None
     verdict_str = getattr(verdict_obj, "value", str(verdict_obj)) if verdict_obj else None
@@ -619,8 +616,16 @@ async def _run_agent_streaming(
     )
 
     last_event_id = 0
-    full_response = ""
     had_error = False
+    # 实时 chunk / thinking 分发器：每个 on_chat_model_stream 事件立即送进 parser,
+    # 解析产出的 (kind, text) 帧立刻 send_json。ThinkingParser 同时识别
+    # ``<thinking>...</thinking>`` 跨 chunk 标签分片,thinking 内容也实时送,
+    # 不再缓存到流末做 re.findall。
+    # WHY 2026-06-28:旧实现 ``full_response += content`` 把所有 chunk 攒到 LLM
+    # 跑完才按 16 字符切碎发出,Agnes 慢模型场景前端 26 秒收不到任何帧,体感
+    # "转圈"。改为实时 emit,前端每个 token 立即可见。
+    parser = ThinkingParser()
+    emitted_chunk_text = ""  # 累积已发 chunk 文本(供 final / DB 入库复用)
 
     # v1 is deprecated since langchain-core 1.0; v2 keeps the same event
     # names (on_chat_model_stream / on_tool_start / on_tool_end) and the
@@ -671,17 +676,45 @@ async def _run_agent_streaming(
                 chunk = event.get("data", {}).get("chunk")
                 content = getattr(chunk, "content", "") if chunk else ""
                 if content:
-                    # 仅累积，不在流中转发 chunk；后处理阶段会按 16 字符分块发出去
-                    full_response += content
+                    # 实时发出：每个 chunk 立刻经 ThinkingParser 解析后 send_json,
+                    # 不再缓存到流末 burst。Agnes 慢模型场景下,前端每个 token
+                    # 立即可见,消除 26s 转圈体感。parser.feed 返回值是
+                    # ``[(kind, text), ...]`` 列表,kinds ∈ {"chunk","thinking"}。
+                    for kind, text in parser.feed(content):
+                        event_id += 1
+                        last_event_id = event_id
+                        await websocket.send_json(
+                            {
+                                "type": kind,
+                                "content": text,
+                                "event_id": event_id,
+                            }
+                        )
+                        if kind == "chunk":
+                            emitted_chunk_text += text
             elif event_type == "on_chat_model_end":
                 # 非流式 LLM(mock / 老式客户端)只发 end 不发 stream —
                 # 此时 on_chat_model_stream 整个流里没有累积,需要从 end 拿全量
                 # content 兜底,否则 reject 反思 / mock LLM 这类"一次性返回"的
-                # 场景 full_response 始终为空,前端收不到任何 chunk/final。
+                # 场景 emitted_chunk_text 始终为空,前端收不到任何 chunk/final。
+                # WHY 仅在 emitted_chunk_text 为空时兜底:避免与 stream 事件重复
+                # emit — 测试用 mock agent 会同时发 N 个 stream + 1 个 end
+                # 携带全量,无脑合并会让前端看到同样的内容出现两次。
                 output = event.get("data", {}).get("output")
                 end_content = getattr(output, "content", "") if output else ""
-                if isinstance(end_content, str) and end_content and not full_response:
-                    full_response = end_content
+                if isinstance(end_content, str) and end_content and not emitted_chunk_text:
+                    for kind, text in parser.feed(end_content):
+                        event_id += 1
+                        last_event_id = event_id
+                        await websocket.send_json(
+                            {
+                                "type": kind,
+                                "content": text,
+                                "event_id": event_id,
+                            }
+                        )
+                        if kind == "chunk":
+                            emitted_chunk_text += text
             elif event_type == "on_tool_start":
                 tool_name = event.get("name", "未知工具")
                 tool_input = event.get("data", {}).get("input") or {}
@@ -864,23 +897,38 @@ async def _run_agent_streaming(
         # 已经有 error 事件发出，StreamGuard 走完就不要再发 done
         return last_event_id, "", False, None, None
 
-    # 正常结束：先做归一化 / token 估算 / 思考抽取 / 16 字符分块，
-    # 然后按 token_usage → thinking → chunks → final → done 顺序发出去。
+    # 正常结束：先 flush parser 残留内容,再发 token_usage → final → stats。
+    # chunk / thinking 已在循环里实时送出,这里不再做 16 字符切碎 / re.findall。
+    # response_text 给下游 add_message / 质量门使用,语义与旧版一致：
+    # 剥离 <thinking> 标签后的纯回复文本。ThinkingParser 实时 emit 时已
+    # 把 thinking 内容作为独立 thinking 帧送出,emitted_chunk_text 自然不含
+    # 任何 thinking 标签,所以 response_text = emitted_chunk_text.strip()。
     response_text = ""
-    if full_response:
-        # 1) 归一化：把 <think> 替换为 <thinking>，前端用 <thinking> 标识思考段
-        normalized = full_response.replace("<think>", "<thinking>").replace("</think>", "</thinking>")
 
-        # 2) token_usage：估算 token + context 占用率
+    # 流末 flush：parser 末尾留的 hold / 未闭合 thinking 块,作为兜底帧发出。
+    # WHY 必须调:流式标签可能最后一刻才凑齐(比如 "<thinking>思考</th" 在
+    # 最后 chunk 才凑完),parser 内部 hold 不发,flush 把残余 emit 出去。
+    for kind, text in parser.flush():
+        event_id += 1
+        last_event_id = event_id
+        await websocket.send_json({"type": kind, "content": text, "event_id": event_id})
+        if kind == "chunk":
+            emitted_chunk_text += text
+
+    if emitted_chunk_text:
+        response_text = emitted_chunk_text.strip()
+
+        # token_usage：估算 token + context 占用率
         # 范围:累积 prompt["messages"] + 本轮 assistant 响应 = 整个对话上下文,
         # 而不是只看本轮响应 —— UI 显示的 % 才跟 deepagents 实际 trigger
         # 决策用的 token 计数同源(都是 count_tokens_approximately)。
-        # prompt 是 _run_agent_streaming 入参(line 484),自带 system 段
-        # + 历史 + 本轮 user 消息;这里再 append 一个 assistant 角色 dict
-        # 模拟刚生成的回复入库后的样子(下游 add_message 也是 assistant
-        # role,所以格式对齐)。
+        # prompt 是 _run_agent_streaming 入参,自带 system 段 + 历史 + 本轮
+        # user 消息;这里再 append 一个 assistant 角色 dict 模拟刚生成的回
+        # 复入库后的样子(下游 add_message 也是 assistant role,所以格式对齐)。
+        # 改用 emitted_chunk_text(不含 thinking 标签),与 DB 入库 / 质量门
+        # raw_response 同源。
         full_context_messages: list[dict[str, Any]] = list(prompt["messages"]) + [
-            {"role": "assistant", "content": normalized}
+            {"role": "assistant", "content": response_text}
         ]
         estimated_tokens, context_usage = _estimate_tokens(
             full_context_messages, context_window=CONFIG["context_window"]
@@ -897,45 +945,19 @@ async def _run_agent_streaming(
         )
         last_event_id = token_usage_event_id
 
-        # 3) 抽取 <thinking>...</thinking> 内容（DOTALL 跨行），并从正文里剥掉
-        thinking_parts = re.findall(r"<thinking>(.*?)</thinking>", normalized, flags=re.DOTALL)
-        response_text = re.sub(r"<thinking>.*?</thinking>", "", normalized, flags=re.DOTALL).strip()
-
-        if thinking_parts:
-            all_thinking = "\n".join(part.strip() for part in thinking_parts)
-            thinking_event_id = last_event_id + 1
-            await websocket.send_json(
-                {
-                    "type": "thinking",
-                    "content": all_thinking,
-                    "event_id": thinking_event_id,
-                }
-            )
-            last_event_id = thinking_event_id
-
-        # 4) 16 字符分块发 chunk，再发 final
-        if response_text:
-            chunk_size = 16
-            for i in range(0, len(response_text), chunk_size):
-                chunk_event_id = last_event_id + 1
-                await websocket.send_json(
-                    {
-                        "type": "chunk",
-                        "content": response_text[i : i + chunk_size],
-                        "event_id": chunk_event_id,
-                    }
-                )
-                last_event_id = chunk_event_id
-
-            final_event_id = last_event_id + 1
-            await websocket.send_json(
-                {
-                    "type": "final",
-                    "content": response_text,
-                    "event_id": final_event_id,
-                }
-            )
-            last_event_id = final_event_id
+        # final 帧:用实时 emit 累积的 chunk 文本(已剥 thinking 标签)。
+        # WHY 不在流期间发 final:旧实现在流末才发,前端 spinner 一直转;
+        # 新实现 chunk 实时发,但 final 仅在结束时发一次,客户端据此停止
+        # spinner 并把 chunks 拼成完整回复展示。
+        final_event_id = last_event_id + 1
+        await websocket.send_json(
+            {
+                "type": "final",
+                "content": response_text,
+                "event_id": final_event_id,
+            }
+        )
+        last_event_id = final_event_id
 
     # 可观测：发送 ``type=stats`` 元事件，把本次流的 StreamGuard 统计
     # 暴露给前端。顺序在 done 之前，确保 done 始终是流的最后一帧。
