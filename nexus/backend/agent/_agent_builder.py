@@ -51,7 +51,7 @@ def create_agent(
     from ._backend import _create_backend
     from ._checkpoint import _create_checkpointer, _create_store
     from ._llm_factory import get_llm
-    from ._subagents import build_interrupt_on_for_agent, create_subagents
+    from ._subagents import create_subagents
     from ._system_prompt import get_project_root, get_system_prompt
 
     project_root = get_project_root()
@@ -104,15 +104,11 @@ def create_agent(
     # 子代理(复用主模型的 LLM 实例)
     subagents = create_subagents(model=llm)
 
-    # 权限规则(白名单 .nexus/ + /tmp/,interrupt AGENTS.md)
+    # 权限规则(白名单 .nexus/,AGENTS.md 与项目源码的 HITL/QualityGate
+    # 由专门中间件接管,见下方 path_aware_hitl / quality_gate)。
     from ..permissions import build_default_permissions, resolve_protected_paths
 
     permissions = build_default_permissions(project_root)
-    # interrupt_on 由 deepagents 从 ``permissions`` 自动生成(见
-    # deepagents.graph._build_interrupt_on_from_permissions)。Nexus 不再手动
-    # 构造 when 谓词(E2E 暴露过手动版与 deepagents 内部 _check_fs_permission
-    # 语义错位,导致"LLM 写项目源码未触发 HITL")。
-    build_interrupt_on_for_agent(project_root)  # noqa: F841 — 废弃兼容,语义由 permissions 接管
 
     # 记忆路径 —— 用户级长期记忆文件。Nexus 是个人智能助理(对标 OpenClaw),
     # 没有"项目级 AGENTS.md"概念;deepagents MemoryMiddleware 会自动加载
@@ -131,6 +127,19 @@ def create_agent(
 
     quality_gate = QualityGateMiddleware(
         filter=MemoryFilter(judge=RubricJudge(llm=llm), rubric=FAITHFULNESS_RUBRIC),
+        protected_paths=tuple(str(p) for p in resolve_protected_paths(project_root)),
+    )
+
+    # 路径感知 HITL(2026-06-29 修复):对"非白名单"的写工具触发 GraphInterrupt,
+    # 让 WS 端发 confirmation_request 帧。原先写进 permissions 的
+    # ``mode="interrupt"`` 是 deepagents 0.5.3 不支持的非法值,被静默忽略,
+    # 导致 E2E 5 个场景(写项目源码 / /tmp / 多 tool_call / reject-then-reflect
+    # / edit_file)全部 FAIL — LLM 写源码无 HITL 弹窗,直接落盘。
+    # 见 :mod:`nexus.backend.middleware.hitl` 实现细节。
+    from ..middleware.hitl import PathAwareHITLMiddleware
+
+    path_aware_hitl = PathAwareHITLMiddleware(
+        project_root=project_root,
         protected_paths=tuple(str(p) for p in resolve_protected_paths(project_root)),
     )
 
@@ -186,10 +195,13 @@ def create_agent(
         store=store,
         # middleware 顺序(由外到内,langchain 第一个是最外层最后执行):
         #   quality_gate      : 拦截 AGENTS.md 写入忠实度评估(配合 MemoryMiddleware)
+        #   path_aware_hitl   : 对"非白名单"写工具触发 GraphInterrupt → confirmation_request
         #   dynamic_identity  : prepend FACT 块(注入当前激活模型)
         #   force_tool        : knowledge/task 类问题强制 LLM 调 yandex_search
-        # 三者职责互不重叠,顺序敏感度低。
-        middleware=[quality_gate, dynamic_identity_middleware, force_tool_mw],
+        # path_aware_hitl 与 quality_gate 顺序: quality_gate 先(它只关心
+        # AGENTS.md,直接透传其它路径);path_aware_hitl 后,对透传过来的
+        # "非白名单 + 非 protected" 路径触发 HITL。
+        middleware=[quality_gate, path_aware_hitl, dynamic_identity_middleware, force_tool_mw],
         checkpointer=checkpointer,
         skills=[
             ".nexus/skills",

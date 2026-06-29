@@ -26,19 +26,45 @@ def test_build_default_permissions_nexus_dir_writable() -> None:
     assert nexus_rule.mode == "allow"
 
 
-def test_build_default_permissions_tmp_readonly() -> None:
-    """/tmp/ 目录只读。"""
+def test_build_default_permissions_only_allow_rules() -> None:
+    """2026-06-30 重构:permissions 只含 allow rules(纯白名单)。
+
+    历史版本含 ``mode="interrupt"`` 试图在 permissions 里表达 HITL/QualityGate
+    拦截语义 — 但 deepagents 0.5.3 的 :class:`FilesystemPermission.mode` 只
+    支持 ``Literal["allow", "deny"]``,``"interrupt"`` 是非法值被静默忽略。
+    HITL 现由 :class:`PathAwareHITLMiddleware` 接管,QualityGate 由
+    :class:`QualityGateMiddleware` 接管;permissions 只做基础白名单。
+    """
     perms = build_default_permissions(Path("/tmp/proj"))
-    tmp_rule = next(p for p in perms if "/tmp/**" in p.paths)
-    assert tmp_rule.operations == ["read"]
-    assert tmp_rule.mode == "allow"
+    modes = [p.mode for p in perms]
+    assert all(m == "allow" for m in modes), f"permissions 应只含 allow rules,实际: {modes}"
 
 
-def test_build_default_permissions_agents_md_interrupt() -> None:
-    """AGENTS.md 写入必须 HITL。"""
+def test_build_default_permissions_no_tmp_rule() -> None:
+    """2026-06-30 重构:/tmp 不在 permissions 白名单。
+
+    历史版本曾写 "``read /tmp/**`` allow" 让 /tmp 只读 — 但 LLM 实际想写
+    /tmp 是要"临时缓存",产物路径(``~/.nexus/outputs/``)才是规范落点。
+    现设计: /tmp 由 :class:`PathAwareHITLMiddleware` 的 ``_DANGEROUS_PREFIXES``
+    直接 deny(``ToolMessage(status='error')``),不走 permissions。
+
+    判定逻辑:permissions 里**不应有以 /tmp 开头的独立规则**。但允许
+    ``/tmp`` 作为某项目 root 前缀的"白名单路径"出现(例:
+    ``/private/tmp/proj/.nexus/**``,macOS 上 ``/tmp/proj`` resolve 后
+    落在这里)。只看 path 的第一个 segment 是否命中 dangerous 根目录。
+    """
+    from pathlib import PurePosixPath
+
     perms = build_default_permissions(Path("/tmp/proj"))
-    interrupt_rules = [p for p in perms if p.mode == "interrupt"]
-    assert any("AGENTS.md" in path for r in interrupt_rules for path in r.paths)
+    for p in perms:
+        for path in p.paths:
+            parts = PurePosixPath(path).parts
+            # path 的根级 segment 不应是 dangerous 根(/tmp / etc / var ...)
+            if parts:
+                first = parts[0]
+                assert first not in {"tmp", "etc", "usr", "bin", "sbin", "System", "Library"}, (
+                    f"permissions 不应包含 dangerous 根路径 /{first}/... 的规则: {path}"
+                )
 
 
 def test_resolve_protected_paths_returns_absolute() -> None:

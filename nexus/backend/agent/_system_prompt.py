@@ -163,7 +163,7 @@ def reload_system_prompt(model_name: str = "") -> None:
     _CACHED_PROMPT.clear()
 
 
-def get_project_root() -> Path:
+def get_project_root() -> Path:  # E2E mock comment
     """获取项目根目录。
 
     Returns:

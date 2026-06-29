@@ -1,17 +1,26 @@
-"""集中定义 FilesystemPermission 规则与 HITL 触发判定。
+"""集中定义 FilesystemPermission 规则与受保护路径解析。
 
 WHY: 把安全策略从 agent.py 抽出,便于审计 + 单测 + 后续扩展(MCP / execute
 等场景复用同一判定函数)。
 
-设计原则:
-  - 框架默认 ``allow``,所以**白名单路径显式 allow,其他路径隐式 allow**
-    → 这条不变,因为 FilesystemPermission 没有 deny-by-default 语义。
-  - 真正的高敏保护靠 ``interrupt`` 模式:用户在前端弹窗确认才放行。
-  - 不引入 deny 规则(避免和 interrupt 语义重复 + 阻断 LLM 看到错误)。
+设计原则(2026-06-29 重构)
+--------------------------
+**只做白名单**,HITL 与质量门交给专门中间件。
 
-HITL 触发面:
-  - AGENTS.md 写入(覆盖 deepagents MemoryMiddleware 的全权)
-  - 项目内非 .nexus/ 路径的写(防 LLM 改 nexus/ frontend/ desktop/ 源码)
+历史实现含 ``mode="interrupt"`` 规则试图拦截 AGENTS.md 写入 / 项目源码
+写入。但 deepagents 0.5.3 的 :class:`FilesystemPermission.mode` 只支持
+``Literal["allow", "deny"]``(**没有** ``"interrupt"`` mode),``_check_fs_permission``
+看到非法 mode 静默 fall-through(``return rule.mode`` 返回 "interrupt"
+字符串但比较 ``== "deny"`` 不命中,落到默认 allow)。结果是所有
+``mode="interrupt"`` 规则被框架忽略,HITL 路径默认放行 — E2E 2026-06-29
+``test_e2e_interrupt_source`` 等 5 个场景全部 FAIL 的根因。
+
+HITL 现在由 :class:`nexus.backend.middleware.hitl.PathAwareHITLMiddleware`
+在 ``wrap_tool_call`` 阶段路径白名单判定后触发;AGENTS.md 的忠实度评估
+由 :class:`nexus.backend.quality.middleware.QualityGateMiddleware` 接管。
+本模块只剩两层白名单:
+  - ``read /**`` allow:LLM 可读任何文件
+  - ``write {project_root}/.nexus/**`` allow:产出物 / 配置 / 日志 / state
 """
 
 from __future__ import annotations
@@ -22,7 +31,7 @@ from deepagents.middleware.filesystem import FilesystemPermission
 
 
 def build_default_permissions(project_root: Path) -> list[FilesystemPermission]:
-    """构造默认 FilesystemPermission 规则列表。
+    """构造默认 FilesystemPermission 规则列表(纯白名单)。
 
     Args:
         project_root: Nexus 项目根目录,用于展开 ``{project_root}`` 占位符。
@@ -31,15 +40,17 @@ def build_default_permissions(project_root: Path) -> list[FilesystemPermission]:
         :class:`FilesystemPermission` 列表,直接传给 ``create_deep_agent(permissions=...)``。
 
     Note:
-        - 读操作 ``["read"]`` 对全路径 allow(`/**`),LLM 可读任何文件。
-        - 写操作分两层:.nexus/ 和 /tmp/ 直接 allow;AGENTS.md 必须 interrupt;
-          其他路径(deepagents 框架对未匹配路径默认 allow)由同模块
-          :func:`build_interrupt_on_for_agent` 提供的 ``when`` 谓词兜底
-          (白名单内放行,其他路径触发 HITL)。
+        - 读操作 ``["read"]`` 对全路径 allow(``/**``),LLM 可读任何文件。
+        - 写白名单只覆盖 ``{project_root}/.nexus/**``,LLM 直接放行;
+          其它路径(包括项目源码 / /tmp / AGENTS.md)走 deepagents 默认
+          allow,但会被 :class:`PathAwareHITLMiddleware` /
+          :class:`QualityGateMiddleware` 在更上层拦截。
+        - ``FilesystemPermission`` 路径必须以 ``/`` 开头(框架硬约束),
+          且不能含 ``..`` 或 ``~``(``__post_init__`` 校验)。
     """
     # 入口先 resolve,避免 macOS 上 /tmp -> /private/tmp 这类 symlink
-    # 导致 build_default_permissions 拼的路径与 resolve_protected_paths
-    # .resolve() 后的字符串不一致。
+    # 导致 build_default_permissions 拼的路径与 PathAwareHITLMiddleware
+    # / QualityGateMiddleware 解析后的字符串不一致。
     project_root = project_root.expanduser().resolve()
     rules: list[FilesystemPermission] = [
         # 读:全开(LLM 看得到才能理解项目)
@@ -48,13 +59,7 @@ def build_default_permissions(project_root: Path) -> list[FilesystemPermission]:
             paths=["/**"],
             mode="allow",
         ),
-        # /tmp/ 只读:LLM 可以看临时文件,但不允许写入(产出物落 .nexus/)
-        FilesystemPermission(
-            operations=["read"],
-            paths=["/tmp/**"],
-            mode="allow",
-        ),
-        # 写白名单:.nexus(配置 / 日志 / outputs / state)
+        # 写白名单:.nexus(配置 / 日志 / outputs / state / skills)
         # 必须以 '/' 开头(框架硬约束),使用绝对路径
         FilesystemPermission(
             operations=["write"],
@@ -62,17 +67,6 @@ def build_default_permissions(project_root: Path) -> list[FilesystemPermission]:
                 f"{project_root}/.nexus/**",
             ],
             mode="allow",
-        ),
-        # AGENTS.md 写入必须 HITL
-        # 注:FilesystemPermission 路径必须以 '/' 开头,所以 ~ 要展开成绝对路径。
-        # Nexus 是个人智能助理（对标 OpenClaw），用户数据目录唯一
-        # ``~/.nexus/``，没有"项目级 AGENTS.md"概念 —— 只保护用户级那一条。
-        FilesystemPermission(
-            operations=["write"],
-            paths=[
-                str((Path.home() / ".nexus" / "AGENTS.md").expanduser().resolve()),
-            ],
-            mode="interrupt",
         ),
     ]
     return rules
@@ -82,15 +76,15 @@ def resolve_protected_paths(project_root: Path) -> list[Path]:
     """解析所有受保护的 AGENTS.md 路径为绝对路径。
 
     Returns:
-        单元素绝对路径列表（``~/.nexus/AGENTS.md``）,供
+        单元素绝对路径列表(``~/.nexus/AGENTS.md``),供
         :class:`QualityGateMiddleware` 校验 edit_file/write_file 目标路径
         是否需要走忠实度评估。
 
     Note:
         历史实现含 ``{project_root}/.nexus/AGENTS.md`` 与
-        ``{project_root}/nexus/.deepagents/AGENTS.md`` 两条 —— 2026-06
-        OpenClaw 定位重设计后产品身份 hardcode 进代码,这两个 dev 时
-        路径已无对应文件,删除。
+        ``{project_root}/nexus/.deepagents/AGENTS.md`` 两条 ——
+        2026-06 OpenClaw 定位重设计后产品身份 hardcode 进代码,
+        这两个 dev 时路径已无对应文件,删除。
     """
     return [(Path.home() / ".nexus" / "AGENTS.md").expanduser().resolve()]
 

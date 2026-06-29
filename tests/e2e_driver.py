@@ -281,7 +281,12 @@ def scenario_interrupt_source() -> ScenarioResult:
 
 
 def scenario_interrupt_agents_md() -> ScenarioResult:
-    """3) 写 ~/.nexus/AGENTS.md → HITL,approve 后文件被创建。"""
+    """3) 写 ~/.nexus/AGENTS.md → QualityGate 评估(机器判断),无 HITL,文件创建。
+
+    2026-06-29 重构:AGENTS.md 写入走 :class:`QualityGateMiddleware` faithfulness
+    评估(机器判断 LLM 内容是否合理),不弹 HITL(用户弹窗冗余)。评估通过 → 文件
+    创建;评估失败 → ToolMessage error 回 LLM 反思。本场景验证评估**通过**路径。
+    """
     r = ScenarioResult(name="interrupt_agents_md", passed=False, summary="")
     fp = Path.home() / ".nexus" / "AGENTS.md"
     backup = None
@@ -292,7 +297,8 @@ def scenario_interrupt_agents_md() -> ScenarioResult:
     try:
         frames, _ = asyncio.run(run_ws_scenario(user_msg="mock test", approve_hitl=True))
         r.frames = frames
-        assert_scenario(r, expect_hitl=True, expect_files=[fp])
+        # expect_hitl=False — AGENTS.md 走 QualityGate 评估,非 HITL。
+        assert_scenario(r, expect_hitl=False, expect_files=[fp])
         if r.passed:
             r.files_created.append(str(fp))
     finally:
@@ -305,7 +311,20 @@ def scenario_interrupt_agents_md() -> ScenarioResult:
 
 
 def scenario_deny_tmp_write() -> ScenarioResult:
-    """4) 写 /tmp → 应 deny,文件未创建,LLM 收到 error 帧。"""
+    """4) 写 /tmp → 应 deny,文件未创建,LLM 反思不再写。
+
+    2026-06-29 重构:系统级危险路径(``/tmp`` / ``/etc`` 等)由
+    :class:`PathAwareHITLMiddleware._should_deny` 短路返回
+    ``ToolMessage(status="error")``,**不弹 HITL**。LLM 看到 ToolMessage
+    后反思,不再调任何写工具(由 mock LLM 的 "has_tool_result → 反思" 行为
+    验证)。断言简化:
+      - 无 HITL 帧
+      - 文件**未**创建
+      - LLM final 出现(说明 mock 收到 ToolMessage 后反思收尾)
+    早期版本要求"thinking 帧含 permission denied",但 mock LLM 反射只
+    final "操作完成",不在 thinking 流里吐 deny 字样 — 断言放宽匹配
+    实际 mock 行为。
+    """
     r = ScenarioResult(name="deny_tmp_write", passed=False, summary="")
     fp = Path("/tmp/e2e_scratch.md")
     cleanup_files([fp])
@@ -313,27 +332,26 @@ def scenario_deny_tmp_write() -> ScenarioResult:
     try:
         frames, _ = asyncio.run(run_ws_scenario(user_msg="mock test"))
         r.frames = frames
-        # 断言:无 HITL(deny 走 FilesystemMiddleware 而非 HITL)+ 文件未创建
+        # 1) 不应触发 HITL
         has_hitl = any(f.get("type") == "confirmation_request" for f in frames)
         if has_hitl:
             r.passed = False
             r.summary = f"❌ /tmp 写不应触发 HITL | {frames_summary(frames)}"
-            return
+            return r
+        # 2) 文件未被创建(系统级路径被 deny)
         if fp.exists():
             r.passed = False
             r.summary = f"❌ /tmp 文件不应被创建 | {frames_summary(frames)}"
-            return
-        # 应有 error 帧或 thinking 帧含 "permission denied"
-        has_error = any(f.get("type") == "error" for f in frames)
-        has_deny_msg = any(
-            "permission" in str(f).lower() or "denied" in str(f).lower() for f in frames if f.get("type") == "thinking"
-        )
-        if not (has_error or has_deny_msg):
+            return r
+        # 3) LLM 应反思收尾(出现 final 帧 — mock 看到 ToolMessage error 后
+        #    走反思路径,不出 tool_call,直接 final)
+        has_final = any(f.get("type") == "final" for f in frames)
+        if not has_final:
             r.passed = False
-            r.summary = f"❌ 未见到 deny 错误反馈 | {frames_summary(frames)}"
-            return
+            r.summary = f"❌ 未见到 LLM 反思收尾 | {frames_summary(frames)}"
+            return r
         r.passed = True
-        r.summary = f"✅ /tmp 写被 deny | {len(frames)} 帧 | {frames_summary(frames)}"
+        r.summary = f"✅ /tmp 写被 deny + LLM 反思 | {len(frames)} 帧 | {frames_summary(frames)}"
     finally:
         cleanup_files([fp])
         kill_server()
@@ -419,7 +437,9 @@ def scenario_edit_file_interrupt() -> ScenarioResult:
     我们先备份原内容 + 恢复,避免污染。
     """
     r = ScenarioResult(name="edit_file_interrupt", passed=False, summary="")
-    fp = ROOT / "nexus" / "backend" / "agent" / "_agent_builder.py"
+    # 2026-06-30 重构:``get_project_root`` 搬到 ``_system_prompt.py``,
+    # 跟着 e2e_mock 的 file_path 同步更新。
+    fp = ROOT / "nexus" / "backend" / "agent" / "_system_prompt.py"
     backup = fp.read_text()
     cleanup_files([])  # 不删任何文件
     start_server("edit_file_interrupt")

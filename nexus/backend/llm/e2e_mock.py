@@ -108,11 +108,13 @@ _SCENARIOS: dict[str, list[dict[str, Any]]] = {
         },
     ],
     # 7. edit_file 改源码 → HITL
+    # 2026-06-30 重构:``get_project_root`` 在重构后搬到 ``_system_prompt.py``,
+    # ``_agent_builder.py`` 里已无此符号。e2e_mock 路径要跟上重构。
     "edit_file_interrupt": [
         {
             "name": "edit_file",
             "args": {
-                "file_path": "/Users/yxb/projects/nexus/nexus/backend/agent/_agent_builder.py",
+                "file_path": "/Users/yxb/projects/nexus/nexus/backend/agent/_system_prompt.py",
                 "old_string": "def get_project_root() -> Path:",
                 "new_string": "def get_project_root() -> Path:  # E2E mock comment",
             },
