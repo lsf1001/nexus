@@ -5,12 +5,15 @@
 旧 ``memory`` 表迁移后改名为 ``memory_legacy``(只读,供回查)。
 """
 
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
 from .config import CONFIG
+
+logger = logging.getLogger(__name__)
 
 # 数据库路径
 DB_PATH = Path.home() / ".nexus" / "nexus.db"
@@ -176,7 +179,7 @@ def save_quality_score(
 
 
 def _migrate_deleted_at() -> None:
-    """迁移 deleted_at 索引。"""
+    """迁移 deleted_at 索引 (幂等,失败仅警告)。"""
     try:
         with get_db() as conn:
             cursor = conn.execute(
@@ -184,8 +187,9 @@ def _migrate_deleted_at() -> None:
             )
             if cursor.fetchone():
                 conn.execute("DROP INDEX _migrate_deleted_at_idx")
-    except Exception:
-        pass
+    except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+        # 索引迁移非业务关键路径,失败不致命,仅记录
+        logger.warning("_migrate_deleted_at 失败 (非致命): %s", exc)
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:

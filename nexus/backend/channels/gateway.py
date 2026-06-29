@@ -12,6 +12,8 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+import httpx
+
 from .base import Channel, ChannelMessage, ChannelType
 
 if TYPE_CHECKING:
@@ -117,8 +119,9 @@ class Gateway:
             logger.error(f"route_message unhandled error: {e}", exc_info=True)
             try:
                 await self._send_error(msg, str(e))
-            except Exception:
-                logger.exception("Even _send_error failed")
+            except (httpx.RequestError, RuntimeError, OSError) as send_err:
+                # 仅捕获可预期的发送错误;其他异常走 logger.exception 留全栈
+                logger.exception("send_error 失败 (channel=%s): %s", msg.channel_type, send_err)
 
     async def _get_or_create_session(self, msg: ChannelMessage) -> str:
         user_key = f"{msg.channel_id}:{msg.user_id}"

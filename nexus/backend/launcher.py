@@ -13,6 +13,7 @@ macOS 关窗行为:
 """
 
 import argparse
+import logging
 import os
 import sys
 import threading
@@ -20,6 +21,8 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # 确保项目根目录在 sys.path(同 run.py)
 _project_root = Path(__file__).parent.parent.parent
@@ -73,8 +76,10 @@ def _patch_cocoa_close_behavior() -> None:
         if instance is not None:
             try:
                 instance.pywebview_window.hide()
-            except Exception:  # noqa: BLE001 - 容错
-                pass
+            except (AttributeError, RuntimeError) as exc:
+                # hide() 失败常见于 pywebview 实例已被销毁 / NSWindow 已 release,
+                # 关窗回调的容错路径,记 warning 即可,不阻断用户关窗操作
+                logger.warning("window.hide() 失败 (容错继续): %s", exc)
         return False  # Foundation.NO - 不要让 NSWindow 关闭
 
     def _patched_applicationShouldHandleReopen_hasVisibleWindows_(self, app, flag):  # noqa: ANN001, N802 - NSApplicationDelegate 签名固定

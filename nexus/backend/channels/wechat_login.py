@@ -137,6 +137,8 @@ async def wait_qr_scan(session_key: str, registry: ChannelRegistry, timeout_ms: 
     deadline = time.time() + timeout_ms / 1000
     refresh_count = 0
     max_refresh = 3
+    consecutive_failures = 0
+    max_consecutive_failures = 20  # 连续失败 N 次主动跳出,避免死循环
 
     while time.time() < deadline:
         try:
@@ -208,8 +210,28 @@ async def wait_qr_scan(session_key: str, registry: ChannelRegistry, timeout_ms: 
             else:
                 await asyncio.sleep(1)
         except Exception as e:
-            logger.error(f"Poll error: {e}")
-            await asyncio.sleep(1)
+            consecutive_failures += 1
+            logger.error(
+                "Poll error (consecutive=%d/%d): %s",
+                consecutive_failures,
+                max_consecutive_failures,
+                e,
+            )
+            # 退避: 1, 2, 4, 8s 上限,避免空 poll 浪费 IO
+            backoff = min(8, 2 ** (consecutive_failures - 1))
+            await asyncio.sleep(backoff)
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    "Poll 连续失败 %d 次, 主动终止 session_key=%s",
+                    consecutive_failures,
+                    session_key,
+                )
+                with _global_lock:
+                    _active_logins.pop(session_key, None)
+                return {
+                    "connected": False,
+                    "message": f"连续失败 {consecutive_failures} 次, 已主动终止",
+                }
 
     del _active_logins[session_key]
     return {"connected": False, "message": "Login timeout"}
