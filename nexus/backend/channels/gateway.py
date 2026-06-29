@@ -127,8 +127,11 @@ class Gateway:
             try:
                 self._sessions.update_session(existing)  # type: ignore[attr-defined]
                 return existing
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 - 容错但需日志,继续走 fallback 路径
+                logger.warning(
+                    "update_session 失败,继续走 find_latest_session_by_user: %s",
+                    exc,
+                )
 
         existing_sid = self._sessions.find_latest_session_by_user(  # type: ignore[attr-defined]
             user_id=msg.user_id, channel=msg.channel_type.value
@@ -140,8 +143,13 @@ class Gateway:
                     self._session_to_channel[existing_sid] = msg.channel_id
                     logger.info("Resumed session for %s from DB: %s", msg.user_id, existing_sid)
                     return existing_sid
-            except Exception:
-                pass
+            except (AttributeError, KeyError, TypeError) as exc:
+                logger.warning(
+                    "get_session 校验失败 (user=%s sid=%s): %s",
+                    msg.user_id,
+                    existing_sid,
+                    exc,
+                )
 
         new_sid = msg.session_id or str(uuid.uuid4())
         try:
