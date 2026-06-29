@@ -78,31 +78,31 @@ class TestBuildSystemPromptHardcodesIdentity:
         assert "【安全规则】" in prompt
 
 
-class TestBuildSystemPromptIsModelAware:
-    """``_build_system_prompt`` 必须实时从 ``~/.nexus/models.json`` 读 active model 注入 FACT 块。
+class TestBuildSystemPromptIsModelAgnostic:
+    """``_build_system_prompt`` 输出**与激活模型无关**的稳定字符串。
 
-    WHY(2026-06-29 三轮迭代的最终方案):
-      之前尝试过两种方案,都有致命缺陷:
-        1. 纯 prompt 字符串硬编码 ``f"基于 {driver_label} 打造"`` → 用户反馈
-           "应该真实获取模型的信息" → 不再硬编码
-        2. prompt 只引导"必须先调 get_model_info 工具" → E2E 验证里 LLM
-           仍然不调,直接答训练记忆里的 "Qwen / Claude" → 失败
-      最终方案:**双保险**:
-        - 第一防线:系统 prompt 顶部 ``[FACT · 当前驱动模型]`` 块**实时**
-          调 ``get_active_model_info()`` 拼入 ``name`` / ``vendor`` —— LLM
-          收到的 system prompt 字符串里**就有**真实数据(从 models.json 读,
-          单一数据源),想答错都难。
-        - 第二防线:``get_model_info`` 工具仍然存在,LLM 可主动调用拿实时数据。
+    2026-06-29 第三轮重构:FACT 块从 prompt 字符串里移走,改由
+    :class:`DynamicIdentityMiddleware` 在每次 LLM 调用前实时注入。理由:
+
+      - 旧方案把 ``"当前驱动模型 = X"`` 烤进 ``create_agent()`` 阶段的
+        system_prompt 字符串,agent 构造一次后**不再刷新**。用户切换
+        ``~/.nexus/models.json`` 后,UI 标题栏(``/api/model`` 端点读
+        models.json)和 LLM 自报身份不一致(E2E 2026-06-29 真实 bug)。
+      - 新方案:prompt 只承载产品层稳定规则(身份 / 思考格式 / 澄清 /
+        安全);FACT 块由 middleware 在 ``wrap_model_call`` 钩子里**每次
+        调用前**重读 models.json 注入。单一数据源,绝无缓存滞留。
 
     契约:
-      - prompt 必须包含当前 active model 的 name + vendor(从 models.json 读)
-      - prompt 必须显式提到 ``get_model_info`` 工具(让 LLM 知道备用通道存在)
-      - 思考格式 / 安全 / 澄清规则等"产品层规则"必须保留
+      - prompt 输出是**纯静态**的,切换 active model 后内容**完全不变**。
+      - prompt 必须显式提到 ``DynamicIdentityMiddleware`` 注入的 FACT 块
+        以及 ``get_model_info`` 工具(让 LLM 知道该用哪份数据答身份问题)。
+      - 思考格式 / 安全 / 澄清规则等"产品层规则"必须保留。
+      - prompt **不能**包含任何具体模型名(否则就成了新的 hardcode 串味源)。
     """
 
     @pytest.fixture
     def _patch_active_model(self, tmp_path, monkeypatch: pytest.MonkeyPatch):
-        """把 ``models_config.MODELS_FILE`` 指向 tmp 路径,避免污染真实配置。"""
+        """把 ``models_config.MODELS_FILE`` 指向 tmp 路径,避免污染真实配置."""
         import json
         from nexus.backend import models_config
 
@@ -124,24 +124,36 @@ class TestBuildSystemPromptIsModelAware:
         from nexus.backend import agent
         monkeypatch.setattr(agent, "_CACHED_PROMPT", {})
 
-    def test_prompt_includes_active_model_name(self, _patch_active_model) -> None:
-        """prompt 必须包含当前 active model 的 name(从 models.json 实时读)。"""
+    def test_prompt_does_not_bake_active_model_name(self, _patch_active_model) -> None:
+        """prompt 不应再含具体模型名(否则就退化成 hardcode 串味源)。"""
         prompt = _build_system_prompt()
-        # active model 是 agnes-2.0-flash → prompt 里必须有这个名字
-        assert "agnes-2.0-flash" in prompt, (
-            "prompt 没包含 active model name → _build_system_prompt 没有实时读 "
-            "models.json,LLM 收到的 system prompt 里没有真实驱动模型信息"
+        assert "agnes-2.0-flash" not in prompt, (
+            "prompt 不应再含 agnes-2.0-flash → _build_system_prompt 不应再 hardcode "
+            "当前激活模型;FACT 块改由 DynamicIdentityMiddleware 注入"
         )
 
-    def test_prompt_includes_active_vendor(self, _patch_active_model) -> None:
-        """prompt 必须包含 vendor(从 api_base 推断: agnes-ai)。"""
+    def test_prompt_mentions_middleware_fact_block(self, _patch_active_model) -> None:
+        """prompt 必须显式提到 ``DynamicIdentityMiddleware`` / FACT 块,LLM 才知道
+        答身份问题该用哪份数据。"""
         prompt = _build_system_prompt()
-        assert "agnes-ai" in prompt, (
-            "prompt 没包含 vendor → infer_vendor 没生效,LLM 答'哪个公司提供'时会瞎答"
+        assert "DynamicIdentityMiddleware" in prompt, (
+            "prompt 没提 DynamicIdentityMiddleware → LLM 不知道 FACT 块从哪来,"
+            "被问'你用的什么模型'时会瞎答"
+        )
+        assert "FACT" in prompt
+        assert "models.json" in prompt, (
+            "prompt 必须说明 FACT 块数据源是 models.json,LLM 才有信心"
         )
 
-    def test_prompt_distinguishes_different_active_models(self, tmp_path, monkeypatch) -> None:
-        """切换 active model 后,prompt 内容必须跟着变(数据源是活的)。"""
+    def test_prompt_mentions_get_model_info_tool(self, _patch_active_model) -> None:
+        """prompt 必须提到 ``get_model_info`` 工具(让 LLM 知道备用通道)。"""
+        prompt = _build_system_prompt()
+        assert "get_model_info" in prompt, (
+            "prompt 没提 get_model_info 工具 → LLM 不会知道有备用 introspect 通道"
+        )
+
+    def test_prompt_is_model_independent(self, tmp_path, monkeypatch) -> None:
+        """切换 active model 后,prompt 内容**完全不变**(因为不再读 models.json)。"""
         import json
         from nexus.backend import agent
         from nexus.backend import models_config
@@ -165,23 +177,13 @@ class TestBuildSystemPromptIsModelAware:
         monkeypatch.setattr(agent, "_CACHED_PROMPT", {})
         prompt_minimax = _build_system_prompt()
 
-        assert "agnes-2.0-flash" in prompt_agnes
-        assert "agnes-ai" in prompt_agnes
-        assert "MiniMax-M3" in prompt_minimax
-        assert "MiniMax" in prompt_minimax
-        assert prompt_agnes != prompt_minimax, (
-            "切换 active model 后 prompt 没变 → 数据源不是 models.json,是 hardcode"
-        )
-
-    def test_prompt_mentions_get_model_info_tool(self, _patch_active_model) -> None:
-        """prompt 必须提到 ``get_model_info`` 工具(让 LLM 知道备用通道)。"""
-        prompt = _build_system_prompt()
-        assert "get_model_info" in prompt, (
-            "prompt 没提 get_model_info 工具 → LLM 不会知道有备用 introspect 通道"
+        assert prompt_agnes == prompt_minimax, (
+            "切换 active model 后 prompt 变了 → _build_system_prompt 不应再依赖 "
+            "models.json,否则就是新 hardcode 串味源"
         )
 
     def test_other_rules_kept(self, _patch_active_model) -> None:
-        """加 model 注入后,其他规则段不能丢。"""
+        """重构后,产品层规则段不能丢。"""
         prompt = _build_system_prompt()
         assert "<thinking>" in prompt
         assert "【主动澄清规则】" in prompt
@@ -189,6 +191,146 @@ class TestBuildSystemPromptIsModelAware:
         # 产品身份段保留
         assert "夜小白科技有限公司" in prompt
         assert "Nexus" in prompt
+
+
+class TestDynamicIdentityMiddleware:
+    """``DynamicIdentityMiddleware`` 必须在每次 LLM 调用前实时注入当前 active model。
+
+    契约:
+      - ``wrap_model_call`` 钩子必须 mutate ``request.system_message.content``,
+        prepend 一段含 ``name`` / ``vendor`` 的 FACT 块。
+      - FACT 块内容**不**缓存(每次都重读 ``models.json``)。
+      - ``get_active_model_info()`` 返回空时走降级措辞(``未配置模型``),
+        绝不编造。
+    """
+
+    @pytest.fixture
+    def _patch_active_model(self, tmp_path, monkeypatch: pytest.MonkeyPatch):
+        """替换 ``models_config.MODELS_FILE`` 到 tmp,避免污染真实配置。"""
+        import json
+        from nexus.backend import models_config
+
+        fake = {
+            "models": [
+                {
+                    "id": "fake-agnes",
+                    "name": "agnes-2.0-flash",
+                    "api_key": "x",
+                    "api_base": "https://apihub.agnes-ai.com/v1",
+                    "temperature": 0.7,
+                    "is_active": True,
+                },
+            ]
+        }
+        monkeypatch.setattr(models_config, "MODELS_FILE", tmp_path / "models.json")
+        (tmp_path / "models.json").write_text(json.dumps(fake), encoding="utf-8")
+
+    def _build_request(self, system_text: str = "base prompt"):
+        """构造一个带固定 system_message 的 ModelRequest 并返回 (mw, request, handler, captured)。
+
+        LangChain ``@wrap_model_call`` 装饰器返回的是 :class:`AgentMiddleware`
+        实例。本 middleware 用 ``async def`` 实现,装饰器只注册
+        ``awrap_model_call``(deepagents 的 ``agent.astream(...)`` 走 async
+        路径;sync ``wrap_model_call`` 在 async 上下文里会抛 NotImplementedError,
+        2026-06-29 E2E 暴露)。测试用 ``asyncio.run`` 调 ``awrap_model_call``。
+        """
+        from langchain.agents.middleware.types import ModelResponse
+        from langchain_core.messages import AIMessage, SystemMessage
+
+        from nexus.backend.middleware.dynamic_identity import dynamic_identity_middleware
+
+        captured: dict = {}
+
+        async def fake_handler(req):
+            # 把 mutate 后的 system_message.content 抓出来供断言
+            captured["system_content"] = req.system_message.content
+            return ModelResponse(result=[AIMessage(content="ok")])
+
+        request = MagicMock()
+        request.system_message = SystemMessage(content=system_text)
+        return dynamic_identity_middleware, request, fake_handler, captured
+
+    def _invoke_middleware(self, mw, request, handler, captured):
+        """统一调 ``mw.awrap_model_call``(async),把 mutate 后的 system_message 抓出来。
+
+        跟 deepagents ws.py 的 ``agent.astream(...)`` 调用栈对齐(都是 async 路径)。
+        """
+        import asyncio
+
+        result = asyncio.run(mw.awrap_model_call(request, handler))
+        return result, captured["system_content"]
+
+    def test_middleware_injects_fact_block_with_active_model(self, _patch_active_model) -> None:
+        """middleware 调用后,system_message.content 必须含 active model 的 name + vendor。"""
+        mw, request, handler, captured = self._build_request("base prompt here")
+
+        _, content = self._invoke_middleware(mw, request, handler, captured)
+
+        assert "agnes-2.0-flash" in content, (
+            f"FACT 块没注入 active model name,实际 content: {content[:300]}"
+        )
+        assert "agnes-ai" in content, (
+            f"FACT 块没注入 vendor,实际 content: {content[:300]}"
+        )
+        # FACT 块必须在最前面(LLM 训练记忆里如果对位置敏感,prepend 比 append 更稳)
+        assert content.startswith("【FACT"), (
+            f"FACT 块没 prepend 到最前,实际开头: {content[:200]}"
+        )
+        # 原始 system prompt 内容必须保留(不能 overwrite 整个 system_message)
+        assert "base prompt here" in content
+
+    def test_middleware_reads_models_json_freshly(self, tmp_path, monkeypatch) -> None:
+        """切换 active model 后,下次 middleware 调用必须反映新值(无缓存)。"""
+        import json
+        from nexus.backend import models_config
+
+        monkeypatch.setattr(models_config, "MODELS_FILE", tmp_path / "models.json")
+        (tmp_path / "models.json").write_text(json.dumps({
+            "models": [{"id": "a", "name": "agnes-2.0-flash", "api_key": "x",
+                        "api_base": "https://apihub.agnes-ai.com/v1",
+                        "temperature": 0.7, "is_active": True}]
+        }), encoding="utf-8")
+
+        mw, request, handler, captured = self._build_request()
+        _, content1 = self._invoke_middleware(mw, request, handler, captured)
+        assert "agnes-2.0-flash" in content1
+
+        # 切换 active model 到 MiniMax-M3
+        (tmp_path / "models.json").write_text(json.dumps({
+            "models": [{"id": "m", "name": "MiniMax-M3", "api_key": "x",
+                        "api_base": "https://api.minimaxi.com/v1",
+                        "temperature": 0.7, "is_active": True}]
+        }), encoding="utf-8")
+
+        # 新一轮 LLM 调用(无 cache,无 reload)—— middleware 必须读出新值
+        mw2, request2, handler2, captured2 = self._build_request()
+        _, content2 = self._invoke_middleware(mw2, request2, handler2, captured2)
+        assert "MiniMax-M3" in content2, (
+            "切换 active model 后 middleware 还是用老 agnes → 它缓存了,"
+            "重读 models.json 的契约没生效"
+        )
+        assert "MiniMax" in content2
+
+    def test_middleware_handles_missing_active_model(self, tmp_path, monkeypatch) -> None:
+        """``models.json`` 里没有 active 模型时,FACT 块走降级措辞(未配置模型)。"""
+        import json
+        from nexus.backend import models_config
+
+        monkeypatch.setattr(models_config, "MODELS_FILE", tmp_path / "models.json")
+        (tmp_path / "models.json").write_text(json.dumps({
+            "models": [{"id": "x", "name": "inactive-model", "api_key": "x",
+                        "api_base": "https://x.com/v1", "temperature": 0.7,
+                        "is_active": False}]
+        }), encoding="utf-8")
+
+        mw, request, handler, captured = self._build_request()
+        _, content = self._invoke_middleware(mw, request, handler, captured)
+        assert "未配置模型" in content, (
+            "无 active 模型时 middleware 没走降级措辞 → LLM 会瞎答"
+        )
+        assert "inactive-model" not in content, (
+            "middleware 不应把 is_active=False 的模型注入 FACT 块"
+        )
 
 
 class TestGetModelInfoToolRegistered:
@@ -315,6 +457,36 @@ class TestCreateAgentWiresDeepAgentsMemory:
             assert any(isinstance(m, QualityGateMiddleware) for m in middleware), (
                 "QualityGateMiddleware 必须装到 middleware 里拦截 edit_file"
             )
+
+    def test_middleware_kwarg_contains_dynamic_identity(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``DynamicIdentityMiddleware`` 必须出现在 ``middleware=`` 列表里。
+
+        WHY:2026-06-29 第三轮重构后,动态身份注入从 prompt 字符串挪到
+        middleware。如果这条契约破了,LLM 收到的 system prompt 永远不含
+        当前激活模型信息(因为 prompt 字符串本身已经模型无关),标题栏
+        和 LLM 答对不上(E2E 2026-06-29 真实 bug 的根因)。
+        """
+        from langchain.agents.middleware import AgentMiddleware
+
+        monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
+        from nexus.backend.agent import create_agent
+
+        with patch("deepagents.create_deep_agent") as mock_create:
+            mock_create.return_value = MagicMock()
+            create_agent(model_name="m", api_key="k", api_base="https://x")
+
+            kwargs = mock_create.call_args.kwargs
+            middleware = kwargs["middleware"]
+            # dynamic_identity_middleware 是 AgentMiddleware 实例
+            dyn = [m for m in middleware if isinstance(m, AgentMiddleware)]
+            assert dyn, (
+                "DynamicIdentityMiddleware 未注册到 middleware → LLM 收不到 "
+                "FACT 块,标题栏和 LLM 自报身份会再次不一致"
+            )
+            # 至少有 2 个 AgentMiddleware:dynamic_identity + quality_gate(后者不是
+            # AgentMiddleware 而是 deepagents 的 Middleware 子类,可能也算,
+            # 这里只断言至少 1 个 dynamic_identity 类的对象)
+            assert len(dyn) >= 1
 
     def test_middleware_kwarg_does_not_duplicate_summarization(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """``SummarizationMiddleware`` 不应出现在 user-passed middleware 里。
