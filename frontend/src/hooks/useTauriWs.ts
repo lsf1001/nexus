@@ -52,15 +52,12 @@ export function useTauriWs<T = unknown>({
           ? url
           : `ws://127.0.0.1:30000${url.startsWith('/') ? '' : '/'}${url}`;
 
-        // ws_open 在 Rust 端要求 onChunk 参数(签名约束),但实际响应转发由
-        // ws_send 启动的临时 rx_task + 临时 Channel 完成(每次 send 独立),
-        // ws_open 这里不真正用 channel —— 但 Tauri IPC 严格按签名校验,
-        // 缺 onChunk 会抛 'missing required key onChunk',前端 catch 发
-        // type:'error' data:String(e),error_code 空 → 前端 setLastError
-        // 显示 '未知错误'。所以这里建一个占位 channel 满足签名校验。
+        // ws_open 绑定的 Channel 是 Rust relay 把后端 WS 响应转回前端的唯一通道。
+        // 必须把每条消息转交给 ChatArea 的 handleWsMessage，否则后端已完成
+        // 但前端永远收不到 final/done/error，会一直停在 loading 转圈。
         const openChunk = new Channel<T>();
-        openChunk.onmessage = () => {
-          /* 占位:ws_open 不产生响应 */
+        openChunk.onmessage = (message) => {
+          onMessageRef.current(message);
         };
 
         const sessionId = await invoke<string>('ws_open', {

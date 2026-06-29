@@ -143,6 +143,10 @@ function ChatArea({
             setConversationMessages([...messagesRef.current]);
           }
         }
+        // thinking 也算"AI 在干活",停 spinner 让用户看到思考过程,
+        // 否则 LLM 思考 + intent 分类期间(可能 1-5s)用户会以为卡死。
+        setIsLoading(false);
+        disarm();
         break;
       }
       case 'chunk': {
@@ -155,6 +159,12 @@ function ChatArea({
             setConversationMessages([...messagesRef.current]);
           }
         }
+        // 收到第一个 chunk 就停 spinner:后端还在 streaming final/done
+        // 之前 (QualityPipeline / chain overhead) 可能要 20-30s,这段时间
+        // 用户看到内容已在累积就以为"卡死"了。disarm 同样防止 watchdog
+        // 在 done 之前误清状态(它会在 final/done 时再次 disarm — 幂等)。
+        setIsLoading(false);
+        disarm();
         break;
       }
       case 'final': {
