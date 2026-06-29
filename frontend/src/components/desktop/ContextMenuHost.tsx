@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useContextMenu } from '../../store/useContextMenu';
+import { useToast } from '../../store/useToast';
 
 /**
  * 全局"复制"菜单浮层。挂在 DesktopShell 顶层,只渲染一次。
@@ -8,6 +9,7 @@ import { useContextMenu } from '../../store/useContextMenu';
 export function ContextMenuHost() {
   const menu = useContextMenu((s) => s.menu);
   const close = useContextMenu((s) => s.close);
+  const toast = useToast();
 
   useEffect(() => {
     if (!menu) return;
@@ -47,7 +49,7 @@ export function ContextMenuHost() {
       document.execCommand('copy');
       document.body.removeChild(ta);
     } catch (err) {
-      console.warn('复制失败:', err);
+      toast.error(`复制失败: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 

@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore';
 import { openContextMenuAt } from '../lib/useContextMenuTrigger';
 import { useWsConnection } from '../hooks/useWsConnection';
 import { useLoadingWatchdog } from '../hooks/useLoadingWatchdog';
+import { useToast } from '../store/useToast';
 import ChatBubble from './ChatBubble';
 import type { StreamEvent, WSMessage, Message, ConfirmationResponseFrame } from '../types';
 import { getRuntimeToken, getApiBase } from '../lib/api';
@@ -82,6 +83,7 @@ function ChatArea({
   const modelName = useStore((s) => s.modelName);
   const pendingConfirmation = useStore((s) => s.pendingConfirmation);
   const setPendingConfirmation = useStore((s) => s.setPendingConfirmation);
+  const toast = useToast();
 
   // 当 conversationId prop 变化时，同步更新 ref
   useEffect(() => {
@@ -262,7 +264,7 @@ function ChatArea({
         setIsLoading(false);
         disarm();
         if (!Array.isArray(data.actions) || data.actions.length === 0) {
-          console.warn('confirmation_request 缺少 actions 字段,忽略');
+          toast.warn('后端 confirmation_request 缺少 actions 字段,已忽略');
           break;
         }
         setPendingConfirmation({
@@ -273,7 +275,7 @@ function ChatArea({
         break;
       }
     }
-  }, [onSessionCreated, setConversationMessages, setIsLoading, setPendingConfirmation]);
+  }, [onSessionCreated, setConversationMessages, setIsLoading, setPendingConfirmation, toast]);
 
   // === 客户端 watchdog:后端不发终止帧时强制清 loading ===
   // 必须在 handleWsMessage 之前声明 — useCallback 的 deps 数组在 render
@@ -470,9 +472,12 @@ function ChatArea({
   };
 
   const handleCopyMessage = (content: string) => {
-    if (!navigator.clipboard) return;
-    navigator.clipboard.writeText(content).catch((err) => {
-      console.warn('复制失败:', err);
+    if (!navigator.clipboard) {
+      toast.warn('当前环境不支持剪贴板 API');
+      return;
+    }
+    navigator.clipboard.writeText(content).catch((err: unknown) => {
+      toast.error(`复制失败: ${err instanceof Error ? err.message : String(err)}`);
     });
   };
 
