@@ -192,16 +192,18 @@ def test_model_switch_updates_store_modelname() -> None:
 
 
 def test_ws_emit_chunk_realtime_not_buffered() -> None:
-    """回归测试:ws.py 的 chunk 处理路径不能改成缓存模式。
+    """回归测试:ws 流式循环的 chunk 处理路径不能改成缓存模式。
 
     WHY 2026-06-28 教训:旧实现 ``full_response += content`` 把 chunk 缓存到流末,
     导致 agnes 慢模型场景前端 26s 收不到任何帧,用户体感"转圈"。
     修复:parser.feed(content) 直接 emit,ThinkingParser 实时解析后 send_json。
+
+    2026-06-29 模块化拆分后,源文件从 ``api/ws.py`` 改为 ``api/ws/streaming.py``。
     """
-    src = (REPO_ROOT / "nexus/backend/api/ws.py").read_text(encoding="utf-8")
+    src = (REPO_ROOT / "nexus/backend/api/ws/streaming.py").read_text(encoding="utf-8")
     # 必须 import ThinkingParser
-    assert "from .thinking_parser import ThinkingParser" in src or "from .api.thinking_parser" in src, (
-        "ws.py 必须 import ThinkingParser,实时 emit chunk"
+    assert "from ..thinking_parser import ThinkingParser" in src or "from .api.thinking_parser" in src, (
+        "ws/streaming.py 必须 import ThinkingParser,实时 emit chunk"
     )
     # on_chat_model_stream 分支必须调用 parser.feed 并 send_json
     stream_match = re.search(
