@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import logging
 import os
 import threading
@@ -219,12 +220,19 @@ _cors_origins = [
     ).split(",")
     if o.strip()
 ]
+# allow_credentials=True 时不允许 origin="*" (CORS 规范),
+# 生产部署若有人误把 NEXUS_ALLOWED_ORIGINS 设成 * 直接启动失败
+if any(o == "*" for o in _cors_origins):
+    raise ValueError(
+        "NEXUS_ALLOWED_ORIGINS 不允许包含 '*' (allow_credentials=True 不兼容通配 origin),"
+        "请使用显式 origin 列表,如 'http://localhost:30077,tauri://localhost'"
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
 # 挂载前端静态文件（挂载到 /app 路径避免与 API 冲突）
@@ -388,7 +396,10 @@ def _build_broadcast_to_ws(websocket: WebSocket):
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket 主端点：业务逻辑委托给 ``api.ws.handle_websocket``。"""
     token = websocket.query_params.get("token")
-    if token != CONFIG.get("ws_token", ""):
+    expected = CONFIG.get("ws_token", "")
+    # 用 hmac.compare_digest 做常量时间比较,防时序攻击
+    # (Python 字符串 == 在长度不等时立即短路,理论上可推算 token 字符)
+    if not expected or not hmac.compare_digest(token or "", expected):
         await websocket.close(code=4001, reason="未授权")
         return
 

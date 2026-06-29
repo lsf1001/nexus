@@ -23,11 +23,15 @@ from nexus.backend.resilience.resume import (
 
 @pytest.fixture
 def fixed_secret(monkeypatch: pytest.MonkeyPatch) -> str:
-    """注入一个固定的 resume secret，避免测试依赖 CONFIG 默认值。"""
+    """注入一个固定的 resume secret,避免测试依赖 CONFIG 默认值。
+
+    长度 >= 32 字节(resume.py 的 _get_secret 会校验,长度不足直接 RuntimeError)。
+    """
     from nexus.backend import config as config_module
 
-    monkeypatch.setitem(config_module.CONFIG, "resume_secret", "test-secret-xyz-123")
-    return "test-secret-xyz-123"
+    secret = "test-resume-secret-32bytes-or-more-abcdef0123456789"
+    monkeypatch.setitem(config_module.CONFIG, "resume_secret", secret)
+    return secret
 
 
 # ---------------- make_token: 基本形态 ----------------
@@ -207,29 +211,27 @@ def test_empty_inputs_raise(fixed_secret: str) -> None:
         verify_token(token, "", now=int(time.time()) + 1)
 
 
-# ---------------- secret 兜底 ----------------
+# ---------------- secret 配置 ----------------
 
 
-def test_falls_back_to_ws_token_when_no_resume_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """未配置 NEXUS_RESUME_SECRET 时，应能回退到 CONFIG['ws_token'] 兜底。"""
+def test_short_secret_raises_runtime_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """secret 长度 < 32 字节时,签发直接 RuntimeError(防止弱密钥上线)。"""
     from nexus.backend import config as config_module
 
-    # 移除 resume_secret 但保留 ws_token
-    monkeypatch.delitem(config_module.CONFIG, "resume_secret", raising=False)
-    monkeypatch.setitem(config_module.CONFIG, "ws_token", "ws-fallback-secret-abc")
-
-    token = make_token("sess-1", 7, ttl_seconds=60)
-    assert verify_token(token, "sess-1", now=int(time.time()) + 1) == 7
+    monkeypatch.setitem(config_module.CONFIG, "resume_secret", "too-short")
+    with pytest.raises(RuntimeError, match="长度"):
+        make_token("sess-1", 0, ttl_seconds=60)
 
 
-def test_runtime_error_when_no_secret_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    """resume_secret 和 ws_token 都未配置时，签发应抛 RuntimeError。"""
+def test_empty_secret_raises_runtime_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未配置 NEXUS_RESUME_SECRET 时签发应抛 RuntimeError,不再回退 ws_token。"""
     from nexus.backend import config as config_module
 
     monkeypatch.setitem(config_module.CONFIG, "resume_secret", "")
-    monkeypatch.setitem(config_module.CONFIG, "ws_token", "")
+    # 即使 ws_token 存在也不再兜底 (B17 安全修复)
+    monkeypatch.setitem(config_module.CONFIG, "ws_token", "ws-token-32bytes-or-more-aaaaaaaaa")
 
-    with pytest.raises(RuntimeError, match="resume secret|ws_token"):
+    with pytest.raises(RuntimeError, match="NEXUS_RESUME_SECRET"):
         make_token("sess-1", 0, ttl_seconds=60)
 
 

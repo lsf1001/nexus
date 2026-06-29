@@ -27,6 +27,7 @@ def _isolate_registry():
     缓存幂等,需要清。
     """
     from deepagents.profiles.harness.harness_profiles import _HARNESS_PROFILES
+
     from nexus.backend.profiles import tier_routing
 
     profiles_snapshot = dict(_HARNESS_PROFILES)

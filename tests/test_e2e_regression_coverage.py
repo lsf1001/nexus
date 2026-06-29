@@ -44,6 +44,7 @@ def test_force_tool_middleware_module_importable() -> None:
 def test_tier_routing_module_importable_and_registered() -> None:
     """tier_routing 注册弱/强两档 HarnessProfile,key 与 deepagents spec 对齐。"""
     from deepagents.profiles.harness.harness_profiles import _HARNESS_PROFILES
+
     from nexus.backend.profiles.tier_routing import register_tier_profiles
 
     register_tier_profiles()
