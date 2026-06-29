@@ -255,7 +255,16 @@ def _delete_account(account_id: str) -> None:
 
 
 def _check_token_valid(account_id: str) -> bool:
-    """检查 token 是否有效（通过 notifyStart 检测）。"""
+    """检查 token 是否有效(通过 notifyStart 检测)。
+
+    调用 iLink ``/ilink/bot/msg/notifystart`` 端点:
+    - errcode == 0 → 有效
+    - errcode != 0 → 服务端拒绝(过期 / 撤销)
+    - 网络 / JSON 解析错误 → 视为无效,降级到 ``_delete_account`` 清理
+
+    Returns:
+        True 表示 token 仍可用,False 表示需重新扫码。
+    """
     try:
         account = _load_account(account_id)
         if not account:
@@ -270,5 +279,6 @@ def _check_token_valid(account_id: str) -> bool:
         data = resp.json()
         errcode = data.get("errcode", 0)
         return errcode == 0
-    except httpx.RequestError:
+    except (httpx.RequestError, json.JSONDecodeError):
+        # 网络抖动 / 上游返回非 JSON → 视为无效,等下次启动重试
         return False
