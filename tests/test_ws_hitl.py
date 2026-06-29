@@ -220,7 +220,7 @@ async def test_finalize_after_stream_done_and_assistant_message() -> None:
     from nexus.backend.api.ws import _finalize_after_stream
     from nexus.backend.intent.router import DEFAULT_INTENT
 
-    with patch("nexus.backend.api.ws.add_message") as mock_add_message:
+    with patch("nexus.backend.db.add_message") as mock_add_message:
         mock_ws = AsyncMock()
         await _finalize_after_stream(
             websocket=mock_ws,
@@ -262,7 +262,7 @@ async def test_finalize_after_stream_pending_interrupts_early_return() -> None:
     from nexus.backend.api.ws import _finalize_after_stream
     from nexus.backend.intent.router import DEFAULT_INTENT
 
-    with patch("nexus.backend.api.ws.add_message") as mock_add_message:
+    with patch("nexus.backend.db.add_message") as mock_add_message:
         mock_ws = AsyncMock()
         await _finalize_after_stream(
             websocket=mock_ws,
@@ -299,7 +299,7 @@ async def test_finalize_after_stream_clarification_writes_placeholder() -> None:
     from nexus.backend.api.ws import _finalize_after_stream
     from nexus.backend.intent.router import DEFAULT_INTENT
 
-    with patch("nexus.backend.api.ws.add_message") as mock_add_message:
+    with patch("nexus.backend.db.add_message") as mock_add_message:
         mock_ws = AsyncMock()
         await _finalize_after_stream(
             websocket=mock_ws,

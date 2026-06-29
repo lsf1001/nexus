@@ -16,7 +16,7 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from ...db import add_message
+from ... import db as _db
 from ...resilience.resume import (
     InvalidResumeToken,
     make_token,
@@ -99,7 +99,7 @@ async def _finalize_after_stream(
         # 前端已经显示澄清表单,业务侧已经在等用户回答。OperationalError
         # 降级为 warning log,不影响协议层。
         try:
-            add_message(str(uuid.uuid4()), session_id, "assistant", placeholder)
+            _db.add_message(str(uuid.uuid4()), session_id, "assistant", placeholder)
         except Exception as persist_exc:  # noqa: BLE001 — 持久化失败不影响协议
             logger.warning(
                 "WS 澄清占位消息入库失败,降级跳过 (session=%s, exc=%s)",
@@ -136,7 +136,7 @@ async def _finalize_after_stream(
 
     # 保存助手回复到数据库
     if response_text:
-        add_message(message_id, session_id, "assistant", response_text)
+        _db.add_message(message_id, session_id, "assistant", response_text)
 
     # 发 done + emit ChatEnd
     if stream_completed:
