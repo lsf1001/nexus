@@ -5,6 +5,121 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [Unreleased] — 修复 model identity 串味:system_prompt 改用 middleware 实时注入
+
+### Problem
+
+用户反馈"标题显示 MiniMax-M3,LLM 答 agnes-2.0-flash,你设计的逻辑不对吧"。
+具体场景:DMG 启动时 active=agnes,用户通过改 `~/.nexus/models.json` 切到
+MiniMax-M3(没走 `POST /api/models/switch` 重建 agent),UI 标题栏立刻
+反映新模型(`/api/model` 端点读 models.json 实时),但 LLM 收到的
+system_prompt **仍然含旧 agnes** → LLM 自报"agnes-2.0-flash"。
+
+### Root Cause
+
+`_build_system_prompt` 把"当前驱动模型 = X"作为字符串常量塞进 system prompt,
+**在 `create_agent()` 阶段只拼一次**。agent 是单例(lifespan 懒构造),
+构造完成后 system_prompt 是 immutable baked string。`POST /api/models/switch`
+会触发 `create_agent_with_model` 重建,但用户从 UI / 终端 / 第三方工具
+直接改 `models.json` **不会**重建 agent → 标题栏(`/api/model` 端点)
+和 LLM 回答的数据源不同步。
+
+第一轮 fix (本 Unreleased 上一个 entry) 用 `cache_key = "model@active_name"`
+试图让 prompt 在切换时重算 → 仍**没有**解决根本问题:active_name 改变
+时,如果新一次 LLM 调用走的是同一个 agent 实例的缓存路径,prompt 还是会
+用缓存的老值(缓存不是永远 100% miss)。
+
+### Changed (第三轮重构 · 2026-06-29)
+
+把"当前驱动模型信息"从"prompt 字符串里的死字面量"挪到"每次 LLM 调用前
+实时注入的 middleware",从根上消除缓存滞留。
+
+- **`nexus/backend/middleware/dynamic_identity.py`** (新增,121 行):
+  - `dynamic_identity_middleware` 用 LangChain `@wrap_model_call` 装饰器
+    实现,挂在 `create_deep_agent(middleware=[..., dynamic_identity_middleware])`
+  - `wrap_model_call` 钩子每次 LLM 调用前**实时**调
+    `get_active_model_info()` 读 `~/.nexus/models.json`,把
+    `[FACT · 当前驱动模型 · 运行时实时注入]` 块 prepend 到
+    `request.system_message.content` 的最前面
+  - **async 签名**:deepagents 的 `agent.astream(...)` 走 async 路径,同步
+    `wrap_model_call` 在 async 上下文里会抛 `NotImplementedError:
+    Asynchronous implementation of awrap_model_call is not available`
+    (E2E 2026-06-29 暴露)。函数用 `async def`,装饰器自动注册
+    `awrap_model_call`
+  - **不**缓存 FACT 块字符串 —— 缓存就是 bug 来源。每次都重算。
+  - `system_message` 为 `None` 的防御性分支(理论上不会触发,只兜底)
+
+- **`nexus/backend/agent.py::_build_system_prompt` 改写**:
+  - 删 `[FACT · 当前驱动模型]` 块(由 middleware 注入,不在这里拼)
+  - 删 `当前驱动模型: {driver_name}` 这类 hardcode(在【身份】段)
+  - 加 `【驱动模型信息 · 由 middleware 注入】` 段,告诉 LLM "FACT 块
+    来自 DynamicIdentityMiddleware,直接用里面的 name / vendor 答"
+  - 删所有 `{driver_name}` / `{driver_vendor}` f-string 插值,函数
+    **与激活模型完全无关**
+
+- **`nexus/backend/agent.py::get_system_prompt` 缓存简化**:
+  - `_CACHED_PROMPT` 从 `dict[str, str]` (key = `model_name@active_name`)
+    改为单 bucket (`_CACHED_PROMPT["__default__"]`)
+  - 旧方案的 `model@active_name` 维度是为了"切模型时强制重算 prompt";
+    现在 FACT 已不在 prompt 字符串里 → 缓存滞留问题从根上消失,
+    不需要分桶
+
+- **`nexus/backend/agent.py::create_agent` middleware 挂载**:
+  - `middleware=[quality_gate]` → `middleware=[quality_gate, dynamic_identity_middleware]`
+  - dynamic_identity 在 LLM 调用**前** mutate system_message(quality_gate
+    只拦截 tool_call,顺序无影响)
+
+- **`nexus/backend/middleware/__init__.py`** (新增):包级 docstring 说明
+  这个包存在的原因(middleware 拿不到 graph state,只能改 ModelRequest
+  再透传;middleware 之间互不耦合,各跑各的)
+
+### Added
+
+- **`tests/test_agent_memory.py::TestBuildSystemPromptIsModelAgnostic`**
+  (5 个测试):验证 `_build_system_prompt` 输出与激活模型无关 —
+  - `test_prompt_does_not_bake_active_model_name` — prompt 不应再含具体模型名
+  - `test_prompt_mentions_middleware_fact_block` — prompt 必须说明 FACT 块由 middleware 注入
+  - `test_prompt_mentions_get_model_info_tool` — 工具仍然注册
+  - `test_prompt_is_model_independent` — 切换 active model 后 prompt **完全不变**
+  - `test_other_rules_kept` — 重构后产品层规则段保留
+- **`tests/test_agent_memory.py::TestDynamicIdentityMiddleware`** (3 个测试):
+  - `test_middleware_injects_fact_block_with_active_model` — 系统消息 prepend FACT 块
+  - `test_middleware_reads_models_json_freshly` — 切换 active model 后**下次调用立即反映**
+  - `test_middleware_handles_missing_active_model` — 无 active 模型时走降级措辞
+- **`tests/test_agent_memory.py::TestCreateAgentWiresDeepAgentsMemory::test_middleware_kwarg_contains_dynamic_identity`** —
+  契约:dynamic_identity_middleware 必须出现在 `create_deep_agent` 的
+  `middleware=` 列表里(破了 → LLM 收不到 FACT → 串味回归)
+
+### Verified
+
+- `ruff check nexus/`:All checks passed
+- `ruff format --check nexus/`:0 diff
+- `pytest tests/test_agent_memory.py`:22 passed
+- `pytest tests/`:549 passed, 12 skipped, 2 failed(基线 537 + 新 12 测试,
+  零回归。2 失败全在 `tests/test_e2e_features.py`,需要 backend 跑起来 +
+  真实 LLM API key,pre-existing 基础设施依赖,跟本次改动无关)
+- E2E WS(同 server 实例,不重启):
+  - active = agnes-2.0-flash → LLM 答 "我是 Nexus,由 agnes-2.0-flash 驱动 ... agnes-2.0-flash 由 agnes-ai 提供"
+  - 改 models.json 切到 MiniMax-M3 → 下一轮 LLM 答 "我是 Nexus,由 MiniMax-M3 驱动 ... MiniMax-M3 由 MiniMax 提供"
+  - **不重启 backend、不重建 agent**,回答立即反映新值,UI 标题栏永远一致
+
+### Notes
+
+- **为什么必须 async**:`@wrap_model_call` 装饰器会根据被装饰函数是
+  sync 还是 async 自动注册 `wrap_model_call` 或 `awrap_model_call`。
+  deepagents 的 `agent.astream()` 走 async 路径,如果只提供 sync 版本,
+  第一次 LLM 调用会抛 `NotImplementedError`,ResilientRunnable 重试 2 次
+  后给用户报 "重试 2 次后仍失败: NotImplementedError: Asynchronous ..."。
+  函数改 `async def` 之后,装饰器只注册 `awrap_model_call`,无副作用。
+- **数据流单一性**:`models.json` 仍然是唯一权威。middleware 在每次
+  LLM 调用前重读一次,纯 IO 是 `json.loads(6KB)`,< 1ms,可忽略。
+- **不再需要 `cache_key = "model@active_name"`**:这种 cache 维度是
+  第二轮的妥协方案,本质是把"动态数据"塞进"静态缓存"的反模式。
+  现在的架构是"prompt 字符串 = 静态,FACT 块 = 动态注入",从根本上
+  让两层数据各走各的路径,缓存问题不存在了。
+
+---
+
 ## [Unreleased] — 模型身份改用实时注入(不再硬编码,不再瞎答训练记忆)
 
 ### Problem

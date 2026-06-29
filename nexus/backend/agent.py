@@ -30,75 +30,61 @@ logger = logging.getLogger(__name__)
 
 
 def _build_system_prompt(model_name: str = "") -> str:
-    """构建系统提示词。
+    """构建系统提示词的**静态部分** —— 与模型无关的产品层规则。
 
-    身份 / 思考格式 / 禁止事项等"产品层规则"由本函数硬编码（对标 OpenClaw 的
-    "产品身份不暴露给用户"原则 —— **绝对不能**靠 ``~/.nexus/AGENTS.md``
-    注入,否则用户可篡改身份)。
+    重要设计变更(2026-06-29 第三轮重构):
+      旧版本把"当前驱动模型 = X"硬编码进 prompt 字符串,**在 ``create_agent``
+      阶段只跑一次**。当用户从 UI / 命令行 / 第三方工具改 ``models.json``
+      切换激活模型时,已经构造好的 agent 内部 system_prompt **不会**自动
+      更新 → 标题栏(``/api/model`` 端点读 models.json)和 LLM 自报身份
+      不一致(E2E 2026-06-29 真实 bug,用户反馈"标题显示 MiniMax-M3,
+      LLM 答 agnes-2.0-flash")。
 
-    用户级长期偏好（``~/.nexus/AGENTS.md``）由 deepagents
-    :class:`MemoryMiddleware` 加载,以 ``<agent_memory>...</agent_memory>``
-    段注入 system prompt —— 与本函数输出**并存**,互不冲突。
+      修正方案:
+        - 本函数**不再**拼"当前驱动模型"相关字符串,只输出产品层稳定规则
+          (身份 / 思考格式 / 澄清规则 / 安全 / 禁止事项)。
+        - "当前驱动模型 = ?" 由 :class:`DynamicIdentityMiddleware` 在
+          **每次 LLM 调用前**实时读 ``~/.nexus/models.json`` 注入到
+          ``request.system_message`` 的最前面(``wrap_model_call`` 钩子)。
+        - 这样切模型后下一轮 LLM 调用**立即**反映新值,UI 和 LLM 永远一致。
 
     Args:
-        model_name: **保留参数仅为向后兼容**。真实"驱动模型"信息**不**依赖
-            这个字符串参数,而是在函数执行时**实时**调
-            :func:`nexus.backend.models_config.get_active_model_info`
-            从 ``~/.nexus/models.json`` 读取。
+        model_name: **保留参数仅为向后兼容**,实际不影响本函数输出。早期版本
+            缓存按 ``model_name`` 分桶;现在 FACT 块由 middleware 注入,缓存
+            key 简化为 ``"__default__"``,整个进程一份即可。
 
-            WHY 双重注入(2026-06-29 三轮迭代后的最终方案):
-              - **第一防线**:系统 prompt 顶部 ``[FACT · 当前驱动模型]`` 块
-                实时拼入 ``get_active_model_info()`` 返回的 ``name`` / ``vendor``。
-                LLM 收到 system prompt 时就已经**有**真实数据,即使不调工具
-                也不会瞎答"Qwen/Claude"这种训练记忆里有的错误答案。
-              - **第二防线**:LLM 还可以主动调 ``get_model_info`` 工具(每次
-                调用都重新读 ``models.json``),用于"展示当前真实数据" /
-                "调试:用户报告模型没切换"等场景。
-            之前尝试(纯 prompt 引导"必须先调工具")在 E2E 验证里
-            LLM 仍然不调,直接瞎答 → 失败。现在改用"prompt 已含真实值"
-            + 工具双保险,LLM 想答错都难。
-
-            切换模型后,缓存机制 ``_CACHED_PROMPT`` 按 model_name 分桶,新
-            model 第一次构造会重算 prompt(读最新 models.json)。
+    Returns:
+        与激活模型无关的 system prompt 字符串。
     """
-    # 实时读 ~/.nexus/models.json — 单一数据源
-    from .models_config import get_active_model_info
-
-    info = get_active_model_info()
-    if info and info.get("name"):
-        driver_name = info["name"]
-        driver_vendor = info.get("vendor", "未知厂商")
-    else:
-        # 无激活模型 → 走降级措辞(绝不编造模型名)
-        driver_name = "未配置模型"
-        driver_vendor = "未知厂商"
-
-    identity = f"""【FACT · 当前驱动模型 · 系统自动注入】
-- name: `{driver_name}`(运行时实时读 `~/.nexus/models.json`)
-- vendor: `{driver_vendor}`(从 api_base URL 自动推断)
-- 数据是**活的** —— 切换模型后下一轮 LLM 调用会自动反映新值
-
-**这条 FACT 由系统注入,不是 prompt 模板里写的死字符串**。
-回答"你用的什么模型"等身份问题时,**直接使用上述 `name` / `vendor` 值**,
-不要凭训练记忆瞎答(LLM 训练数据里的"Qwen/Claude/MiniMax-M3"在这里不权威)。
-
-【身份】
+    identity = """【身份】
 你是 Nexus,夜小白科技有限公司打造的 AI 智能助理。
 - 名字:Nexus
 - 开发者:夜小白科技有限公司
-- 当前驱动模型: `{driver_name}`(由 `{driver_vendor}` 提供)
 - 定位:个人智能助理,本地常驻 gateway + 多 IM 通道连接(对标 OpenClaw)
+
+【驱动模型信息 · 由 middleware 注入】
+**你每次收到 system prompt 时,最顶部会被 ``DynamicIdentityMiddleware``
+注入一段 ``[FACT · 当前驱动模型 · 运行时实时注入]`` 块**。该块包含
+``name`` / ``vendor`` 两个字段,**直接来自 ``~/.nexus/models.json``
+的 is_active=true 那条记录**。
+
+回答"你用的什么模型"等身份问题时:
+  1. **必须**使用上述 FACT 块里系统注入的 ``name`` / ``vendor`` 值。
+  2. **禁止**凭训练记忆瞎答(LLM 训练数据里的"Qwen/Claude/MiniMax-M3"
+     等默认回答**在这里全部不权威**)。
+  3. 标准话术:
+     > 我是 Nexus,由 {name} 驱动。Nexus 是夜小白科技有限公司基于
+     > {name} 模型打造的 AI 智能助理。{name} 由 {vendor} 提供。
+     其中 ``{name}`` / ``{vendor}`` 替换为 FACT 块里的实际值。
+  4. 如果 FACT 块里 name="未配置模型",明确告诉用户"当前没有激活的模型,
+     请到模型设置里选一个",**不要**瞎编一个名字。
 
 【回答规则 · 强约束】
 1. 你是 Nexus —— 不是 Cline、Claude 或任何其他 AI
-2. **被问"你是谁 / 你叫什么 / 你用的什么模型"时,直接用上面 FACT 块里的
-   `name` / `vendor` 拼下面话术回答**(prompt 里已经有真实值,不需要
-   再调工具,除非用户明确问"给我看实时数据"):
-   > 我是 Nexus,由 {driver_name} 驱动。Nexus 是夜小白科技有限公司基于
-   > {driver_name} 模型打造的 AI 智能助理。{driver_name} 由 {driver_vendor} 提供。
-3. 用中文回答 —— 用户用中文提问就用中文
-4. 简洁直接 —— 不要过度铺垫或寒暄
-5. 使用思考标签 —— 所有思考过程必须用 <thinking>...</thinking> 标签包裹,标签内不要包含其他 XML 标签
+2. 用中文回答 —— 用户用中文提问就用中文
+3. 简洁直接 —— 不要过度铺垫或寒暄
+4. 使用思考标签 —— 所有思考过程必须用 <thinking>...</thinking> 标签包裹,标签内不要包含其他 XML 标签
+5. **自报身份时严格依据 FACT 块**(见上),不要凭训练记忆
 
 【思考输出格式】
 **硬性要求!严格遵守!**
@@ -126,11 +112,11 @@ def _build_system_prompt(model_name: str = "") -> str:
 【绝对禁止 · 自报身份错误措辞】
 回答"你是谁 / 你叫什么 / 你用的什么模型"时,**绝对禁止**使用以下任一措辞
 (LLM 训练记忆里常见的错误版本,会让用户觉得 AI 在瞎答):
-- ✗ "由 MiniMax 公司开发" → 训练记忆里 MiniMax 是默认,跟当前 driver_name 无关
+- ✗ "由 MiniMax 公司开发" → 训练记忆里 MiniMax 是默认,跟 FACT 块的 name 无关
 - ✗ "由 Claude 开发" / "由 GPT 开发" / "由 Qwen 开发" → 同上
 - ✗ 任何**跟 FACT 块里 `name` / `vendor` 不一致**的版本
 
-唯一允许的来源:FACT 块里系统注入的 `name` / `vendor`(或 LLM 主动调
+唯一允许的来源:FACT 块里 middleware 注入的 `name` / `vendor`(或 LLM 主动调
 `get_model_info` 工具拿到的值,这俩应当一致)。"""
 
     security = """【安全规则】
@@ -162,6 +148,7 @@ ask_user 会暂停当前回合,前端弹出结构化澄清表单(候选项 / 自
 - 闲聊 → 自然对话即可"""
 
     return "\n\n".join([identity, clarification_rule, security])
+
 
 _CACHED_PROMPT: dict[str, str] = {}
 
@@ -247,50 +234,40 @@ def get_llm(
 
 
 def get_system_prompt(model_name: str = "") -> str:
-    """获取系统提示词（带缓存,按 ``model_name`` 分桶）。
+    """获取系统提示词（带缓存,单 bucket)。
 
-    WHY 分桶:
-      Nexus 助理在切换模型(``POST /api/models/switch``)时,旧 agent 实例
-      持有旧 ``system_prompt``,LLM 身份段还是上一个模型名;必须按
-      ``model_name`` 区分缓存键,避免切换瞬间串味。
+    WHY 单 bucket:
+      2026-06-29 第三轮重构后,``_build_system_prompt`` 输出的字符串**与激活
+      模型无关**(FACT 块由 :class:`DynamicIdentityMiddleware` 在每次 LLM
+      调用前实时注入)。不同 model_name / 不同 active model 拼出来的字符串
+      完全一致 → 不需要分桶,一份缓存覆盖所有场景。
 
-    2026-06-29 更新:cache key 同时包含 ``model_name`` 和"active model
-    info 快照",这样切换激活模型后,即便 model_name 字符串没变,新激活
-    模型第一次构造时也会重新读 ``models.json`` —— **避免缓存滞留**。
-    具体做法:key 形如 ``"{model_name}@{active_name}"``。
+      这是相对第二轮的简化:第二轮 cache key 是 ``"model@active_name"``,
+      目的是"切模型时强制重算 prompt 让新 prompt 里的 FACT 反映新模型";
+      现在 FACT 已经从 prompt 字符串里移走,缓存滞留问题从根上消失。
 
     Args:
-        model_name: 当前驱动 LLM 的模型名;与 :func:`_build_system_prompt`
-            同义。
+        model_name: **保留参数仅为向后兼容**,不再影响缓存键。
 
     Returns:
-        该 ``model_name`` 对应的 system prompt 字符串(空字符串时也合法,
-        与 ``_build_system_prompt("")`` 等价)。
+        与激活模型无关的 system prompt 字符串(单 bucket 缓存)。
     """
     global _CACHED_PROMPT
-    # 把"激活模型名"也纳入 cache key(2026-06-29 实时注入重构后必要)
-    from .models_config import get_active_model_info
-
-    active = get_active_model_info()
-    active_name = active.get("name", "") if active else ""
-    cache_key = f"{model_name or '__default__'}@{active_name}"
-    cached = _CACHED_PROMPT.get(cache_key)
+    cached = _CACHED_PROMPT.get("__default__")
     if cached is None:
         cached = _build_system_prompt(model_name)
-        _CACHED_PROMPT[cache_key] = cached
+        _CACHED_PROMPT["__default__"] = cached
     return cached
 
 
 def reload_system_prompt(model_name: str = "") -> None:
-    """重新加载系统提示词（用于热更新）。
+    """重新加载系统提示词（用于热更新,清空单 bucket 缓存)。
 
-    不传 ``model_name`` 时清空整个缓存(全量失效);传具体值时只清该桶。
+    不传 ``model_name`` 时清空整个缓存(全量失效);传具体值时也清空
+    (现在单 bucket,语义上等价)。
     """
     global _CACHED_PROMPT
-    if not model_name:
-        _CACHED_PROMPT.clear()
-        return
-    _CACHED_PROMPT.pop(model_name, None)
+    _CACHED_PROMPT.clear()
 
 
 def get_project_root() -> Path:
@@ -1010,6 +987,14 @@ def create_agent(
         protected_paths=tuple(str(p) for p in resolve_protected_paths(project_root)),
     )
 
+    # 动态身份 middleware:每次 LLM 调用前**实时**从 ``~/.nexus/models.json``
+    # 读当前 active model,把 ``[FACT · 当前驱动模型]`` 块 prepend 到
+    # ``request.system_message.content`` 的最前面。这是修复 E2E 2026-06-29
+    # "标题栏显示 MiniMax-M3,LLM 答 agnes-2.0-flash" 串味 bug 的核心机制:
+    # 把"FACT 块"从"在 create_agent 时拼字符串"挪到"在每次 LLM 调用前注入",
+    # 单一数据源(models.json),绝无缓存滞留。
+    from .middleware.dynamic_identity import dynamic_identity_middleware
+
     # 上下文自动压缩:由 deepagents 0.6.8 主 agent stack 自动注入
     # ``create_summarization_middleware(model, backend)``,trigger 通过
     # ``ResilientRunnable._resolve_model_profile()`` 暴露的 profile 计算:
@@ -1032,11 +1017,13 @@ def create_agent(
     agent = create_deep_agent(
         model=llm,
         tools=all_tools,
-        # 2026-06-29 重构:不再把 model_name 硬编码进 system prompt 字符串。
-        # LLM 在被问"你用的什么模型"时,会主动调 ``get_model_info`` 工具
-        # 实时读 ``~/.nexus/models.json`` 拿到 name / vendor / api_base。
-        # 这里的 ``model_name`` 参数保留仅为兼容 ``_build_system_prompt`` 老签名,
-        # prompt 内容不再因 model_name 不同而变化(契约更稳)。
+        # 2026-06-29 第三轮重构:``_build_system_prompt`` 输出**与激活模型无关**
+        # 的稳定字符串(身份 / 思考格式 / 澄清 / 安全)。当前激活模型信息由
+        # ``middleware=[..., dynamic_identity_middleware]`` 在每次 LLM 调用
+        # 前实时注入(``wrap_model_call`` 钩子读 ``~/.nexus/models.json``)。
+        # 单一数据源,标题栏(``/api/model``)和 LLM 自报身份永远一致。
+        # ``model_name`` 参数保留仅为兼容 ``get_system_prompt`` 老签名,
+        # 实际不影响 prompt 内容(单 bucket 缓存)。
         # ``model_name`` 为 ``None`` 时回退到 CONFIG["model_name"](跟 get_llm 默认对齐)。
         system_prompt=get_system_prompt(model_name or CONFIG.get("model_name", "")),
         backend=backend,
@@ -1044,7 +1031,13 @@ def create_agent(
         permissions=permissions,
         memory=memory_files,
         store=store,
-        middleware=[quality_gate],
+        # middleware 顺序:dynamic_identity 必须**先**执行(prepend FACT 到
+        # system_message),再让 quality_gate 看到。langchain middleware 列表
+        # 的第一个是最外层 → 它最后执行(对 LLM 而言);但 dynamic_identity
+        # 不拦截 / 改写 LLM 响应,只 mutate system_message,实际效果:
+        # handler 进入 LLM 时,system_message 已经被 dynamic_identity 更新为
+        # 最新值。quality_gate 只关心 tool_call,顺序无关紧要。
+        middleware=[quality_gate, dynamic_identity_middleware],
         checkpointer=checkpointer,
         skills=[
             ".nexus/skills",
