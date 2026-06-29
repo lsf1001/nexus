@@ -157,4 +157,67 @@ PreferenceExporter().export_kto(records, Path('/tmp/kto.jsonl'))
 
 ---
 
-**下次新会话：先 cat 这个文件 + git log --oneline -10，然后问用户下一步（合并 / 文档 / gitignore / 阶段 3）。阶段 1+2 已全部完成并通过真环境验证。**
+## 2026-06-30 后续会话修复实录(本轮增量 4 commit)
+
+> 本节跟踪 2026-06-29 全量代码审查 (`docs/operations/audit-2026-06-29.md`)
+> + DeepAgents-native 重构 (`docs/superpowers/plans/2026-06-29-deepagents-native-refactor.md`)
+> 落地后暴露的 4 类遗留问题。feat/agent-reliability-quality 分支后续已合 main,
+> 以下 4 commit 是本会话的工作。
+
+### 4 个本轮 commit 摘要
+
+| commit | 标题 | 影响 |
+|---|---|---|
+| `f63b9b9` | fix(security): HITL/deny 三态路由 | E2E 5 场景 FAIL → PASS |
+| `ab90c04` | fix(ws): 拆包漏 re-export | 6 测试 AttributeError → PASS |
+| `fc41909` | fix(force_tool): task 类不再强制 patch yandex_search | 死循环根除 |
+| `8400836` | fix(frontend): type strict 报错 4 处 | DMG 构建阻塞消除 |
+
+### 当前状态(2026-06-30)
+
+- **分支**:`main`(28 commits ahead of origin/main)
+- **pytest 基线**:558 passed, 12 skipped in 38.06s(0 回归)
+- **前端 TS strict**:`cd frontend && npx tsc -b --noEmit` 0 错
+- **DMG**:`release/Nexus-1.0.0-arm64.dmg` 已 build + 安装到 /Applications/
+- **HITL E2E**:5 场景 PASS(confirmation_request 帧落地 accept/reject)
+
+### 关键代码路径变化
+
+- **`nexus/backend/middleware/hitl.py`** (新增,~330 行):PathAwareHITLMiddleware,三态路由(protected/HITL/deny 白名单)
+- **`nexus/backend/api/ws/`**:拆包后包层 re-export `add_message`(`__init__.py`),各子模块改 `import db as _db` 模式(monkeypatch-friendly)
+- **`nexus/backend/agent/_agent_builder.py::create_agent` middleware 链**:`[quality_gate, path_aware_hitl, dynamic_identity_middleware, force_tool_mw]`(顺序敏感)
+- **`ForceToolMiddleware(force_intents=("knowledge",))`**:task 类不再被强制 patch(`feedback-no-wrapping-stdlib.md` 不直接相关,但同源"减少误引导"思路)
+
+### 验收命令速查(2026-06-30 更新)
+
+```bash
+# 后端(注意 timeout 防 sqlite lock;APP 跑着时 nexus.runtime 持 nexus.db 写锁)
+.venv/bin/pytest tests/ -q --timeout=60
+
+# 前端 TS strict
+(cd frontend && npx tsc -b --noEmit)
+
+# Lint
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+
+# DMG 构建
+bash scripts/build_dmg.sh
+# 产物:release/Nexus-1.0.0-arm64.dmg (~70MB)
+
+# APP 安装(若有新 build)
+hdiutil attach release/Nexus-1.0.0-arm64.dmg
+cp -R /Volumes/Nexus/Nexus.app /Applications/
+hdiutil detach /Volumes/Nexus
+open /Applications/Nexus.app   # 首次需右键 → 打开(绕 Gatekeeper)
+```
+
+### 不在本轮范围(下次会话可做)
+
+- v0.4 计划:`backend/agent.py` / `frontend/ChatArea.tsx` 仍超 800 行(由重构分块逐文件处理,4 commit 已落,但 ChatArea 是 TBD)
+- `pywebview` 替代 Electron 整体迁移(目前 DMG 仍用 PyInstaller + pywebview,SPEC 已更新)
+- Tier routing 是否需要更多 tier(目前只有 weak / full 两级)
+
+---
+
+**下次新会话:先 cat 本节 `## 2026-06-30 后续会话修复实录` + git log --oneline -10,然后继续 4 个 commit 之前的合并分支工作或 v0.4 计划。**

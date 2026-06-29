@@ -686,3 +686,17 @@ pytest tests/test_ws_minimax_safety.py -v
 | `intent/router.py` 在其它路径被引用 | Task 6 Step 2 grep 后再删,若仍有引用保留为 shim(只 export 空) |
 | ForceToolMiddleware patch tool_call 后 LLM 拿到 tool_result 但仍可能答错 | E2E 验证实际回复质量,不强求 100% 准确率(只验证不再"我是 Nexus..."复读) |
 | 模型切换后 HarnessProfile 没生效 | Task 7 Step 2 真实切模型后跑 minimax E2E 验证 |
+
+---
+
+## 落地后追加修复(2026-06-30,4 commit 增量)
+
+本 plan 的 Acceptance Checklist 全部勾完后,本轮会话执行了 4 个 commit 收尾
+暴露的 4 类遗留问题,均不破坏 plan 原有意图:
+
+- **`f63b9b9` fix(security): HITL/deny 三态路由** — 本 plan 没规划 HITL(走 PermissionsMiddleware 的 `mode="interrupt"` 假设),实际发现 deepagents 0.5.3 不支持 `mode="interrupt"`(被静默忽略)。补 `nexus/backend/middleware/hitl.py::PathAwareHITLMiddleware`,在 `wrap_tool_call` 阶段主动抛 `GraphInterrupt`,WS handler 转 `confirmation_request` 帧。三态: `protected` (AGENTS.md) → quality_gate 透传 / `HITL` (项目源码) → 弹窗 / `deny 白名单` (`.nexus/skills/*`) → 透传。
+- **`ab90c04` fix(ws): 拆包漏 re-export** — `api/ws.py` 拆成 6 模块小包(回 §1.2 单文件 ≤ 800 行),`__init__.py` 漏 `add_message` re-export,6 个测试用 `patch("nexus.backend.api.ws.add_message")` 找不到。各子模块 (`finalize.py` / `streaming.py` / `observability.py`) 改 `from ... import db as _db` 模式(monkeypatch-friendly)。回归测试 `tests/test_ws_package_init.py::test_ws_module_add_message_points_to_db_add_message` 守 `ws.add_message is db.add_message` invariant。
+- **`fc41909` fix(force_tool): task 类不再强制 patch yandex_search** — 本 plan 写了 `force_intents = ("knowledge", "task")`,实际使用中发现 task 类("帮我把 print 写到 nexus/backend/test_human.py")被强制 patch `yandex_search`,LLM 拿到搜索结果不知何用,新一轮"无 tool_call" → 强制再次 patch → 死循环(同 session 16+ 次 patch)。改为 `force_intents = ("knowledge",)`,task 类放行原 LLM 决策。回归测试 `tests/test_force_tool_middleware.py::test_task_intent_no_longer_forced_to_yandex_search` 守不变量。
+- **`8400836` fix(frontend): type strict 报错 4 处** — `ToastHost.tsx` + `useWsConnection.ts` 在 strict TS 下报 TS18048 / TS2741,`cd frontend && npm run build` 走 `tsc -b --noEmit` 校验失败,阻塞 DMG 构建。补 `interface KindColor` 显式声明 + `useWsConnectionResult` 合并 `isTauri` 字段。
+
+WHY 单列"落地后追加修复"小节而不回到原 Task:本 plan 落地后 commit history (`d56cd8e` / `13113f7` / `15e360a` / `182b80c` / `9428f67` / `f63b9b9` / `ab90c04` / `fc41909` / `8400836`) 已固化在 git log,planning 阶段返工成本远高于事后修补。下一轮 v0.4 计划可整体迁到 `PermissionsMiddleware(mode="ask")`(deepagents 0.6.12+ 已稳定支持),届时 PathAwareHITLMiddleware 退役。

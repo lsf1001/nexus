@@ -98,17 +98,43 @@ nexus/                 # 仓库根
 | `CompiledSubAgent` (任意 Runnable) | env-gated | `NEXUS_COMPILED_SUBAGENTS_JSON=[...]` |
 | `SkillsMiddleware` + `SKILL.md` | 默认 | `.nexus/skills/<name>/SKILL.md` |
 | `MemoryMiddleware` + AGENTS.md | 默认 | `make_memory_paths()`(用户级 + 项目级) |
+| `PathAwareHITLMiddleware`(HITL 三态路由) | 默认 | `nexus/backend/agent/_agent_builder.py::create_agent` middleware 链 |
+| `ForceToolMiddleware`(弱模型不调工具反模式) | 默认 | `nexus/backend/middleware/force_tool.py` |
+| `DynamicIdentityMiddleware`(FACT 块实时注入) | 默认 | `nexus/backend/middleware/dynamic_identity.py` |
+| `QualityGateMiddleware`(AGENTS.md 写忠实度拦截) | 默认 | `nexus/backend/quality/middleware.py` |
 
 ⚠️ **execution backend 警告**:LocalShellBackend / LangSmithSandbox / ContextHubBackend 让
 LLM 可以执行 shell / 远程代码。deepagents 0.6.8 的 FilesystemMiddleware 不支持同时配
 permissions 和 execution backend(框架会主动禁用 permissions)。生产建议禁用,
 本地开发 / CI 测试按需开启。
 
+### 中间件链(middleware,顺序敏感,2026-06-29 重构 + 2026-06-30 追加)
+
+`create_deep_agent(middleware=[...])` 的中间件顺序由外到内,langchain 第一个是最外层最后执行:
+
+```
+[quality_gate → path_aware_hitl → dynamic_identity → force_tool]
+```
+
+- **`quality_gate`** — 拦截 AGENTS.md 写入的忠实度评估(配合 `MemoryMiddleware`),对应 `nexus/backend/quality/middleware.py::QualityGateMiddleware`
+- **`path_aware_hitl`** — 路径感知 HITL:**protected**(AGENTS.md 类)透传给 quality_gate;**HITL**(项目源码 / `/tmp` / 全局 `.git/` 等)触发 GraphInterrupt → WS `confirmation_request` 帧;**deny 白名单** (`.nexus/skills/*` 等)直接透传。详见 `nexus/backend/middleware/hitl.py`
+- **`dynamic_identity`** — 每次 LLM 调用前实时读 `~/.nexus/models.json`,把 `[FACT · 当前驱动模型]` 块 prepend 到 `request.system_message.content` 最前面,解决标题栏与 LLM 回答的模型串味
+- **`force_tool`** — knowledge 类问题("BTC 还能涨吗" / "元力股份 能买吗")LLM 第一次响应没调工具时,自动 patch 一个 `yandex_search` tool_call 强制走事实检索;**task 类不再强制**(2026-06-30 收紧,反模式修复)
+
+WHY 走 middleware 不走 permissions:deepagents 0.5.3 不支持 permissions 写入 `mode="interrupt"`(被静默忽略);middleware 是 framework-stable 钩子,跨版本兼容。NEXUS_CONTEXT_WINDOW 等模型默认参数也通过 `HarnessProfile` + `register_tier_profiles()` 注入(弱模型 `_WEAK_SUFFIX` + 强模型 `_FULL_SUFFIX`),不走 middleware 层。
+
 ### WebSocket (main.py)
 
 - `/api/ws` - 实时对话端点
-- 流式响应：`thinking` → `chunk` → `final` → `done`
-- 支持多客户端
+- 流式响应：`thinking` → `chunk` → `confirmation_request`(HITL 路径)→ `final` → `done`
+- 支持多客户端 + 断线重连(resume token)
+- **`ws/` 包结构**(2026-06-30 拆分,回落到 §1.2 单文件 ≤ 800 行):
+  - `__init__.py` — re-export `add_message` / `handle_websocket` 等公开符号,保证 `mock.patch("nexus.backend.api.ws.add_message")` 路径稳定
+  - `connection.py` — WS 鉴权 / 心跳 / 重连 resume
+  - `streaming.py` — 流式 chunk + thinking parser
+  - `finalize.py` — final / done 帧 + add_message 持久化
+  - `observability.py` — intent 分类 / quality score 集成
+- 生产代码用 `from ... import db as _db` 而非 `from ...db import add_message`(monkeypatch-friendly;见 `feedback-monkeypatch-module-state.md`)
 
 ### 微信通道 (channels/wechat.py)
 
@@ -171,7 +197,7 @@ API Key 兼容：`MINIMAX_API_KEY` > `MiniMax_API_KEY` > `ANTHROPIC_AUTH_TOKEN` 
 
 ## 实现说明
 
-最近一轮稳定性修复（已通过 83 项 E2E 验证）：
+最近一轮稳定性修复（已通过 83 项 E2E 验证 + 558 项 pytest 单测）：
 
 - **PRAGMA 启用**：`db.py` 在连接建立时执行 `foreign_keys=ON`、`journal_mode=WAL`、`synchronous=NORMAL`，避免跨表引用失败和断电丢数据
 - **模型配置原子写**：`models_config.save_models()` 走 `tmp + fsync + os.replace` 流程，写失败不污染原文件
@@ -180,7 +206,11 @@ API Key 兼容：`MINIMAX_API_KEY` > `MiniMax_API_KEY` > `ANTHROPIC_AUTH_TOKEN` 
 - **BM25 增量缓存**：`MemoryService` 按 `(id, key, value)` 签名复用分词结果，未变化文档不重算
 - **用户消息去重**：连续相同 `content` 在 2s 内只触发一次 LLM 调用，避免误触重发
 - **WS 跨线程桥接**：流式回调在子线程中通过 `asyncio.run_coroutine_threadsafe` 投递回事件循环，不阻塞通道
+- **HITL 三态路由**(2026-06-30)：`nexus/backend/middleware/hitl.py::PathAwareHITLMiddleware` 在 `wrap_tool_call` 阶段对"非白名单 + 非 protected 写工具"主动抛 `GraphInterrupt`,WS handler 转 `confirmation_request` 帧回放给前端。三态: `protected` (AGENTS.md) → quality_gate 透传 / `HITL` (项目源码) → 弹窗 / `deny 白名单` (`.nexus/skills/*`) → 透传。修复 deepagents `mode="interrupt"` 在 0.5.3 被静默忽略的 5 个 E2E 场景全 FAIL。
+- **ws 包层 re-export**(2026-06-30)：`api/ws/__init__.py` 重新导出 `add_message`,`api/ws/{finalize.py, streaming.py, observability.py}` 改 `from ... import db as _db` 模式。修复 6 个测试 AttributeError + monkeypatch 看不到生产侧对象的隐性 bug。
+- **ForceToolMiddleware `force_intents` 收紧**(2026-06-30)：从 `("knowledge", "task")` 改为 `("knowledge",)`。task 类问题(写代码 / 写文件)由 LLM 自决,knowledge 类(BTC / 元力股份)继续强制 patch `yandex_search`。修复把 task 推上搜索循环的死锁。
+- **前端 TS strict 修复**(2026-06-30)：`ToastHost.tsx` 补 `KindColor` interface + fallback / `useWsConnection.ts` 合并 `isTauri` 字段。修复 `cd frontend && tsc -b --noEmit` 2 类 4 处报错阻塞 DMG 构建。
 
 ---
 
-*最后更新: 2026-06-02*
+*最后更新: 2026-06-30*
