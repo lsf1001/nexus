@@ -151,7 +151,7 @@ class RubricJudge:
             else:
                 scores.append(outcome)
 
-        if all(s.score == 0.0 and "fallback" in s.reasoning for s in scores):
+        if all(s.score == 0.0 and s.reasoning.startswith("\x00FALLBACK\x00") for s in scores):
             raise RubricJudgeError(f"所有 {len(scores)} 个 rubric 评分均失败")
         return scores
 
@@ -351,10 +351,11 @@ def _strip_to_json(content: str) -> str:
 def _fallback_score(rubric_name: str, exc: BaseException) -> Score:
     """当某个 rubric 评分失败时构造 fallback :class:`Score`。
 
-    fallback 的 score 强制为 0.0，reasoning 含失败类型 + 异常信息，
-        evidence 为空 tuple。
+    fallback 的 score 强制为 0.0，reasoning 以 ``\\x00FALLBACK\\x00`` 前缀
+    标记(LLM 不会生成 NUL 字符,可被 RubricJudge.judge 稳定识别),
+    evidence 为空 tuple。
     """
-    reason = f"[fallback] {type(exc).__name__}: {exc}"
+    reason = f"\x00FALLBACK\x00 {type(exc).__name__}: {exc}"
     return Score(
         rubric_name=rubric_name,
         score=0.0,
