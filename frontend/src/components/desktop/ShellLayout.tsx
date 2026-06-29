@@ -4,6 +4,7 @@ import { SettingsView } from './SettingsView';
 import { SetupView } from './SetupView';
 import { Sidebar } from './Sidebar';
 import { SketchLine } from './SketchLines';
+import { ToastHost } from '../ToastHost';
 import { WechatAssistantView } from './WechatAssistantView';
 import { useStore } from '../../store/useStore';
 import type { Conversation } from '../../types';
@@ -75,6 +76,8 @@ export function ShellLayout({
 
       {/* 全局右键菜单浮层(挂在最外层,避免被父级 overflow 切掉) */}
       <ContextMenuHost />
+      {/* 全局 toast 浮层 — 替代散落 console.warn,提示用户"复制失败"等非阻塞问题 */}
+      <ToastHost />
     </div>
   );
 }
