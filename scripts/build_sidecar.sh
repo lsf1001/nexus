@@ -30,6 +30,7 @@ mkdir -p "$ROOT_DIR/release"
   --collect-submodules langchain \
   --collect-submodules mcp \
   --collect-submodules uvicorn \
+  --collect-submodules nexus.backend \
   --hidden-import=uvicorn \
   --hidden-import=nexus.backend.main \
   "$ROOT_DIR/nexus/backend/runtime_main.py"
