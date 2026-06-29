@@ -177,9 +177,14 @@ def create_agent(
     # 2026-06-29 重构:加 ForceToolMiddleware —— 弱模型(MiniMax-M3)问投资
     # 类问题不调 yandex_search,LLM 答非所问。本中间件在 LLM 第一次响应没
     # 调工具时,自动 patch 一个 yandex_search tool_call,强制走事实检索。
+    # 2026-06-30 修正:``force_intents`` 只含 ``knowledge``,不再含 ``task``。
+    # 历史版本("knowledge","task")把"帮我把 print 写到 foo.py"这种 task
+    # 也强制 patch yandex_search → LLM 拿到搜索结果不知何用,又触发新一
+    # 轮无 tool_call → 死循环。task 类工具选择很广(write_file/edit_file
+    # / str_replace_editor 等),由 LLM 自决,避免错误引导。
     from ..middleware.force_tool import ForceToolMiddleware
 
-    force_tool_mw = ForceToolMiddleware(force_intents=("knowledge", "task"))
+    force_tool_mw = ForceToolMiddleware(force_intents=("knowledge",))
 
     agent = create_deep_agent(
         model=llm,
