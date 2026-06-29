@@ -84,8 +84,21 @@ def load_models() -> dict[str, Any]:
     的 ``config.get("models")`` 会报 'list' has no attribute 'get'。
     """
     if not MODELS_FILE.exists():
+        # E2E 2026-06-29 转圈 bug 修复:文件不存在时**返回内存 default,不写盘**。
+        #
+        # 之前这里 ``save_models(default_config)`` 会主动创建空 api_key 的
+        # default-MiniMax-M3 配置并覆盖磁盘 — 后果:
+        #   1. 用户在 UI 切换激活模型后(models.json 含完整 agnes 配置)被覆盖成空 default
+        #   2. _ensure_agent_ready 拿空 api_key,走 CONFIG["minimax_api_key"] fallback
+        #   3. 后续 LLM 走 minimax,与 UI 标题栏不一致 → "转圈"(用户感)
+        #
+        # 修正:**只在内存里给 default 配置,绝不写盘**。磁盘文件的创建走显式路径
+        # (UI 首次添加模型 / 首次 setup / 现有 save_models 调用方)。返回的 default
+        # 故意 ``api_key=""`` — 调用方 (get_active_model → _create_agent_with_model)
+        # 看到空 key 会返 None,agent 不被构造;UI 拉 /api/model 拿到 default 模型名
+        # 但无 key,正常进 "未配置" 提示状态,不静默 fallback 到 minimax 凭据。
         MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        default_config = {
+        return {
             "models": [
                 {
                     "id": "default",
@@ -97,8 +110,6 @@ def load_models() -> dict[str, Any]:
                 }
             ]
         }
-        save_models(default_config)
-        return default_config
 
     try:
         with open(MODELS_FILE) as f:
