@@ -7,6 +7,7 @@ from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool as langchain_tool
 
 from .config import CONFIG
+from .models_config import get_active_model_info
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,41 @@ def list_dir(path: str | None = None) -> str:
     return "\n".join(files)
 
 
+# === 自省工具:get_model_info ===
+# WHY(2026-06-29 重构):之前把当前驱动模型名当字符串塞进 system prompt
+# (``_build_system_prompt(model_name)``),这种"硬编码到 prompt"做法有几个固有问题:
+#   1. 模型切换时若未走 ``POST /api/models/switch`` 重建 agent,prompt 还显示老模型 → 误导
+#   2. vendor / api_base / temperature 等其他元数据塞不进去(塞多了爆 LLM 上下文)
+#   3. 测试契约脆弱:传不传 model_name,产出的 prompt 字符串易不一致
+# 现在 LLM 在被问"你用的什么模型"时主动调本工具 introspect 真实状态;
+# prompt 模板只声明"调 get_model_info 拿实时信息",不再烘焙字符串事实。
+@langchain_tool
+def get_model_info() -> str:
+    """返回当前激活 LLM 的实时元数据(name / vendor / api_base / temperature)。
+
+    **这是 introspect 当前驱动模型的唯一可靠方式**:
+        - 系统提示词不会预写"当前驱动模型 = X",你必须自己读 ``~/.nexus/models.json``
+        - 用户切换模型后,这个工具的返回值会**立刻**反映新模型(每次调用都
+          实时读盘),prompt 字符串做不到这一点
+        - vendor 字段从 ``api_base`` URL 自动推断(MiniMax / agnes-ai / OpenAI / Anthropic)
+
+    使用场景:
+        - 用户问"你用的什么模型" → 先调本工具,再把返回的 ``name`` 拼进回答
+        - 用户问"你是谁 / 你是哪个公司的" → 调本工具拿 ``vendor`` 字段
+        - 调试/排障:用户报告"换了模型没生效" → 调本工具对账
+
+    Returns:
+        JSON 字符串,字段: ``name`` / ``vendor`` / ``api_base`` / ``temperature`` /
+        ``is_active``。无激活模型时返回 ``"{}"``。
+    """
+    import json as _json
+
+    info = get_active_model_info()
+    if not info:
+        return "{}"
+    return _json.dumps(info, ensure_ascii=False)
+
+
 # === 澄清工具 ===
 # 关键设计：ask_user 是一个"被拦截"的工具 —— LLM 调用它的时候,ws.py 会
 # 检测到 on_tool_start 事件,把工具入参(问题/候选项)作为 clarification_request
@@ -156,5 +192,6 @@ TOOLS = [
     wikipedia,
     list_dir,
     ask_user,
+    get_model_info,
 ]
 TOOLS = [t for t in TOOLS if t is not None]

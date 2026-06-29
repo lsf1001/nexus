@@ -79,51 +79,146 @@ class TestBuildSystemPromptHardcodesIdentity:
 
 
 class TestBuildSystemPromptIsModelAware:
-    """``_build_system_prompt`` 必须接受 ``model_name`` 并把"驱动模型"塞进身份段。
+    """``_build_system_prompt`` 不再硬编码 model_name,改为引导 LLM 调 ``get_model_info`` 工具。
 
-    WHY(2026-06-29 bug):
-      用户切到 agnes-2.0-flash 后,Nexus 实际由 agnes 驱动回复。被问"你用的什么
-      模型"时,如果 prompt 还 hardcode 写"你是 Nexus,夜小白科技有限公司开发的
-      AI 智能助理"而没有 model_name,LLM 没有任何线索知道当前驱动模型是 agnes,
-      只能瞎猜 / 退回到训练时的默认(MiniMax-M3)→ 回答自相矛盾。
+    WHY(2026-06-29 重构):
+      之前的 fix 把 model_name 当字符串塞进 system prompt 模板(``f"基于 {driver_label} 打造"``)。
+      这种"硬编码到 prompt"做法有几个固有问题:
+        1. 模型切换若未走 ``POST /api/models/switch`` 重建 agent,prompt 还显示老模型 → 误导
+        2. vendor / api_base / temperature 等其他元数据塞不进去(塞多了爆 LLM 上下文)
+        3. 传不传 model_name 都能让 LLM 误答(传错值或瞎答训练记忆里的默认值)
 
-    契约:
-      - 身份段必须显式提"基于 {model_name} 模型打造",让 LLM introspect 实际驱动
-        模型来回答用户的"你什么模型 / 你是谁"问题。
-      - 不传 model_name / 传空串 → 走兜底默认,不抛(防御性,不阻塞启动)。
+      新契约:prompt 模板**不烘焙** model_name,改为强约束 LLM 调
+      ``get_model_info`` 工具实时 introspect。模型身份变成"运行时事实"而非
+      "字符串常量",切换模型后工具返回值立刻反映新状态 —— 这是用户反馈
+      "应该真实获取模型的信息 而不是硬编码" 的根本修复。
+
+    契约(2026-06-29 重构后):
+      - ``_build_system_prompt`` 接受 ``model_name`` 参数仅为向后兼容,**不**把
+        它写进 prompt 内容(传啥都一样)。
+      - prompt 必须显式指引 LLM 调 ``get_model_info`` 工具获取当前驱动模型
+        (FACT 块 + 回答规则 2 + forbidden 三处冗余)。
+      - 不传 model_name / 传空串 → 走兼容路径,不抛(防御性,不阻塞启动)。
     """
 
-    def test_identity_section_includes_model_name_agnes(self) -> None:
+    def test_prompt_does_not_hardcode_model_name(self) -> None:
+        """prompt 字符串里不应该出现"当前驱动模型 = X"这种硬编码事实。"""
         prompt = _build_system_prompt("agnes-2.0-flash")
-        # 当前驱动模型名必须出现在身份段 —— 用户切到 agnes 后 LLM 才认得自己在 agnes 上跑
-        assert "agnes-2.0-flash" in prompt, (
-            "_build_system_prompt(model_name) 没把 model_name 注入身份段 → "
-            "切换模型后 LLM 不知道自己在哪个模型上跑,会瞎答/minimax 默认。"
-            "这是 2026-06-29 user-feedback bug 的根因。"
+        # 重构后:无论传什么 model_name,prompt 里都不应该出现具体模型名作为
+        # "驱动模型" 事实陈述(应该只出现 "调 get_model_info 拿值" 的指引)。
+        assert "agnes-2.0-flash" not in prompt, (
+            "_build_system_prompt(model_name) 还在把 model_name 硬编码到 prompt → "
+            "这是 2026-06-29 重构要根除的'硬编码'做法。prompt 应当只引导 LLM 调 "
+            "get_model_info 工具,模型身份应当是运行时事实。"
         )
-        # 兜底校验:产品身份段保留
-        assert "夜小白科技有限公司" in prompt
-        assert "Nexus" in prompt
+        assert "MiniMax-M3" not in prompt, (
+            "prompt 里出现 MiniMax-M3 字面量 → 同上,模型名不应作为字符串常量出现在 prompt"
+        )
 
-    def test_identity_section_includes_model_name_minimax(self) -> None:
-        prompt = _build_system_prompt("MiniMax-M3")
-        assert "MiniMax-M3" in prompt
-        assert "夜小白科技有限公司" in prompt
+    def test_prompt_directs_to_get_model_info_tool(self) -> None:
+        """prompt 必须显式指引 LLM 调 ``get_model_info`` 工具。"""
+        prompt = _build_system_prompt()
+        # FACT 块 + 回答规则 2 + forbidden 至少得有一处提到 get_model_info
+        assert "get_model_info" in prompt, (
+            "_build_system_prompt 漏掉 '调 get_model_info 工具' 指引 → "
+            "LLM 不会主动 introspect,被问'你什么模型'时会瞎答训练记忆。"
+        )
+        # 强约束关键词:LLM 看到这些词才能理解"必须先调工具再答"
+        assert "实时" in prompt or "运行时" in prompt, (
+            "prompt 没强调模型身份是'运行时事实' → LLM 容易把 prompt 里的占位提示当成建议忽略"
+        )
 
-    def test_identity_section_changes_with_model_name(self) -> None:
-        """同一函数,两个 model_name → 两个不同 prompt(model_name 必须真影响输出)。"""
+    def test_prompt_does_not_depend_on_model_name_param(self) -> None:
+        """重构后,prompt 内容不应随 model_name 变化(避免无意义的契约面)。"""
+        prompt_default = _build_system_prompt("")
         prompt_agnes = _build_system_prompt("agnes-2.0-flash")
         prompt_minimax = _build_system_prompt("MiniMax-M3")
-        assert prompt_agnes != prompt_minimax, (
-            "两个 model_name 产出同一个 prompt → model_name 没真影响生成逻辑,签名加 model_name 参数等于挂羊头卖狗肉"
+        # 重构后:传啥都一样 — model_name 不再参与 prompt 模板拼接
+        assert prompt_default == prompt_agnes == prompt_minimax, (
+            "重构后 _build_system_prompt 应该不区分 model_name → "
+            "三个不同 model_name 产出三个不同 prompt 说明仍在拼接字符串事实"
         )
 
     def test_other_rules_kept_when_model_name_provided(self) -> None:
-        """加 model_name 参数后,其他规则段不能丢。"""
+        """重构后,其他规则段不能丢。"""
         prompt = _build_system_prompt("agnes-2.0-flash")
         assert "<thinking>" in prompt
         assert "【主动澄清规则】" in prompt
         assert "【安全规则】" in prompt
+        # 产品身份段保留
+        assert "夜小白科技有限公司" in prompt
+        assert "Nexus" in prompt
+
+
+class TestGetModelInfoToolRegistered:
+    """``get_model_info`` 工具必须在 ``TOOLS`` 列表里注册,LLM 才能调到。
+
+    WHY:2026-06-29 重构后,prompt 引导 LLM 调此工具 introspect 真实驱动模型。
+    工具如果没注册到 TOOLS,deepagents 不会把它暴露给 LLM,prompt 指引形同虚设。
+    """
+
+    def test_get_model_info_in_tools(self) -> None:
+        from nexus.backend.tools import TOOLS
+
+        tool_names = {t.name for t in TOOLS}
+        assert "get_model_info" in tool_names, (
+            "get_model_info 工具未注册到 TOOLS → deepagents 不会把它暴露给 LLM,"
+            "prompt 里的 '调 get_model_info' 指引形同虚设。"
+        )
+
+    def test_get_model_info_tool_returns_live_data(self, tmp_path, monkeypatch) -> None:
+        """``get_model_info`` 工具调用应该实时读 ``~/.nexus/models.json``,返回 active 模型。"""
+        import json
+
+        from nexus.backend import models_config
+
+        fake_models = {
+            "models": [
+                {
+                    "id": "fake-minimax",
+                    "name": "MiniMax-M3",
+                    "api_key": "x",
+                    "api_base": "https://api.minimaxi.com/v1",
+                    "temperature": 0.7,
+                    "is_active": False,
+                },
+                {
+                    "id": "fake-agnes",
+                    "name": "agnes-2.0-flash",
+                    "api_key": "x",
+                    "api_base": "https://apihub.agnes-ai.com/v1",
+                    "temperature": 0.5,
+                    "is_active": True,
+                },
+            ]
+        }
+        # 替换 models_config 的 MODELS_FILE 路径(只在本测试里)
+        monkeypatch.setattr(models_config, "MODELS_FILE", tmp_path / "models.json")
+        (tmp_path / "models.json").write_text(json.dumps(fake_models), encoding="utf-8")
+
+        from nexus.backend.tools import get_model_info
+
+        result = get_model_info.invoke({})
+        payload = json.loads(result)
+        # 工具必须返回 active 模型的真实信息(实时读盘,不读老 cache)
+        assert payload["name"] == "agnes-2.0-flash"
+        assert payload["vendor"] == "agnes-ai", (
+            f"vendor 推断错误,期望 agnes-ai,实际 {payload['vendor']} → "
+            "infer_vendor 解析 api_base 出错,LLM 答'哪个公司提供的'时会答错"
+        )
+        assert payload["api_base"] == "https://apihub.agnes-ai.com/v1"
+        assert payload["temperature"] == 0.5
+
+    def test_infer_vendor_minimax(self) -> None:
+        from nexus.backend.models_config import infer_vendor
+
+        assert infer_vendor({"api_base": "https://api.minimaxi.com/v1"}) == "MiniMax"
+        assert infer_vendor({"api_base": "https://apihub.agnes-ai.com/v1"}) == "agnes-ai"
+        assert infer_vendor({"api_base": "https://api.openai.com/v1"}) == "OpenAI"
+        assert infer_vendor({"api_base": "https://api.anthropic.com/v1"}) == "Anthropic"
+        # 未知 / 缺字段 → 走兜底,不抛
+        assert infer_vendor({}) == "未知厂商"
+        assert "未知厂商" in infer_vendor({"api_base": "https://example.com/v1"})
 
 
 class TestCreateAgentWiresDeepAgentsMemory:

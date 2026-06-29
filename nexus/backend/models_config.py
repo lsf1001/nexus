@@ -1,14 +1,80 @@
+"""``~/.nexus/models.json`` 读写原语 + vendor 推断。
+
+健壮性:
+  - 缺文件 → 写入默认 MiniMax-M3 占位
+  - 裸 list / 缺 models 键 → 规范化成 ``{"models": [...]}``
+  - 原子写:临时文件 + ``os.replace``
+"""
+
 import json
 import os
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 # 模型配置文件路径。优先级:NEXUS_HOME 环境变量 > ~/.nexus/models.json。
 # WHY:NEXUS_HOME 由 Tauri 桌面端 / 测试 fixture 显式设置,把数据目录和系统 home
 # 解耦(避免污染用户 home);desktop install 路径必须可移植,不能假设 macOS user
 # home 即可。CI Playwright 也通过 NEXUS_HOME 隔离,修 2026-06-28 27 spec 全 fail。
 MODELS_FILE = Path(os.environ.get("NEXUS_HOME") or Path.home()) / ".nexus" / "models.json"
+
+
+# 域名 → 厂商名映射,只覆盖 Nexus 实际可能接入的 vendor。
+# WHY hardcode 这层映射:
+#   models.json schema 只有 ``api_base`` URL(无 vendor 字段),真实从 LLM
+#   那里拿不到厂商名;LLM 被问"你用的什么模型"时,需要 introspect 真实厂商
+#   (MiniMax / agnes-ai / OpenAI / Anthropic),不能瞎猜。
+#   域名是稳定锚点 — MiniMax / agnes-ai 都不会轻易换主域。
+_VENDOR_BY_HOST: dict[str, str] = {
+    "apihub.agnes-ai.com": "agnes-ai",
+    "api.minimaxi.com": "MiniMax",
+    "api.openai.com": "OpenAI",
+    "api.anthropic.com": "Anthropic",
+}
+
+
+def infer_vendor(model: dict[str, Any]) -> str:
+    """从 model dict 的 ``api_base`` URL 推断厂商名。
+
+    Args:
+        model: 单条模型配置,需含 ``api_base``(URL 字符串)。
+
+    Returns:
+        厂商名(``"MiniMax"`` / ``"agnes-ai"`` / ``"OpenAI"`` / ``"Anthropic"``
+        等)。无法识别时回退到 ``"未知厂商"`` —— 绝不抛,因为 tool 调用方
+        容错性优先,LLM 用空字符串能答"未知厂商"也比崩掉好。
+    """
+    api_base = (model.get("api_base") or "").strip()
+    if not api_base:
+        return "未知厂商"
+    try:
+        host = (urlparse(api_base).hostname or "").lower()
+    except ValueError:
+        return "未知厂商"
+    if not host:
+        return "未知厂商"
+    return _VENDOR_BY_HOST.get(host, f"未知厂商({host})")
+
+
+def get_active_model_info() -> dict[str, Any]:
+    """返回当前激活模型的完整 info,供 LLM 工具调用时 introspect。
+
+    Returns:
+        ``{name, vendor, api_base, temperature, is_active}``;无激活模型时
+        返回空 dict(让 LLM 端 fallback 报"未配置模型")。
+    """
+    model = get_active_model()
+    if not model:
+        return {}
+    return {
+        "name": model.get("name", ""),
+        "vendor": infer_vendor(model),
+        "api_base": model.get("api_base", ""),
+        "temperature": model.get("temperature"),
+        "is_active": model.get("is_active", False),
+    }
+
 
 
 def load_models() -> dict[str, Any]:
