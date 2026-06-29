@@ -249,12 +249,13 @@ if frontend_path:
 
 
 @app.get(f"{API_PREFIX}/")
-async def root():
+async def root() -> dict[str, str]:
+    """API 根端点,返回服务基本信息(版本 / 运行状态)。"""
     return {"message": "Nexus Backend", "version": "1.0.0", "status": "running"}
 
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> dict[str, Any]:
     """健康检查端点（供 Docker 和外部监控使用）。"""
     return {
         "status": "healthy",
@@ -264,7 +265,7 @@ async def health_check():
 
 
 @app.get(f"{API_PREFIX}/context", dependencies=[Depends(require_token)])
-async def get_context_info():
+async def get_context_info() -> dict[str, Any]:
     """获取上下文窗口使用信息。
 
     返回：
@@ -291,7 +292,7 @@ async def get_context_info():
 
 
 @app.post(f"{API_PREFIX}/context/compact", dependencies=[Depends(require_token)])
-async def trigger_compact():
+async def trigger_compact() -> dict[str, Any]:
     """手动触发上下文压缩（类似 Claude Code 的 /compact）。
 
     注意：当前实现由前端控制，实际压缩由 SummarizationMiddleware
@@ -304,7 +305,7 @@ async def trigger_compact():
 
 
 @app.get(f"{API_PREFIX}/model", dependencies=[Depends(require_token)])
-async def get_model_info():
+async def get_model_info() -> dict[str, Any]:
     """获取当前激活的模型信息。"""
     active = get_active_model()
     if active:
@@ -435,7 +436,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 @app.post(f"{API_PREFIX}/channels/wechat/qr", dependencies=[Depends(require_token)])
-async def wechat_qr_login(request: Request):
+async def wechat_qr_login(request: Request) -> dict[str, Any]:
     """获取微信登录二维码"""
     from .channels.wechat_login import wechat_qr_login as do_qr_login
 
@@ -448,7 +449,7 @@ async def wechat_qr_login(request: Request):
 
 
 @app.get(f"{API_PREFIX}/channels/wechat/status/{{session_key}}", dependencies=[Depends(require_token)])
-async def wechat_qr_status(request: Request, session_key: str, timeout_ms: int = 10000):
+async def wechat_qr_status(request: Request, session_key: str, timeout_ms: int = 10000) -> dict[str, Any]:
     """获取微信登录二维码状态"""
     from .channels.wechat_login import wait_qr_scan
 
@@ -461,7 +462,7 @@ async def wechat_qr_status(request: Request, session_key: str, timeout_ms: int =
 
 
 @app.get(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
-async def wechat_bind_status(request: Request):
+async def wechat_bind_status(request: Request) -> dict[str, Any]:
     """获取微信绑定状态"""
     from .channels.base import ChannelType
     from .channels.wechat_account import (
@@ -487,7 +488,7 @@ async def wechat_bind_status(request: Request):
 
 
 @app.post(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
-async def wechat_do_bind(request: Request):
+async def wechat_do_bind(request: Request) -> dict[str, Any]:
     """绑定微信账号:从已有账号恢复,或要求重新扫码。"""
     from .channels.base import ChannelConfig, ChannelType
     from .channels.wechat_account import (
@@ -531,7 +532,7 @@ async def wechat_do_bind(request: Request):
 
 
 @app.delete(f"{API_PREFIX}/channels/wechat/bind", dependencies=[Depends(require_token)])
-async def wechat_unbind(request: Request):
+async def wechat_unbind(request: Request) -> dict[str, bool]:
     """解除微信绑定"""
     from .channels.base import ChannelType
 
@@ -543,7 +544,7 @@ async def wechat_unbind(request: Request):
 
 
 @app.get(f"{API_PREFIX}/channels", dependencies=[Depends(require_token)])
-async def get_channels(request: Request):
+async def get_channels(request: Request) -> dict[str, list[dict[str, Any]]]:
     """获取所有通道状态"""
     from .channels import ChannelRegistry
 

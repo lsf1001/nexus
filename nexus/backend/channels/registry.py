@@ -77,6 +77,7 @@ class ChannelRegistry:
         logger.info(f"Channel stopped: {channel_id}")
 
     def get(self, channel_id: str) -> Channel | None:
+        """按 channel_id 取已注册 Channel,不存在返回 None。"""
         return self._channels.get(channel_id)
 
     def get_active_by_type(self, ch_type: ChannelType) -> Channel | None:
@@ -88,9 +89,11 @@ class ChannelRegistry:
         return None
 
     def list_all(self) -> list[Channel]:
+        """列出所有已注册 Channel 实例(包含 RUNNING / STARTING / STOPPED)。"""
         return list(self._channels.values())
 
     async def stop_all(self) -> None:
+        """停掉所有 Channel,通常用于后端关闭 / 测试 teardown。"""
         for cid in list(self._channels.keys()):
             await self.stop_channel(cid)
 

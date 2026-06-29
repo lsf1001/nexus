@@ -51,11 +51,27 @@ class Gateway:
         self._broadcasts: dict[ChannelType, Callable[[ChannelMessage], Awaitable[None]]] = {}
 
     def register_channel(self, ch: Channel) -> None:
+        """注册一个 Channel 实例:绑定 gateway 反向引用,加入路由表。
+
+        Channel 启动时调用,之后此 gateway 即可向其下发 ``send_message``。
+
+        Args:
+            ch: 待注册的 Channel 实例。
+        """
         ch.bind_gateway(self)
         self._channels[ch.config.channel_id] = ch
         logger.info(f"Channel registered: {ch}")
 
     async def unregister_channel(self, channel_id: str) -> None:
+        """注销 Channel:停止实例 + 清理 session→channel 反向索引。
+
+        Channel 主动停用或路由表需要动态剔除时调用。已不存在的 id 是 noop。
+        会清理绑定到该 channel 的所有 session→channel 映射,避免重启后
+        session 仍指向已下线的 channel。
+
+        Args:
+            channel_id: Channel 配置中的唯一标识(``ChannelConfig.channel_id``)。
+        """
         async with self._lock:
             ch = self._channels.pop(channel_id, None)
             if ch is None:
@@ -78,6 +94,20 @@ class Gateway:
         self._broadcasts[ch_type] = fn
 
     async def route_message(self, msg: ChannelMessage) -> None:
+        """IM 消息中央路由:从收到 → agent 回复 → 回传 + 广播。
+
+        流程:
+          1. 空消息直接丢弃(微信有时推送系统通知等无效 payload);
+          2. ``_get_or_create_session`` 拿到 session_id(同 user 复用);
+          3. 持久化 user 消息;
+          4. 调 agent 拿回复;Agent 异常走 ``_send_error``;
+          5. 持久化 assistant 回复;
+          6. 调 channel.send_message 把回复发回 IM;
+          7. 广播给 WS 客户端(前端"channel_message"帧)。
+
+        Args:
+            msg: 从 Channel 投递过来的消息,含 channel_id / user_id / content。
+        """
         try:
             if not msg.content:
                 logger.warning(f"Empty message content from {msg.channel_id}")
