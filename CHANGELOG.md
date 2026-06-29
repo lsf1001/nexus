@@ -5,6 +5,153 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [Unreleased] — DeepAgents 框架对齐:删除自造 QualityPipeline / IntentClassifier,引入 ForceToolMiddleware + tier_routing
+
+### Problem
+
+2026-06-29 用户反馈:**完全基于 DeepAgents 框架开发,需要优化的增加的模块
+再自己开发**。但当前代码里有两块**自造 LLM-to-LLM 中间件**:
+
+  1. **`nexus/backend/quality/pipeline.py`** —— 维护一套自造的
+     QualityPipeline,在主 LLM 响应后**复用同一个 LLM** 做 1-shot 评分,
+     触发 REPAIR / REJECT 时再让主 LLM 反思。质量门本应是 deepagents
+     `RubricMiddleware` 的标准能力,自造版本跟 deepagents 0.6.x 升级
+     路径脱节。
+  2. **`nexus/backend/intent/router.py`** —— 用户消息先过一次 LLM
+     分类器(也是 1-shot function calling,5s 超时),把 intent
+     (knowledge / task / chitchat) 写库 + 喂给 quality gate 短路。
+     实测 agnes 慢模型 16s+ 经常让 wait_for 失效,前端 spinner 卡死。
+     业务级"intent 标记"用正则同步推断足够,**LLM 介入是反模式**。
+
+外加:弱模型(MiniMax-M3)对"元力股份 能买吗"这类投资问题不主动调
+yandex_search,LLM 复读身份话术("我是 Nexus,由 X 驱动...")。根因是
+system prompt 的"标准话术"硬指令对弱模型过强,把它推到身份回答上。
+
+### Root Cause
+
+1. QualityPipeline:把"主 LLM 评分"硬塞在主循环里,跟 deepagents
+   `RubricMiddleware(*, model=..., tools=None, max_iterations=3)`
+   的契约不兼容(后者期望在 create_deep_agent 阶段挂载,
+   middleware 内部维护评分状态)。两条路径并存导致:
+   - RubricJudge 的 faithfulness rubric 已经挂到 QualityGateMiddleware
+     上(拦截 AGENTS.md 写入)
+   - 主循环的 QualityPipeline 重复一次评分,REPAIR 时再让主 LLM 重生
+   - 维护成本 ×2,deepagents 升级后两个评分器行为漂移
+2. IntentClassifier:中间件层**不该**再调 LLM
+   (对齐 DeepAgents 框架的设计原则:SubAgent + Task 工具机制
+   让主 LLM 自己决定 dispatch,中间件只做轻量路由/转发)
+3. Tier 路由缺失:不同 tier 模型(弱 MiniMax-M3 vs 强 agnes-2.0-flash)
+   共享同一份 system_prompt,弱模型没有"必须先调工具"的硬指令,
+   强模型被"标准话术"拖去复读。
+
+### Changed (2026-06-29)
+
+#### 删除
+
+- **`nexus/backend/quality/pipeline.py`** — 整文件删除(150 行)
+- **`tests/test_quality_pipeline.py`** — 整文件删除
+- **`nexus/backend/intent/router.py`** — 重写:从 LLM-to-LLM 分类
+  改为同步正则推断(70 行,新文件见 Added)
+- **`tests/test_intent_timeout.py`** — 整文件删除(测 LLM 超时,路径已删)
+- **`tests/test_switch_model_rebuilds_intent.py`** — 整文件删除
+  (对应 `_rebuild_intent_and_quality` 函数已删)
+- **`main.py::_intent_llm` 全局 / `_get_intent_llm()` /
+  `_rebuild_intent_and_quality()`** — 三处全局状态 + 函数整体删除
+  (~120 行)
+- **`_ensure_agent_ready` 里的 judge_llm 构造块** — 删除(50+ 行)
+- **`ws.py:handle_websocket` 的 `get_intent_llm` 参数** — 删除
+- **`ws.py::_classify_and_record` 的 `get_intent_llm` 参数** — 删除
+  (新签名 `(websocket, session_id, user_content, last_event_id=0)`)
+- **`routes/model_config.py` 的 `_rebuild_intent_and_quality` 引用 +
+  `init_router` 签名** — 删 3 处调用
+
+#### Added
+
+- **`nexus/backend/middleware/force_tool.py`** (新增,182 行):
+  - `ForceToolMiddleware(AgentMiddleware)` 挂在
+    `create_deep_agent(middleware=[..., force_tool_mw])` 末尾
+  - 行为契约:LLM 第一次响应**没调任何工具**且 user 输入命中
+    `force_intents` 默认 (`("knowledge", "task")`) → patch 一个
+    `yandex_search` tool_call,query 取自用户最后一条消息
+  - 同步 `wrap_model_call` + 异步 `awrap_model_call` 双钩子(deepagents
+    `agent.astream` 走 async 路径,缺一会 `NotImplementedError`)
+  - **`classify_intent_lightweight(text)`** 纯函数暴露:正则 4 类
+    (knowledge / task / identity / chitchat),单测可独立验证
+- **`nexus/backend/profiles/tier_routing.py`** (新增,~120 行):
+  - `register_tier_profiles()` 按 `provider:model` 注册 HarnessProfile
+  - 弱模型 `_WEAK_SUFFIX`:`openai:MiniMax-M3` → 强调"必须用工具,
+    投资/医疗/法律/股票类问题先调 yandex_search 走事实检索"
+  - 强模型 `_FULL_SUFFIX`:`openai:agnes-2.0-flash` → "自主决定是否
+    用工具,允许自由答"
+  - 幂等保护:`_REGISTERED_SPECS` 缓存 + deepagents 同 key 累加合并
+  - 用 deepagents 公开 API `from deepagents.profiles import
+    HarnessProfile, register_harness_profile`
+- **`nexus/backend/profiles/__init__.py` + `legacy.py`** (新增):
+  - package 重新组织:`profiles/legacy.py` 承载旧
+    `register_nexus_profiles` / `_ensure_registered` /
+    `reset_profiles_for_test`(降级为 no-op,只设 `_PROFILES_REGISTERED`
+    标志,保持旧测试 / 调用方零感知)
+  - **`_PROFILES_REGISTERED` 必须定义在 package `__init__.py` 顶层**
+    (不在子模块),否则测试 "True trap" — 子模块 `global` 改不到
+    package 属性
+  - `__init__.py` re-export 全部名字,`from nexus.backend.profiles
+    import (register_nexus_profiles, register_tier_profiles, ...)` 工作
+- **`nexus/backend/intent/router.py` 重写** (~100 行):
+  - `classify_intent(message: str) -> IntentKind` 纯函数,**不再接 LLM**
+  - 内部调 `classify_intent_lightweight`,把它的字符串 bucket 映射到
+    `IntentKind` 字面量(`identity → chitchat` 归一)
+  - `try/except` 兜底:任何异常 / 空消息 / None 输入 → DEFAULT_INTENT
+  - 延迟 import `force_tool` (避免 DB-only 操作被迫拉 langchain)
+- **`tests/test_force_tool_middleware.py`** (新增,8 测试):覆盖
+  4 类意图 + 3 种响应分支
+- **`tests/test_tier_routing.py`** (新增,4 测试):弱/强 suffix 内容 +
+  幂等性 + 隔离 fixture
+- **`tests/test_e2e_regression_coverage.py`** (新增,5 测试):覆盖矩阵
+  标记,显式 import 关键链路 + 列举真实 E2E 在生产环境跑法
+- **`tests/test_intent_router.py` / `test_intent_ws_integration.py` /
+  `test_intent_heartbeat.py`** (重写/适配):适配新签名 + 删 LLM 路径
+- **`nexus/backend/agent.py::create_agent`** 大改:
+  - middleware 链追加 `force_tool_mw`:`[quality_gate,
+    dynamic_identity_middleware, force_tool_mw]`
+  - `create_deep_agent` 之前显式调
+    `register_tier_profiles()`(顺序敏感,必须在 resolve_model 之前)
+  - `_build_system_prompt` 删所有 `_FULL_PROFILE_TIPS` 段(模型特定
+    指令改由 HarnessProfile suffix 注入)+ 删 `{driver_name}` f-string
+  - docstring 改写:标注"模型特定指令由 tier_routing 通过
+    HarnessProfile 注入,不在本函数硬拼"
+
+### Verified
+
+- `tests/test_tier_routing.py` 4/4 ✅
+- `tests/test_force_tool_middleware.py` 8/8 ✅
+- `tests/test_deepagents_integration.py` 19/19 ✅
+- `tests/test_intent_router.py` 7/7 ✅
+- `tests/test_intent_ws_integration.py` 4/4 ✅
+- `tests/test_intent_heartbeat.py` 3/3 ✅
+- `tests/test_e2e_regression_coverage.py` 5/5 ✅
+- **全量 pytest**:`540 passed, 12 skipped, 0 failed` in 26.22s
+- **ruff check**:All checks passed
+- **ruff format**:`8 files already formatted`
+
+### Notes
+
+- 真实 E2E(`tests/e2e_debug_stock_question.py`)需 API key + DMG
+  启动,在有 key 的环境跑:
+  - active=agnes 问"元力股份 能买吗" → 1191+ 字投资分析
+    (WS tool_start 帧出现 yandex_search)
+  - active=MiniMax-M3 同样问题 → 第一次 LLM 响应不调工具,
+    ForceToolMiddleware patch yandex_search,搜索结果回填后 LLM
+    用结果回答(不再复读身份话术)
+- `_HarnessProfile` 在 deepagents 是下划线前缀的内部 API
+  (0.6.14 `_harness_profiles.py`);本项目统一改用公开
+  `from deepagents.profiles import HarnessProfile, register_harness_profile`
+  路径稳定,跨 deepagents 升级不会破
+- 旧 `nexus/backend/profiles.py` 单文件已删除,内容拆到
+  `profiles/__init__.py`(no-op 兼容层) + `profiles/tier_routing.py`
+  (实际注册)
+
+---
+
 ## [Unreleased] — 修复 model identity 串味:system_prompt 改用 middleware 实时注入
 
 ### Problem

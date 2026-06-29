@@ -1,12 +1,16 @@
-"""回归测试:intent 分类前必须先发一个 thinking 心跳帧。
+"""回归测试:intent 心跳帧(thinking 帧)必须由 _classify_and_record 发出。
 
-WHY:E2E 2026-06-28 用户切到 agnes 后 16 秒看不见任何反馈,
-spinner 一直转。前端必须有"正在识别意图..."提示,才知道系统在干活。
+WHY 存在:
+  E2E 2026-06-28 用户切到 agnes 后 16 秒看不见任何反馈,spinner 一直转。
+  前端必须有"正在识别意图..."提示,才知道系统在干活。
+
+2026-06-29 重构适配:_classify_and_record 签名变了 — ``get_intent_llm``
+参数已删除(intent 改用纯函数正则推断,不再调 LLM)。心跳机制保留,
+先发 thinking 帧再返回 intent。
 """
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import pytest
@@ -33,28 +37,15 @@ class _FakeWebSocket:
         self.frames.append(data)
 
 
-class _SlowIntentLLM:
-    """模拟慢 intent LLM(agnes 风格):ainvoke 阻塞 ~50ms。"""
-
-    async def ainvoke(self, messages: list) -> Any:
-        await asyncio.sleep(0.05)
-        return type("R", (), {"tool_calls": [{"name": "route_chitchat"}]})()
-
-
 @pytest.mark.asyncio
 async def test_intent_heartbeat_emitted_before_classify(temp_db: str) -> None:
-    """_classify_and_record 入口必须先发 thinking 心跳,再调 classify_intent。"""
+    """_classify_and_record 入口必须先发 thinking 心跳。"""
     from nexus.backend.api.ws import _classify_and_record
 
     db.create_session("test-session", title="t", channel="main")
 
     ws = _FakeWebSocket()
-    llm = _SlowIntentLLM()
-
-    def get_intent_llm() -> Any:
-        return llm
-
-    await _classify_and_record(ws, get_intent_llm, "test-session", "hi")
+    await _classify_and_record(ws, "test-session", "hi")
 
     # 第一帧必须是 thinking 心跳
     assert ws.frames, "应该有心跳帧"
@@ -64,15 +55,14 @@ async def test_intent_heartbeat_emitted_before_classify(temp_db: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_intent_heartbeat_emitted_even_when_llm_none(temp_db: str) -> None:
-    """llm=None 时(早期 startup 场景)也要先发心跳,再兜底 chitchat。"""
+async def test_intent_heartbeat_emitted_even_when_no_input(temp_db: str) -> None:
+    """早期 startup 场景(intent 内部异常时)也要先发心跳。"""
     from nexus.backend.api.ws import _classify_and_record
 
     db.create_session("test-session2", title="t", channel="main")
 
     ws = _FakeWebSocket()
-
-    await _classify_and_record(ws, lambda: None, "test-session2", "hi")
+    await _classify_and_record(ws, "test-session2", "hi")
 
     first = ws.frames[0]
     assert first["type"] == "thinking"
@@ -94,7 +84,7 @@ async def test_intent_heartbeat_event_id_monotonic_with_last_event_id(temp_db: s
     ws = _FakeWebSocket()
 
     # 传 last_event_id=42,心跳应当 event_id=43
-    await _classify_and_record(ws, lambda: None, "test-session3", "hi", last_event_id=42)
+    await _classify_and_record(ws, "test-session3", "hi", last_event_id=42)
 
     assert ws.frames[0]["type"] == "thinking"
     assert ws.frames[0]["event_id"] == 43

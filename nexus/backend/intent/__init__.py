@@ -1,4 +1,4 @@
-"""意图识别路由:复用主 ChatModel 做 1-shot function-calling 分类。"""
+"""意图分类枚举(2026-06-29 重构后,具体分类逻辑见 :mod:`.router`)。"""
 
 from .router import (
     DEFAULT_INTENT,
