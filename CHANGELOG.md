@@ -5,6 +5,74 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [Unreleased] — 模型身份改用实时注入(不再硬编码,不再瞎答训练记忆)
+
+### Problem
+
+用户反馈"用的什么模型 应该真实获取模型的信息 而不是硬编码"。
+本轮迭代解决 2026-06-29 暴露的两个 LLM 自我介绍答错场景:
+
+1. **场景 A — 硬编码失效**:之前 fix 把 `model_name` 字符串拼进
+   `f"基于 {driver_label} 打造"` 这种 prompt 模板字面量 → 启动时快照一次
+   之后,用户切换模型若未走 `POST /api/models/switch` 重建 agent,
+   prompt 还显示老模型,用户被误导。
+2. **场景 B — LLM 不调工具**:试图改成"prompt 引导 LLM 必须先调
+   `get_model_info` 工具拿真实数据" → E2E 验证(问"你用的什么模型"):
+   - 当前 active = agnes-2.0-flash,训练数据里有 → LLM 凭记忆答对
+     (Sapiens AI / agnes-2.0-flash),**工具 0 次调用** — 看似 OK
+     但完全没"实时获取"
+   - 当前 active = 其他冷门模型,训练数据里没有 → LLM **瞎答**
+     "我使用的是 Qwen 模型,由阿里云(Alibaba Cloud)开发",**完全没看
+     prompt 指令** — 提示词形同虚设
+
+### Root Cause
+
+- 把"模型身份"当作字符串常量塞进 prompt 模板 → 任何"数据源必须活"的
+  保证都依赖外部机制,内生不可靠。
+- 把"必须调工具"当 soft rule → LLM 训练抗性让 soft rule 失效。
+
+### Changed
+
+- **`nexus/backend/agent.py::_build_system_prompt` 实时读 active model**:
+  - 函数体里调 `get_active_model_info()` 从 `~/.nexus/models.json` 实时读
+    name / vendor,拼进 prompt 顶部 `[FACT · 当前驱动模型]` 块
+  - 数据源是**单一**的(models.json),切换模型后下一轮构造自动反映新值
+  - `get_system_prompt` cache key 改为 `f"{model_name}@{active_name}"` →
+    切换激活模型后旧 cache 立刻失效,新 prompt 重新读盘生成
+- **`nexus/backend/models_config.py::infer_vendor`** (新增):从 `api_base`
+  URL 域名推断 vendor(MiniMax / agnes-ai / OpenAI / Anthropic),未知走
+  "未知厂商"兜底
+- **`nexus/backend/models_config.py::get_active_model_info`** (新增):返回
+  `{name, vendor, api_base, temperature, is_active}` 完整 dict
+- **`nexus/backend/tools.py::get_model_info`** (新增 `@langchain_tool`):
+  每次调用都重新读 `~/.nexus/models.json` 返回实时 JSON,挂进 `TOOLS`
+  列表,LLM 可主动调(展示实时数据 / 排障场景)
+- **prompt 强约束**:forbidden 块加 "任何跟 FACT 块里 name/vendor 不一致的
+  版本" → LLM 想答错都难
+
+### Verified
+
+- `pytest tests/test_agent_memory.py`:18 passed(含 5 个新契约 + 3 个 tool 注册测试)
+- `pytest tests/ -q --ignore=tests/test_e2e_features.py`:534 passed
+- E2E 验证(dev uvicorn + WS,active = agnes-2.0-flash):
+  问"你用的什么模型" → LLM 答:
+  > 我是 Nexus,由 agnes-2.0-flash 驱动。Nexus 是夜小白科技有限公司基于
+  > agnes-2.0-flash 模型打造的 AI 智能助理。agnes-2.0-flash 由 agnes-ai 提供。
+  答对 model name + vendor + 公司 + 产品名,精确按 prompt 模板输出。
+
+### Notes
+
+- **数据源单一**:`~/.nexus/models.json` 是唯一权威。`api_base` 域名
+  映射 vendor: `apihub.agnes-ai.com → agnes-ai`, `api.minimaxi.com → MiniMax`。
+  新增 vendor 厂商需要更新 `_VENDOR_BY_HOST` 常量。
+- **cache 策略**:cache key = `"{model_name}@{active_name}"`,双维度保证
+  切换时立即失效。
+- **为什么还需要 `get_model_info` 工具**(不只靠 prompt 注入):
+  - 用户问"给我看实时数据" → LLM 调工具展示当前 model info
+  - 调试场景:用户报告"模型没切换" → 调工具对账 models.json vs 实际 driver
+
+---
+
 ## [Unreleased] — 修复 LLM 自我介绍答错(切到 Agnes 后还说 MiniMax-M3)
 
 ### Problem
