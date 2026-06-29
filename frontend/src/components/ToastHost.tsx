@@ -5,9 +5,14 @@
  * 不引入额外 UI 库 — 简单 inline style 即可覆盖 4 种 kind。
  */
 
-import { useToastStore } from '../store/useToast';
+import { useToastStore, type ToastKind } from '../store/useToast';
 
-const KIND_COLOR: Record<string, { bg: string; border: string }> = {
+interface KindColor {
+  bg: string;
+  border: string;
+}
+
+const KIND_COLOR: Record<ToastKind, KindColor> = {
   info: { bg: '#1f2937', border: '#3b82f6' },
   success: { bg: '#14532d', border: '#22c55e' },
   warn: { bg: '#78350f', border: '#f59e0b' },

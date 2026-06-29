@@ -46,5 +46,6 @@ export function useWsConnection({
     enabled: !isTauri,
   });
 
-  return isTauri ? tauri : browser;
+  // 合并 isTauri 字段(子 hook 返回值不含它,但 UseWsConnectionResult 要求暴露)
+  return { ...(isTauri ? tauri : browser), isTauri };
 }
