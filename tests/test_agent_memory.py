@@ -79,69 +79,110 @@ class TestBuildSystemPromptHardcodesIdentity:
 
 
 class TestBuildSystemPromptIsModelAware:
-    """``_build_system_prompt`` 不再硬编码 model_name,改为引导 LLM 调 ``get_model_info`` 工具。
+    """``_build_system_prompt`` 必须实时从 ``~/.nexus/models.json`` 读 active model 注入 FACT 块。
 
-    WHY(2026-06-29 重构):
-      之前的 fix 把 model_name 当字符串塞进 system prompt 模板(``f"基于 {driver_label} 打造"``)。
-      这种"硬编码到 prompt"做法有几个固有问题:
-        1. 模型切换若未走 ``POST /api/models/switch`` 重建 agent,prompt 还显示老模型 → 误导
-        2. vendor / api_base / temperature 等其他元数据塞不进去(塞多了爆 LLM 上下文)
-        3. 传不传 model_name 都能让 LLM 误答(传错值或瞎答训练记忆里的默认值)
+    WHY(2026-06-29 三轮迭代的最终方案):
+      之前尝试过两种方案,都有致命缺陷:
+        1. 纯 prompt 字符串硬编码 ``f"基于 {driver_label} 打造"`` → 用户反馈
+           "应该真实获取模型的信息" → 不再硬编码
+        2. prompt 只引导"必须先调 get_model_info 工具" → E2E 验证里 LLM
+           仍然不调,直接答训练记忆里的 "Qwen / Claude" → 失败
+      最终方案:**双保险**:
+        - 第一防线:系统 prompt 顶部 ``[FACT · 当前驱动模型]`` 块**实时**
+          调 ``get_active_model_info()`` 拼入 ``name`` / ``vendor`` —— LLM
+          收到的 system prompt 字符串里**就有**真实数据(从 models.json 读,
+          单一数据源),想答错都难。
+        - 第二防线:``get_model_info`` 工具仍然存在,LLM 可主动调用拿实时数据。
 
-      新契约:prompt 模板**不烘焙** model_name,改为强约束 LLM 调
-      ``get_model_info`` 工具实时 introspect。模型身份变成"运行时事实"而非
-      "字符串常量",切换模型后工具返回值立刻反映新状态 —— 这是用户反馈
-      "应该真实获取模型的信息 而不是硬编码" 的根本修复。
-
-    契约(2026-06-29 重构后):
-      - ``_build_system_prompt`` 接受 ``model_name`` 参数仅为向后兼容,**不**把
-        它写进 prompt 内容(传啥都一样)。
-      - prompt 必须显式指引 LLM 调 ``get_model_info`` 工具获取当前驱动模型
-        (FACT 块 + 回答规则 2 + forbidden 三处冗余)。
-      - 不传 model_name / 传空串 → 走兼容路径,不抛(防御性,不阻塞启动)。
+    契约:
+      - prompt 必须包含当前 active model 的 name + vendor(从 models.json 读)
+      - prompt 必须显式提到 ``get_model_info`` 工具(让 LLM 知道备用通道存在)
+      - 思考格式 / 安全 / 澄清规则等"产品层规则"必须保留
     """
 
-    def test_prompt_does_not_hardcode_model_name(self) -> None:
-        """prompt 字符串里不应该出现"当前驱动模型 = X"这种硬编码事实。"""
-        prompt = _build_system_prompt("agnes-2.0-flash")
-        # 重构后:无论传什么 model_name,prompt 里都不应该出现具体模型名作为
-        # "驱动模型" 事实陈述(应该只出现 "调 get_model_info 拿值" 的指引)。
-        assert "agnes-2.0-flash" not in prompt, (
-            "_build_system_prompt(model_name) 还在把 model_name 硬编码到 prompt → "
-            "这是 2026-06-29 重构要根除的'硬编码'做法。prompt 应当只引导 LLM 调 "
-            "get_model_info 工具,模型身份应当是运行时事实。"
-        )
-        assert "MiniMax-M3" not in prompt, (
-            "prompt 里出现 MiniMax-M3 字面量 → 同上,模型名不应作为字符串常量出现在 prompt"
-        )
+    @pytest.fixture
+    def _patch_active_model(self, tmp_path, monkeypatch: pytest.MonkeyPatch):
+        """把 ``models_config.MODELS_FILE`` 指向 tmp 路径,避免污染真实配置。"""
+        import json
+        from nexus.backend import models_config
 
-    def test_prompt_directs_to_get_model_info_tool(self) -> None:
-        """prompt 必须显式指引 LLM 调 ``get_model_info`` 工具。"""
+        fake = {
+            "models": [
+                {
+                    "id": "fake-agnes",
+                    "name": "agnes-2.0-flash",
+                    "api_key": "x",
+                    "api_base": "https://apihub.agnes-ai.com/v1",
+                    "temperature": 0.7,
+                    "is_active": True,
+                },
+            ]
+        }
+        monkeypatch.setattr(models_config, "MODELS_FILE", tmp_path / "models.json")
+        (tmp_path / "models.json").write_text(json.dumps(fake), encoding="utf-8")
+        # 清空 _CACHED_PROMPT,避免老 cache 干扰
+        from nexus.backend import agent
+        monkeypatch.setattr(agent, "_CACHED_PROMPT", {})
+
+    def test_prompt_includes_active_model_name(self, _patch_active_model) -> None:
+        """prompt 必须包含当前 active model 的 name(从 models.json 实时读)。"""
         prompt = _build_system_prompt()
-        # FACT 块 + 回答规则 2 + forbidden 至少得有一处提到 get_model_info
+        # active model 是 agnes-2.0-flash → prompt 里必须有这个名字
+        assert "agnes-2.0-flash" in prompt, (
+            "prompt 没包含 active model name → _build_system_prompt 没有实时读 "
+            "models.json,LLM 收到的 system prompt 里没有真实驱动模型信息"
+        )
+
+    def test_prompt_includes_active_vendor(self, _patch_active_model) -> None:
+        """prompt 必须包含 vendor(从 api_base 推断: agnes-ai)。"""
+        prompt = _build_system_prompt()
+        assert "agnes-ai" in prompt, (
+            "prompt 没包含 vendor → infer_vendor 没生效,LLM 答'哪个公司提供'时会瞎答"
+        )
+
+    def test_prompt_distinguishes_different_active_models(self, tmp_path, monkeypatch) -> None:
+        """切换 active model 后,prompt 内容必须跟着变(数据源是活的)。"""
+        import json
+        from nexus.backend import agent
+        from nexus.backend import models_config
+
+        # 第一组: agnes 激活
+        monkeypatch.setattr(models_config, "MODELS_FILE", tmp_path / "models.json")
+        (tmp_path / "models.json").write_text(json.dumps({
+            "models": [{"id": "a", "name": "agnes-2.0-flash", "api_key": "x",
+                        "api_base": "https://apihub.agnes-ai.com/v1",
+                        "temperature": 0.7, "is_active": True}]
+        }), encoding="utf-8")
+        monkeypatch.setattr(agent, "_CACHED_PROMPT", {})
+        prompt_agnes = _build_system_prompt()
+
+        # 第二组: MiniMax-M3 激活
+        (tmp_path / "models.json").write_text(json.dumps({
+            "models": [{"id": "m", "name": "MiniMax-M3", "api_key": "x",
+                        "api_base": "https://api.minimaxi.com/v1",
+                        "temperature": 0.7, "is_active": True}]
+        }), encoding="utf-8")
+        monkeypatch.setattr(agent, "_CACHED_PROMPT", {})
+        prompt_minimax = _build_system_prompt()
+
+        assert "agnes-2.0-flash" in prompt_agnes
+        assert "agnes-ai" in prompt_agnes
+        assert "MiniMax-M3" in prompt_minimax
+        assert "MiniMax" in prompt_minimax
+        assert prompt_agnes != prompt_minimax, (
+            "切换 active model 后 prompt 没变 → 数据源不是 models.json,是 hardcode"
+        )
+
+    def test_prompt_mentions_get_model_info_tool(self, _patch_active_model) -> None:
+        """prompt 必须提到 ``get_model_info`` 工具(让 LLM 知道备用通道)。"""
+        prompt = _build_system_prompt()
         assert "get_model_info" in prompt, (
-            "_build_system_prompt 漏掉 '调 get_model_info 工具' 指引 → "
-            "LLM 不会主动 introspect,被问'你什么模型'时会瞎答训练记忆。"
-        )
-        # 强约束关键词:LLM 看到这些词才能理解"必须先调工具再答"
-        assert "实时" in prompt or "运行时" in prompt, (
-            "prompt 没强调模型身份是'运行时事实' → LLM 容易把 prompt 里的占位提示当成建议忽略"
+            "prompt 没提 get_model_info 工具 → LLM 不会知道有备用 introspect 通道"
         )
 
-    def test_prompt_does_not_depend_on_model_name_param(self) -> None:
-        """重构后,prompt 内容不应随 model_name 变化(避免无意义的契约面)。"""
-        prompt_default = _build_system_prompt("")
-        prompt_agnes = _build_system_prompt("agnes-2.0-flash")
-        prompt_minimax = _build_system_prompt("MiniMax-M3")
-        # 重构后:传啥都一样 — model_name 不再参与 prompt 模板拼接
-        assert prompt_default == prompt_agnes == prompt_minimax, (
-            "重构后 _build_system_prompt 应该不区分 model_name → "
-            "三个不同 model_name 产出三个不同 prompt 说明仍在拼接字符串事实"
-        )
-
-    def test_other_rules_kept_when_model_name_provided(self) -> None:
-        """重构后,其他规则段不能丢。"""
-        prompt = _build_system_prompt("agnes-2.0-flash")
+    def test_other_rules_kept(self, _patch_active_model) -> None:
+        """加 model 注入后,其他规则段不能丢。"""
+        prompt = _build_system_prompt()
         assert "<thinking>" in prompt
         assert "【主动澄清规则】" in prompt
         assert "【安全规则】" in prompt
