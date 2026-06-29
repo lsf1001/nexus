@@ -415,11 +415,11 @@ def scenario_reject_then_reflect() -> ScenarioResult:
 def scenario_edit_file_interrupt() -> ScenarioResult:
     """7) edit_file 改源码 → HITL,approve 后修改生效。
 
-    特殊:目标文件 nexus/backend/agent.py 必须存在。
+    特殊:目标文件 nexus/backend/agent/_agent_builder.py 必须存在。
     我们先备份原内容 + 恢复,避免污染。
     """
     r = ScenarioResult(name="edit_file_interrupt", passed=False, summary="")
-    fp = ROOT / "nexus" / "backend" / "agent.py"
+    fp = ROOT / "nexus" / "backend" / "agent" / "_agent_builder.py"
     backup = fp.read_text()
     cleanup_files([])  # 不删任何文件
     start_server("edit_file_interrupt")
