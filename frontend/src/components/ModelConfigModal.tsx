@@ -13,6 +13,7 @@ interface ModelConfigModalProps {
 function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalProps) {
   const models = useStore((s) => s.models);
   const setModels = useStore((s) => s.setModels);
+  const setModelName = useStore((s) => s.setModelName);
   const [editingModel, setEditingModel] = useState<Model | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [formData, setFormData] = useState({
@@ -32,10 +33,16 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
       const res = await apiFetch(`${apiUrl}/models`);
       const data = await res.json();
       setModels(data);
+      // 同步 modelName:从最新 models 里找 is_active 的。
+      // 之前 useStore.modelName 只有 useBootstrap 启动时设一次,切模型后
+      // SettingsView / ChatView 还显示旧名字。设在这里之后,任何 path
+      // (modal load / 切完 reload / 外部 reload) 都能保证 modelName 同步。
+      const active = (data as Model[]).find((m) => m.is_active);
+      if (active) setModelName(active.name);
     } catch {
       console.error('加载模型失败');
     }
-  }, [apiUrl, setModels]);
+  }, [apiUrl, setModels, setModelName]);
 
   const resetForm = useCallback(() => {
     setFormData({
@@ -122,6 +129,9 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
       });
       const data = await res.json();
       if (data.success) {
+        // 立即同步 modelName,不等 loadModels 完成。SettingsView / ChatView
+        // 标题立即反映新模型;loadModels 内部还会再同步一次做兜底。
+        if (data.active_model?.name) setModelName(data.active_model.name);
         await loadModels();
         onModelChange?.(data.active_model.name);
       } else {

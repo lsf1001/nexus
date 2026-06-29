@@ -120,10 +120,19 @@ async def get_sessions(limit: int = 50) -> list[dict]:
 
 @router.post("")
 async def create_new_session(body: dict | None = None) -> dict:
-    """创建新会话。"""
-    session_id = str(uuid.uuid4())
-    title = body.get("title") if body else None
-    channel = body.get("channel", "main") if body else "main"
+    """创建新会话。
+
+    支持客户端预定义 ``session_id``(前端持久化 / WS 路径兼容 — ws.py:1188
+    也接受客户端传 session_id)。缺省走 uuid4,与旧版行为一致。
+
+    WHY 之前是 bug:旧实现直接覆盖客户端传的 ``session_id``,前端拿到 200
+    后用自传 id 去 GET 会拿到 404("会话不存在")—— 客户端预定义 session_id
+    在 REST 路径下被默默忽略。
+    """
+    body = body or {}
+    session_id = body.get("session_id") or str(uuid.uuid4())
+    title = body.get("title")
+    channel = body.get("channel", "main")
     return create_session(session_id, title=title, channel=channel)
 
 

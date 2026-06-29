@@ -72,7 +72,6 @@ def get_active_model_info() -> dict[str, Any]:
     }
 
 
-
 def load_models() -> dict[str, Any]:
     """从 ~/.nexus/models.json 加载模型配置。
 

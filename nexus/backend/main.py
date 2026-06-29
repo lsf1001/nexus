@@ -147,6 +147,7 @@ async def lifespan(app: FastAPI):
         mcp_tools=_mcp_tools,
         create_agent_with_model=_create_agent_with_model,
         set_global_agent=_set_global_agent,
+        rebuild_intent_and_quality=_rebuild_intent_and_quality,
     )
 
     # 初始化 Gateway + ChannelRegistry (C4 重构: Gateway 真接管路由)
@@ -267,6 +268,50 @@ def _set_global_agent(agent) -> None:
     global _agent
     with _agent_lock:
         _agent = agent
+
+
+def _rebuild_intent_and_quality(app) -> None:
+    """模型切换后重新构建 intent_llm / QualityPipeline,沿用当前激活模型。
+
+    WHY 必须重建:``_ensure_agent_ready`` 里 ``_intent_llm`` 是从首次
+    ``get_active_model()`` 构造的,模型切换 / 默认模型写入后,旧实例仍
+    拿着旧模型的 api_key/base,继续打旧地址。日志里切到 Agnes 之后
+    intent 还在打 ``api.minimaxi.com``、失败重试 191s,就是这个问题。
+    """
+    global _intent_llm
+    app_obj = app or _app_ref
+    if app_obj is None:
+        return
+    try:
+        from .agent import get_llm
+        from .models_config import get_active_model as _get_active_model
+        from .quality.pipeline import QualityPipeline
+        from .rubrics.judge import RubricJudge
+        from .rubrics.prompts import apply_prompts_to_default_rubrics
+        from .rubrics.repair import RepairStrategy
+
+        apply_prompts_to_default_rubrics()
+        model_cfg = _get_active_model() or {}
+        api_key = model_cfg.get("api_key") or CONFIG.get("minimax_api_key", "")
+        if not api_key:
+            _intent_llm = None
+            app_obj.state.quality_pipeline = None
+            return
+        judge_llm = get_llm(
+            api_key=api_key,
+            api_base=model_cfg.get("api_base") or CONFIG.get("minimax_api_base"),
+            model_name=model_cfg.get("name", CONFIG.get("model_name", "MiniMax-M3")),
+            temperature=0,
+        )
+        app_obj.state.quality_pipeline = QualityPipeline(
+            judge=RubricJudge(llm=judge_llm),
+            repair_strategy=RepairStrategy(),
+            main_llm=judge_llm,
+        )
+        _intent_llm = judge_llm
+        logger.info("切换模型后,QualityPipeline / intent_llm 已用 %s 重建", model_cfg.get("name"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("切换后重建 QualityPipeline 失败,沿用旧实例: %s", exc)
 
 
 API_PREFIX = "/api"

@@ -125,9 +125,9 @@ def verify_step2_reject() -> bool:
     # 检查 quality_scores 表里有 REJECT 记录
     try:
         with get_db() as conn:
-            reject_count = conn.execute(
-                "SELECT COUNT(*) as n FROM quality_scores WHERE verdict = 'reject'"
-            ).fetchone()["n"]
+            reject_count = conn.execute("SELECT COUNT(*) as n FROM quality_scores WHERE verdict = 'reject'").fetchone()[
+                "n"
+            ]
             print(f"\n  quality_scores 表中 REJECT 记录数: {reject_count}")
     except Exception as exc:  # noqa: BLE001
         print(f"  [WARN] 查 quality_scores 失败: {exc}")
@@ -177,7 +177,9 @@ def verify_step3_repair() -> bool:
         print(f"  [WARN] 查 verdict 分布失败: {exc}")
         has_repair = False
     print("  提示：repair 路径触发取决于 LLM 评分是否落在 [0.6, 0.8) 区间。")
-    print(f"  结果: {'✅ 通过（看到 repair verdict）' if has_repair else '⚠️  本次没看到 repair verdict（可能 LLM 答得太好/太差）'}")
+    print(
+        f"  结果: {'✅ 通过（看到 repair verdict）' if has_repair else '⚠️  本次没看到 repair verdict（可能 LLM 答得太好/太差）'}"
+    )
     return True  # 验收 3 不强制通过（看 LLM 实际表现）
 
 
@@ -237,6 +239,7 @@ def verify_step4_bulk_export(min_pairs: int = 30) -> bool:
     out_dpo = Path("/tmp/nexus_prefs_dpo.jsonl")  # CLI 工具的默认输出位置
     try:
         from nexus.backend.rubrics._cli_helpers import load_preference_records
+
         from nexus.backend.rubrics.exporter import PreferenceExporter
 
         records = load_preference_records(min_score=0.0, max_records=10000)

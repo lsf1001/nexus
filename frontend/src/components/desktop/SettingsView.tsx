@@ -1,7 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useStore } from '../../store/useStore';
-import type { Model } from '../../types';
-import { apiFetch } from '../../lib/api';
 import { useCopyText } from '../../lib/useContextMenuTrigger';
 import ModelConfigModal from '../ModelConfigModal';
 
@@ -13,17 +11,16 @@ export function SettingsView({ onBack }: SettingsViewProps = {}) {
   const showThinking = useStore((state) => state.showThinking);
   const setShowThinking = useStore((state) => state.setShowThinking);
   const modelName = useStore((state) => state.modelName);
+  const models = useStore((state) => state.models);
   const darkMode = useStore((state) => state.darkMode);
   const setDarkMode = useStore((state) => state.setDarkMode);
-  const [models, setModels] = useState<Model[]>([]);
   const [showModelConfig, setShowModelConfig] = useState(false);
 
-  useEffect(() => {
-    apiFetch('/api/models')
-      .then((response) => response.json())
-      .then((data: Model[]) => setModels(data))
-      .catch(() => setModels([]));
-  }, []);
+  // 不再维护 local models:从 useStore.models 读,modal 切完会通过
+  // setModels 写进 store,这里自动 re-render。useBootstrap 已经把首个
+  // active model 写进 modelName,ModelConfigModal 切完也会再同步一次。
+  // 旧实现 useState + useEffect([]) 只拉一次,modal 切完 SettingsView
+  // 的 models.length 永远停在初值,user 看到「共配置 N 个」不变。
 
   // 切换 dark mode 时同步到 .nexus-desktop 元素（CSS 选择器作用域）
   const handleToggleDarkMode = () => {

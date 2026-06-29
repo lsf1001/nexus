@@ -63,9 +63,7 @@ class TestCreateAgentCheckpointer:
             kwargs = mock_create.call_args.kwargs
             assert isinstance(kwargs["checkpointer"], MemorySaver)
 
-    def test_default_database_follows_nexus_home(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_default_database_follows_nexus_home(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """未显式设置 DB 路径时，checkpointer 必须写入 NEXUS_HOME。"""
         nexus_home = tmp_path / "custom-home"
         fallback_home = tmp_path / "fallback-home"

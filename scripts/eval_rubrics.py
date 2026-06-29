@@ -106,10 +106,7 @@ def _print_report(result: MetaEvalResult) -> None:
             jv = result.judge_verdicts[i]
             hv = result.human_verdicts[i]
             mark = "✓" if jv == hv else "✗"
-            print(
-                f"  [{i+1}] {mark}  Judge: {js:.2f} ({jv:6s})  "
-                f"Human: {hs:.2f} ({hv:6s})"
-            )
+            print(f"  [{i + 1}] {mark}  Judge: {js:.2f} ({jv:6s})  Human: {hs:.2f} ({hv:6s})")
 
 
 def _save_report(result: MetaEvalResult, output_path: Path) -> None:
