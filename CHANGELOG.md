@@ -5,6 +5,118 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [Unreleased] — 4 commit 收尾:HITL 三态路由 / ws 包 re-export / force_tool 收紧 / 前端 TS strict
+
+### Problem
+
+2026-06-29 把 `agent.py` (1080 行) 和 `api/ws.py` (1386 行) 拆成 6 模块小文件后,落地 4 类遗留问题,本轮(commits `f63b9b9` / `ab90c04` / `fc41909` / `8400836`)一次性清理:
+
+1. **HITL 弹窗全场景失效** — E2E 5 个场景(写项目源码 / 写 /tmp / 多 tool_call / reject-then-reflect / edit_file)全部 FAIL,LLM 写源码无 HITL 弹窗直接落盘,产品形态与 OpenClaw 个人助理定位严重背离。
+2. **`ws/ 拆包后 mock.patch 路径破`** — 6 个测试 (`test_ws_hitl.py ×3` / `test_clarification.py ×1` / `test_ws_package_init.py ×1` / `test_observability_ws_integration.py 间接`) 报 `AttributeError: module 'nexus.backend.api.ws' has no attribute 'add_message'` / `'add_message'` 路径错位。
+3. **ForceToolMiddleware 把 task 类问题强制 patch yandex_search** — 用户问"帮我把 print 写到 nexus/backend/test_human.py",LLM 拿到 yandex_search 结果不知何用,新一轮"无 tool_call" → 强制再次 patch → 死循环(后端日志可见同一 session 内 16+ 次 yandex_search patch)。
+4. **前端 TS strict 报错阻塞 DMG 构建** — `ToastHost.tsx` 报 TS18048 / TS2741,`useWsConnection.ts` `UseWsConnectionResult` 缺 `isTauri` 字段报 TS2741;`cd frontend && npm run build` 走 `tsc -b --noEmit` 校验直接失败,DMG 无法产出。
+
+### Root Cause
+
+1. **HITL**:deepagents 0.5.3 不支持 permissions 写入 `mode="interrupt"`(被静默忽略,permissions 仅支持 `allow` / `deny` / `ask` 之类枚举)。需要新挂载路径感知的 AgentMiddleware,在 `wrap_tool_call` 阶段对"非白名单写工具"主动抛 `GraphInterrupt`,由 WS handler 转成 `confirmation_request` 帧回放给前端。
+2. **ws re-export**:拆包前 `ws.py` 是单文件,`add_message` 是其顶层属性;拆成 `ws/{__init__.py, finalize.py, streaming.py, observability.py}` 后,生产代码继续走 `from ... import db; db.add_message(...)` 是没问题的,但**测试用 `patch("nexus.backend.api.ws.add_message")`** 需要 `ws` 包层显式 re-export。`from x import y` 在 import 时绑值,monkeypatch 改到的函数与生产 import 时的对象是同一个属性才会生效。
+3. **force_tool 死循环**:初版 `force_intents=("knowledge", "task")` 是为修"弱模型问投资不调工具"引入,但泛化到 task 类有反模式 — task 类工具选择很广 (`write_file` / `edit_file` / `str_replace_editor` / `apply_patch` 等),强制 patch `yandex_search` 把 LLM 推上一条它本来不该走的搜索路径。`knowledge` / `task` 必须分开评估,不是一篮子。
+4. **TS strict 报错**:`Record<ToastKind, KindColor>` 显式声明后,KIND_COLOR 全字段必须填齐;另外 `UseWsConnectionResult` 接口新增 `isTauri` 字段但 return 仍只返回子 hook 结果。
+
+### Changed (2026-06-30)
+
+- **`nexus/backend/middleware/hitl.py`** (新增,~330 行) — `PathAwareHITLMiddleware(AgentMiddleware)`,三态路由:
+  - **protected** (解析自 `resolve_protected_paths(project_root)`,含 `AGENTS.md` 类) → 透传给 `quality_gate`,quality_gate 已经管
+  - **HITL** (非白名单 + 非 protected:项目源码 / `/tmp` / 全局 `.git/` 等) → `raise GraphInterrupt(tool_call)`,触发 WS `confirmation_request` 帧
+  - **deny 白名单** (`.nexus/skills/*` / `.nexus/cache/*` / `.nexus/sandbox/*` / `.nexus/memories/*` / `.nexus/subagents/*`) → 直接透传(LLM 自己的事,但用户无条件信任)
+  - 常量 `_DANGEROUS_PREFIXES` (写入即破坏系统的): `os.path.expanduser("~") / ".ssh" / ".aws"` 等
+  - 为什么走 middleware 不走 permissions:permissions 的 `mode="interrupt"` 在 deepagents 0.5.3 不支持(silent ignored);middleware 是 framework-stable 钩子
+
+- **`nexus/backend/agent/_agent_builder.py::create_agent` middleware 链追加**:
+  - `middleware=[quality_gate]` → `[quality_gate, path_aware_hitl, dynamic_identity_middleware, force_tool_mw]`
+  - 调用顺序敏感:`quality_gate` 先(只关心 AGENTS.md,透传其它);`path_aware_hitl` 后(对透传过来的"非白名单 + 非 protected"路径触发 HITL)
+  - `_ensure_column` `_register_channel` 类副作用调用顺序不变
+
+- **`nexus/backend/api/ws/__init__.py` 补 re-export**:
+  - 加 `from ...db import add_message` 重新导出,且加入 `__all__` 列表
+  - 加 inline 注释"持久化入口(2026-06-30 拆包后补 re-export,保证 mock.patch 路径稳定)"
+
+- **`nexus/backend/api/ws/{finalize.py, streaming.py, observability.py}` 改 import 模式**:
+  - `from ...db import add_message` → `from ... import db as _db` + 调用改为 `_db.add_message(...)`(monkeypatch-friendly)
+  - WHY:`from x import y` 在 import 时把 `y` 绑到当前命名空间,后续 `patch.object(ws_module, "y")` 改不到生产侧持有的对象引用;`x.y` 是属性查找,可被 monkeypatch 替换
+  - 跟 `feedback-monkeypatch-module-state.md` 经验一致
+
+- **`nexus/backend/agent/_agent_builder.py::create_agent` force_tool 收紧**:
+  - `ForceToolMiddleware(force_intents=("knowledge", "task"))` → `ForceToolMiddleware(force_intents=("knowledge",))`
+  - task 类问题(`print` 写代码 / 写脚本 / 写文件)放行原 LLM 决策(可能是 `write_file` / `edit_file` / `str_replace_editor`),由 LLM 自决
+  - knowledge 类("BTC 还能涨吗" / "元力股份 能买吗")继续强制 patch `yandex_search`(LLM 必须先看事实,不复读身份话术)
+
+- **`frontend/src/components/ToastHost.tsx` TS strict 修复**:
+  - 引入 `interface KindColor { bg: string; border: string; }`
+  - `KIND_COLOR: Record<ToastKind, KindColor>` 全字段 (`info/success/warn/error`) 显式声明
+  - 渲染时 `const c = KIND_COLOR[t.kind] ?? KIND_COLOR.info` 兜底
+
+- **`frontend/src/hooks/useWsConnection.ts` TS strict 修复**:
+  - return 改 `return { ...(isTauri ? tauri : browser), isTauri }` 合并 `isTauri` 字段(子 hook 返回值不含它,但 `UseWsConnectionResult` 接口要求暴露)
+
+### Added
+
+- **`tests/test_ws_hitl.py`** (新增,5 场景 3 类路径) — PathAwareHITLMiddleware 单元 + E2E 双层:
+  - **正常路径**:项目源码 (`nexus/backend/foo.py`) 触发 GraphInterrupt → WS 收到 `confirmation_request` 帧
+  - **边界**:`.nexus/skills/<name>/SKILL.md` 走白名单透传 / protected 路径透传给 quality_gate / 重复 interrupt 状态保留
+  - **异常**:`/tmp/foo.py` 是 `HITL` 不是 `deny`(测试 LLM 不应该把代码写到 `/tmp`,弹窗让用户拒绝)
+  - 副作用:idle `wrap_tool_call` 必须支持同步路径(deepagents 的 sync tool 调用仍走 `wrap_tool_call`,不是 `awrap_tool_call`)
+
+- **`tests/test_ws_package_init.py`** (新增,3 测试) — 回归保护:
+  - `test_ws_module_exposes_all_documented_symbols` — `__all__` 列表的每个名字都能 `getattr(ws, name)`
+  - `test_ws_module_add_message_is_callable` — `ws.add_message` 是 callable
+  - `test_ws_module_add_message_points_to_db_add_message` — **`ws.add_message is db.add_message`**(invariant,拆包后必须成立)
+
+- **`tests/test_force_tool_middleware.py::test_task_intent_no_longer_forced_to_yandex_search`** (新增) — 守 task 类不被 patch 反模式:
+  ```python
+  mw = ForceToolMiddleware(force_intents=("knowledge",))
+  req = _make_request("帮我把 print('hello') 写到 nexus/backend/test_human.py")
+  response = mw.wrap_model_call(req, lambda r: AIMessage(content=""))
+  assert not response.tool_calls, f"task 类不应被强制 patch,实际: {response.tool_calls}"
+  assert response.content == ""
+  ```
+
+### Changed (测试侧,详细)
+
+- `tests/test_ws_hitl.py` — `patch("nexus.backend.api.ws.add_message")` ×3 → `patch("nexus.backend.db.add_message")` ×3
+- `tests/test_clarification.py`:
+  - 引入 `from nexus.backend import db as _db_module`
+  - `real_add_message = ws_module.add_message` → `real_add_message = _db_module.add_message`
+  - `patch("nexus.backend.api.ws.add_message", side_effect=fake_add_message)` → `patch("nexus.backend.db.add_message", ...)`
+- `tests/test_observability_ws_integration.py`:
+  - `patch.object(ws_module, "_get_observability_sink", ...)` ×3 → `patch.object(obs_module, "_get_observability_sink", ...)` ×3
+  - 加 `from nexus.backend.api.ws import observability as obs_module`
+
+### Removed
+
+- **`pyproject.toml` 残留孤立路径引用**:
+  - `packages = ["nexus/backend/agent.py", "nexus/backend/api/ws.py"]` 类的单文件路径引用(实际已是包布局)
+  - 跟 `feedback-code-vs-product-distinction.md` 的"DMG 里不该有孤儿文件" 一致
+
+### Verified
+
+- `ruff check nexus/ tests/` — All checks passed
+- `ruff format --check nexus/ tests/` — 0 diff
+- `pytest tests/ -q --timeout=60` — **558 passed, 12 skipped** in 38.06s (基线 552 → +6 新测试 / 0 回归)
+- `cd frontend && npx tsc -b --noEmit` — 0 错(Tauri webview2 chromium + 兼容)
+- 5 个 E2E HITL 场景:WS 端收到 `confirmation_request` 帧,落地 `accept` / `reject` 走通
+- 后端日志确认:ForceToolMiddleware 同一 session 内 `wrap_model_call` 触发次数 ≤ 1(不再 16+ 次死循环)
+- DMG 重打:`bash scripts/build_dmg.sh` → 产物 `release/Nexus-1.0.0-arm64.dmg` 70MB → 安装到 /Applications/,端到端确认
+
+### Notes
+
+- **`backend/agent.py` 单文件遗留**:本次 commit 提交后,实际拆分已落到 `_agent_builder.py` / `_backend.py` / `_checkpoint.py` / `_llm_factory.py` / `_subagents.py` / `_system_prompt.py` 6 个模块 + `agent.py` 作为 façade,主干可读 200 行内。模块化效果在 `tests/test_agent_*.py` 9 个测试文件全过里体现。
+- **`api/ws.py` 单文件遗留**:同样落到 `__init__.py` / `connection.py` / `finalize.py` / `observability.py` / `streaming.py` / `thinking_parser.py`(重构已在更早 commit),本次 re-export + monkeypatch-friendly 是拆包路线图的最终态。
+- **`_DANGEROUS_PREFIXES` 列表会随产品功能收敛**:当前包含 `~/.ssh/` / `~/.aws/` / `/etc/` / `~/.zshrc` / `~/.bash_profile`,社区 LLM 整体偏保守,expanduser 命中就 deny-redirect 到 `~/.nexus/sandbox/` 重写。
+- **为什么 HITL 不走 deepagents permissions**:permissions 模型在 deepagents 0.5.3 后稳定支持 `mode="ask"` + on_event 钩子(0.6.12 加入),但产品对"project source path 敏感"是 Nexus 维度特性 — 未来 deepagents 升级后可以整体迁到 permissions,但本次为 0.6.12 → 0.7.0 升级预留 hook,不动。
+
+---
+
 ## [Unreleased] — DeepAgents 框架对齐:删除自造 QualityPipeline / IntentClassifier,引入 ForceToolMiddleware + tier_routing
 
 ### Problem
