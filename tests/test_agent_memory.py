@@ -104,6 +104,7 @@ class TestBuildSystemPromptIsModelAgnostic:
     def _patch_active_model(self, tmp_path, monkeypatch: pytest.MonkeyPatch):
         """把 ``models_config.MODELS_FILE`` 指向 tmp 路径,避免污染真实配置."""
         import json
+
         from nexus.backend import models_config
 
         fake = {
@@ -122,6 +123,7 @@ class TestBuildSystemPromptIsModelAgnostic:
         (tmp_path / "models.json").write_text(json.dumps(fake), encoding="utf-8")
         # 清空 _CACHED_PROMPT,避免老 cache 干扰
         from nexus.backend import agent
+
         monkeypatch.setattr(agent, "_CACHED_PROMPT", {})
 
     def test_prompt_does_not_bake_active_model_name(self, _patch_active_model) -> None:
@@ -137,49 +139,67 @@ class TestBuildSystemPromptIsModelAgnostic:
         答身份问题该用哪份数据。"""
         prompt = _build_system_prompt()
         assert "DynamicIdentityMiddleware" in prompt, (
-            "prompt 没提 DynamicIdentityMiddleware → LLM 不知道 FACT 块从哪来,"
-            "被问'你用的什么模型'时会瞎答"
+            "prompt 没提 DynamicIdentityMiddleware → LLM 不知道 FACT 块从哪来,被问'你用的什么模型'时会瞎答"
         )
         assert "FACT" in prompt
-        assert "models.json" in prompt, (
-            "prompt 必须说明 FACT 块数据源是 models.json,LLM 才有信心"
-        )
+        assert "models.json" in prompt, "prompt 必须说明 FACT 块数据源是 models.json,LLM 才有信心"
 
     def test_prompt_mentions_get_model_info_tool(self, _patch_active_model) -> None:
         """prompt 必须提到 ``get_model_info`` 工具(让 LLM 知道备用通道)。"""
         prompt = _build_system_prompt()
-        assert "get_model_info" in prompt, (
-            "prompt 没提 get_model_info 工具 → LLM 不会知道有备用 introspect 通道"
-        )
+        assert "get_model_info" in prompt, "prompt 没提 get_model_info 工具 → LLM 不会知道有备用 introspect 通道"
 
     def test_prompt_is_model_independent(self, tmp_path, monkeypatch) -> None:
         """切换 active model 后,prompt 内容**完全不变**(因为不再读 models.json)。"""
         import json
-        from nexus.backend import agent
-        from nexus.backend import models_config
+
+        from nexus.backend import agent, models_config
 
         # 第一组: agnes 激活
         monkeypatch.setattr(models_config, "MODELS_FILE", tmp_path / "models.json")
-        (tmp_path / "models.json").write_text(json.dumps({
-            "models": [{"id": "a", "name": "agnes-2.0-flash", "api_key": "x",
-                        "api_base": "https://apihub.agnes-ai.com/v1",
-                        "temperature": 0.7, "is_active": True}]
-        }), encoding="utf-8")
+        (tmp_path / "models.json").write_text(
+            json.dumps(
+                {
+                    "models": [
+                        {
+                            "id": "a",
+                            "name": "agnes-2.0-flash",
+                            "api_key": "x",
+                            "api_base": "https://apihub.agnes-ai.com/v1",
+                            "temperature": 0.7,
+                            "is_active": True,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(agent, "_CACHED_PROMPT", {})
         prompt_agnes = _build_system_prompt()
 
         # 第二组: MiniMax-M3 激活
-        (tmp_path / "models.json").write_text(json.dumps({
-            "models": [{"id": "m", "name": "MiniMax-M3", "api_key": "x",
-                        "api_base": "https://api.minimaxi.com/v1",
-                        "temperature": 0.7, "is_active": True}]
-        }), encoding="utf-8")
+        (tmp_path / "models.json").write_text(
+            json.dumps(
+                {
+                    "models": [
+                        {
+                            "id": "m",
+                            "name": "MiniMax-M3",
+                            "api_key": "x",
+                            "api_base": "https://api.minimaxi.com/v1",
+                            "temperature": 0.7,
+                            "is_active": True,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(agent, "_CACHED_PROMPT", {})
         prompt_minimax = _build_system_prompt()
 
         assert prompt_agnes == prompt_minimax, (
-            "切换 active model 后 prompt 变了 → _build_system_prompt 不应再依赖 "
-            "models.json,否则就是新 hardcode 串味源"
+            "切换 active model 后 prompt 变了 → _build_system_prompt 不应再依赖 models.json,否则就是新 hardcode 串味源"
         )
 
     def test_other_rules_kept(self, _patch_active_model) -> None:
@@ -208,6 +228,7 @@ class TestDynamicIdentityMiddleware:
     def _patch_active_model(self, tmp_path, monkeypatch: pytest.MonkeyPatch):
         """替换 ``models_config.MODELS_FILE`` 到 tmp,避免污染真实配置。"""
         import json
+
         from nexus.backend import models_config
 
         fake = {
@@ -266,71 +287,98 @@ class TestDynamicIdentityMiddleware:
 
         _, content = self._invoke_middleware(mw, request, handler, captured)
 
-        assert "agnes-2.0-flash" in content, (
-            f"FACT 块没注入 active model name,实际 content: {content[:300]}"
-        )
-        assert "agnes-ai" in content, (
-            f"FACT 块没注入 vendor,实际 content: {content[:300]}"
-        )
+        assert "agnes-2.0-flash" in content, f"FACT 块没注入 active model name,实际 content: {content[:300]}"
+        assert "agnes-ai" in content, f"FACT 块没注入 vendor,实际 content: {content[:300]}"
         # FACT 块必须在最前面(LLM 训练记忆里如果对位置敏感,prepend 比 append 更稳)
-        assert content.startswith("【FACT"), (
-            f"FACT 块没 prepend 到最前,实际开头: {content[:200]}"
-        )
+        assert content.startswith("【FACT"), f"FACT 块没 prepend 到最前,实际开头: {content[:200]}"
         # 原始 system prompt 内容必须保留(不能 overwrite 整个 system_message)
         assert "base prompt here" in content
 
     def test_middleware_reads_models_json_freshly(self, tmp_path, monkeypatch) -> None:
         """切换 active model 后,下次 middleware 调用必须反映新值(无缓存)。"""
         import json
+
         from nexus.backend import models_config
 
         monkeypatch.setattr(models_config, "MODELS_FILE", tmp_path / "models.json")
-        (tmp_path / "models.json").write_text(json.dumps({
-            "models": [{"id": "a", "name": "agnes-2.0-flash", "api_key": "x",
-                        "api_base": "https://apihub.agnes-ai.com/v1",
-                        "temperature": 0.7, "is_active": True}]
-        }), encoding="utf-8")
+        (tmp_path / "models.json").write_text(
+            json.dumps(
+                {
+                    "models": [
+                        {
+                            "id": "a",
+                            "name": "agnes-2.0-flash",
+                            "api_key": "x",
+                            "api_base": "https://apihub.agnes-ai.com/v1",
+                            "temperature": 0.7,
+                            "is_active": True,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
 
         mw, request, handler, captured = self._build_request()
         _, content1 = self._invoke_middleware(mw, request, handler, captured)
         assert "agnes-2.0-flash" in content1
 
         # 切换 active model 到 MiniMax-M3
-        (tmp_path / "models.json").write_text(json.dumps({
-            "models": [{"id": "m", "name": "MiniMax-M3", "api_key": "x",
-                        "api_base": "https://api.minimaxi.com/v1",
-                        "temperature": 0.7, "is_active": True}]
-        }), encoding="utf-8")
+        (tmp_path / "models.json").write_text(
+            json.dumps(
+                {
+                    "models": [
+                        {
+                            "id": "m",
+                            "name": "MiniMax-M3",
+                            "api_key": "x",
+                            "api_base": "https://api.minimaxi.com/v1",
+                            "temperature": 0.7,
+                            "is_active": True,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
 
         # 新一轮 LLM 调用(无 cache,无 reload)—— middleware 必须读出新值
         mw2, request2, handler2, captured2 = self._build_request()
         _, content2 = self._invoke_middleware(mw2, request2, handler2, captured2)
         assert "MiniMax-M3" in content2, (
-            "切换 active model 后 middleware 还是用老 agnes → 它缓存了,"
-            "重读 models.json 的契约没生效"
+            "切换 active model 后 middleware 还是用老 agnes → 它缓存了,重读 models.json 的契约没生效"
         )
         assert "MiniMax" in content2
 
     def test_middleware_handles_missing_active_model(self, tmp_path, monkeypatch) -> None:
         """``models.json`` 里没有 active 模型时,FACT 块走降级措辞(未配置模型)。"""
         import json
+
         from nexus.backend import models_config
 
         monkeypatch.setattr(models_config, "MODELS_FILE", tmp_path / "models.json")
-        (tmp_path / "models.json").write_text(json.dumps({
-            "models": [{"id": "x", "name": "inactive-model", "api_key": "x",
-                        "api_base": "https://x.com/v1", "temperature": 0.7,
-                        "is_active": False}]
-        }), encoding="utf-8")
+        (tmp_path / "models.json").write_text(
+            json.dumps(
+                {
+                    "models": [
+                        {
+                            "id": "x",
+                            "name": "inactive-model",
+                            "api_key": "x",
+                            "api_base": "https://x.com/v1",
+                            "temperature": 0.7,
+                            "is_active": False,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
 
         mw, request, handler, captured = self._build_request()
         _, content = self._invoke_middleware(mw, request, handler, captured)
-        assert "未配置模型" in content, (
-            "无 active 模型时 middleware 没走降级措辞 → LLM 会瞎答"
-        )
-        assert "inactive-model" not in content, (
-            "middleware 不应把 is_active=False 的模型注入 FACT 块"
-        )
+        assert "未配置模型" in content, "无 active 模型时 middleware 没走降级措辞 → LLM 会瞎答"
+        assert "inactive-model" not in content, "middleware 不应把 is_active=False 的模型注入 FACT 块"
 
 
 class TestGetModelInfoToolRegistered:
@@ -480,8 +528,7 @@ class TestCreateAgentWiresDeepAgentsMemory:
             # dynamic_identity_middleware 是 AgentMiddleware 实例
             dyn = [m for m in middleware if isinstance(m, AgentMiddleware)]
             assert dyn, (
-                "DynamicIdentityMiddleware 未注册到 middleware → LLM 收不到 "
-                "FACT 块,标题栏和 LLM 自报身份会再次不一致"
+                "DynamicIdentityMiddleware 未注册到 middleware → LLM 收不到 FACT 块,标题栏和 LLM 自报身份会再次不一致"
             )
             # 至少有 2 个 AgentMiddleware:dynamic_identity + quality_gate(后者不是
             # AgentMiddleware 而是 deepagents 的 Middleware 子类,可能也算,
