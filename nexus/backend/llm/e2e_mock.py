@@ -112,7 +112,7 @@ _SCENARIOS: dict[str, list[dict[str, Any]]] = {
         {
             "name": "edit_file",
             "args": {
-                "file_path": "/Users/yxb/projects/nexus/nexus/backend/agent.py",
+                "file_path": "/Users/yxb/projects/nexus/nexus/backend/agent/_agent_builder.py",
                 "old_string": "def get_project_root() -> Path:",
                 "new_string": "def get_project_root() -> Path:  # E2E mock comment",
             },
