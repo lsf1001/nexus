@@ -34,8 +34,57 @@ else:
 
 logger = logging.getLogger(__name__)
 
-# deepagents 内置文件工具名
-_FILE_TOOLS: frozenset[str] = frozenset({"edit_file", "write_file"})
+# deepagents 0.6.x 暴露给 LLM 的写文件工具名集合。
+# 主路径: edit_file / write_file (核心写工具, 必须评估)。
+# 别名: create_file / apply_patch / patch_file / str_replace_editor / write_document。
+_FILE_TOOLS: frozenset[str] = frozenset(
+    {
+        "edit_file",
+        "write_file",
+        "create_file",
+        "apply_patch",
+        "patch_file",
+        "str_replace_editor",
+        "write_document",
+    }
+)
+
+# 黑名单兜底模式: 工具名包含这些子串即视为写文件工具。
+_WRITE_TOOL_PATTERNS: tuple[str, ...] = (
+    "write_",
+    "edit_",
+    "patch_",
+    "apply_",
+    "_file",
+    "_document",
+)
+
+# 明确只读工具白名单 — 即使名称含 file/document 也不视为写。
+_READ_ONLY_TOOLS: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "ls",
+        "glob",
+        "grep",
+        "internet_search",
+    }
+)
+
+
+def _is_write_tool(tool_name: str) -> bool:
+    """判断工具名是否对应文件写操作(可能影响 AGENTS.md)。
+
+    优先级: 精确白名单命中 → 黑名单模式命中 → 否则按只读处理。
+    """
+    if not tool_name:
+        return False
+    if tool_name in _FILE_TOOLS:
+        return True
+    name = tool_name.lower()
+    if name in _READ_ONLY_TOOLS:
+        return False
+    return any(pattern in name for pattern in _WRITE_TOOL_PATTERNS)
+
 
 # 抽 user context 的窗口大小:最近 3 条 HumanMessage 拼成摘要,单条截断到
 # 500 字,总长度上限 1500 字。足够 Judge 理解意图又不会撑爆 token。
@@ -94,7 +143,7 @@ class QualityGateMiddleware(AgentMiddleware[AgentState, ContextT, ResponseT]):
 
     def _is_protected(self, tool_call: dict[str, Any]) -> bool:
         tool_name = tool_call.get("name", "")
-        if tool_name not in _FILE_TOOLS:
+        if not _is_write_tool(tool_name):
             return False
         target = self._extract_target_path(tool_call)
         if not target:
@@ -192,21 +241,21 @@ class QualityGateMiddleware(AgentMiddleware[AgentState, ContextT, ResponseT]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
     ) -> ToolMessage | Command[Any]:
-        """同步版本: 通过 asyncio.run 跑异步实现。"""
+        """同步入口: 把异步实现跑在独立线程,避免 asyncio.run 在已有 loop 时崩溃。
+
+        deepagents 0.6.x 主路径走 awrap_tool_call (FastAPI/uvicorn 全 async),
+        此方法仅在 sync 上下文(单测 / 同步脚本)被调用。
+        原实现直接 asyncio.run 会触发 'cannot be called from a running event loop',
+        改为 ThreadPoolExecutor 后 asycio.run 在新线程跑就没有冲突。
+        """
         import asyncio
+        import concurrent.futures
 
-        async def _run() -> ToolMessage | Command[Any]:
-            return await self.awrap_tool_call(request, lambda r: _sync(handler, r))
+        def _runner() -> ToolMessage | Command[Any]:
+            return asyncio.run(self.awrap_tool_call(request, handler))
 
-        return asyncio.run(_run())
-
-
-async def _sync(
-    handler: Callable[[Any], Any],
-    request: Any,
-) -> Any:
-    """桥接 sync handler 到 async（让 wrap_tool_call 也能用 sync handler)。"""
-    return handler(request)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(_runner).result()
 
 
 __all__ = ["QualityGateMiddleware"]
