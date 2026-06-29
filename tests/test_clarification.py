@@ -487,9 +487,9 @@ def test_clarification_placeholder_persist_failure_does_not_kill_ws(monkeypatch)
                 "data": {"chunk": MagicMock(content="done reply")},
             }
 
-    from nexus.backend.api import ws as ws_module
+    from nexus.backend import db as _db_module
 
-    real_add_message = ws_module.add_message
+    real_add_message = _db_module.add_message
 
     def fake_add_message(*args, **kwargs):
         # add_message(message_id, session_id, role, content, ...)
@@ -505,7 +505,7 @@ def test_clarification_placeholder_persist_failure_does_not_kill_ws(monkeypatch)
 
             with client.websocket_connect("/api/ws?token=test-token") as ws:
                 # 第一次 turn → 触发 clarification；只模拟 clarification 占位入库失败。
-                with _patch("nexus.backend.api.ws.add_message", side_effect=fake_add_message):
+                with _patch("nexus.backend.db.add_message", side_effect=fake_add_message):
                     ws.send_json({"content": "Q1", "title": "lock-test"})
                     first_events: list[dict] = []
                     for _ in range(20):

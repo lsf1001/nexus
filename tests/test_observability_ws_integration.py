@@ -33,8 +33,9 @@ def jsonl_sink(tmp_path: Path) -> EventSink:
 def test_emit_chat_event_writes_to_sink(jsonl_sink: EventSink):
     """emit_chat_event 公开 API 应写到 sink。"""
     from nexus.backend.api import ws as ws_module
+    from nexus.backend.api.ws import observability as obs_module
 
-    with patch.object(ws_module, "_get_observability_sink", lambda: jsonl_sink):
+    with patch.object(obs_module, "_get_observability_sink", lambda: jsonl_sink):
         ws_module.emit_chat_event(
             ChatStart(
                 timestamp="t",
@@ -55,11 +56,12 @@ def test_emit_chat_event_writes_to_sink(jsonl_sink: EventSink):
 def test_emit_chat_event_swallows_exceptions(tmp_path: Path):
     """emit_chat_event 失败不抛(观测层不能影响主流程)。"""
     from nexus.backend.api import ws as ws_module
+    from nexus.backend.api.ws import observability as obs_module
 
     def broken_sink() -> EventSink:
         raise RuntimeError("sink unavailable")
 
-    with patch.object(ws_module, "_get_observability_sink", broken_sink):
+    with patch.object(obs_module, "_get_observability_sink", broken_sink):
         # 不应抛
         ws_module.emit_chat_event(
             ChatStart(
@@ -75,8 +77,9 @@ def test_emit_chat_event_swallows_exceptions(tmp_path: Path):
 def test_event_dataclass_round_trips_through_sink(jsonl_sink: EventSink):
     """4 个产品事件 dataclass 都能 round-trip 过 sink。"""
     from nexus.backend.api import ws as ws_module
+    from nexus.backend.api.ws import observability as obs_module
 
-    with patch.object(ws_module, "_get_observability_sink", lambda: jsonl_sink):
+    with patch.object(obs_module, "_get_observability_sink", lambda: jsonl_sink):
         ws_module.emit_chat_event(
             ChatStart(
                 timestamp="t1",

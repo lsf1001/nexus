@@ -27,8 +27,8 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from ... import db as _db
 from ...config import CONFIG
-from ...db import add_message
 from ...intent.router import IntentKind, classify_intent
 from ...llm.policies import RetryPolicy
 from ...resilience.stream_guard import StreamGuard
@@ -127,7 +127,7 @@ async def _classify_and_record(
     # 同步正则推断 intent(classify_intent 内部已 try/except 兜底 chitchat)
     intent: IntentKind = classify_intent(user_content)
     # 入库(用 generate uuid;不传 thinking_content,跟 add_message 默认对齐)
-    add_message(str(uuid.uuid4()), session_id, "user", user_content, intent=intent)
+    _db.add_message(str(uuid.uuid4()), session_id, "user", user_content, intent=intent)
     return intent
 
 
