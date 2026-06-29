@@ -1,7 +1,11 @@
-"""端到端安全防护验证:HITL 拦截 + allow + interrupt 三类路径。
+"""端到端安全防护验证:三层防护(permissions 白名单 + PathAwareHITLMiddleware HITL
++ QualityGateMiddleware 评估)在端到端场景下行为一致。
 
-WHY:Task 1-4 已经分别覆盖了单元(permissions) / 集成(agent) / 边界(WS HITL),
-本文件验证三层防护在端到端场景下行为一致,防止未来重构破坏不变量。
+WHY:2026-06-30 重构后,HITL 不再由 ``FilesystemPermission(mode="interrupt")``
+派生(该字段在 deepagents 0.5.3 是非法值,被静默忽略),改为由
+:class:`nexus.backend.middleware.hitl.PathAwareHITLMiddleware` 在
+``wrap_tool_call`` 阶段做路径白名单 + 危险路径判定。本测试守住新架构的
+不变量,防止未来重构再次破坏 HITL 拦截语义。
 """
 
 from __future__ import annotations
@@ -9,6 +13,10 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from nexus.backend.middleware.hitl import (
+    PathAwareHITLMiddleware,
+    _is_write_tool,
+)
 from nexus.backend.permissions import (
     build_default_permissions,
     is_write_to_protected_path,
@@ -16,17 +24,29 @@ from nexus.backend.permissions import (
 )
 
 
-def test_agents_md_write_triggers_interrupt_at_three_locations() -> None:
-    """3 处 AGENTS.md(用户级 + 项目级 .nexus + .deepagents)写入必须 interrupt。
+def test_agents_md_triggers_quality_gate_not_hitl() -> None:
+    """2026-06-30 重构:AGENTS.md 写入由 QualityGateMiddleware 评估,
+    不是 PathAwareHITLMiddleware 弹 HITL(避免双重弹窗)。
 
-    WHY:deepagents FilesystemPermission mode="interrupt" 只对显式列出的路径
-    触发 HITL;若这 3 条路径任一遗漏,LLM 写入污染长期记忆时不会弹确认。
+    行为契约:
+      - PathAwareHITLMiddleware._is_protected() 对 ``~/.nexus/AGENTS.md``
+        返回 True(在 protected 集合中)→ _should_interrupt() 返回 False
+        → 中间件透传,不弹 HITL。
+      - 真正的"机器判断"由 :class:`QualityGateMiddleware` 跑 faithfulness 评估。
     """
-    perms = build_default_permissions(Path("/tmp/proj"))
-    interrupt_paths = [path for p in perms if p.mode == "interrupt" for path in p.paths]
-    # 至少 1 条 interrupt 规则,每条规则都含 AGENTS.md
-    assert interrupt_paths, "至少需要 1 条 interrupt 规则"
-    assert all("AGENTS.md" in p for p in interrupt_paths), f"所有 interrupt 路径都应含 AGENTS.md: {interrupt_paths}"
+    project_root = Path("/tmp/proj")
+    protected_abs = tuple(str(p) for p in resolve_protected_paths(project_root))
+    mw = PathAwareHITLMiddleware(project_root=project_root, protected_paths=protected_abs)
+    # 写 AGENTS.md: 应跳过 HITL(让 QualityGate 评估)
+    assert protected_abs, "应至少有 1 个受保护路径"
+    tool_call = {
+        "name": "write_file",
+        "id": "tc1",
+        "args": {"file_path": str(protected_abs[0]), "content": "x"},
+    }
+    assert not mw._should_interrupt(tool_call), (
+        "AGENTS.md 写入应跳过 HITL(QualityGate 兜底),不应再弹确认 — 避免双重弹窗"
+    )
 
 
 def test_nexus_dir_write_allowed() -> None:
@@ -38,32 +58,51 @@ def test_nexus_dir_write_allowed() -> None:
     )
 
 
-def test_tmp_is_readonly_not_writable() -> None:
-    """/tmp 只读:LLM 可看临时文件,但不允许写入(产出物应落 .nexus/)。
+def test_tmp_is_dangerous_not_writable() -> None:
+    """/tmp 是 PathAwareHITLMiddleware 的 dangerous 路径,直接 deny 不弹 HITL。
 
-    WHY:把 /tmp 设为 write-allow 会让 LLM 在 /tmp 下散落大量不可审计的
-    临时文件,违反"产出物集中 .nexus/"的设计原则。当前架构故意把 /tmp
-    列为 read-only 规则。
+    2026-06-30 重构:历史版本把 /tmp 列为 "read-only allow"(LLM 可看但不可写),
+    但深 agents 0.5.3 _PermissionMiddleware 对 "read-only allow" 不阻断 write
+    调用(因为 deepagents 框架允许"未命中 allow-write 规则 → 默认 allow")。
+    实测 LLM 仍可写 /tmp。当前设计:
+      - permissions 不含 /tmp 规则(只看 dangerous 根前缀,不查字符串含 /tmp)
+      - PathAwareHITLMiddleware._should_deny() 对 /tmp/** 直接返回 deny,
+        生成 ``ToolMessage(status='error')`` 阻断,LLM 反思不再写
     """
+    from pathlib import PurePosixPath
+
     perms = build_default_permissions(Path("/tmp/proj"))
-    # 找包含 /tmp/** 的规则
-    tmp_rules = [p for p in perms if any("/tmp/**" in path for path in p.paths)]
-    assert tmp_rules, "应至少 1 条规则覆盖 /tmp/**"
-    # /tmp/** 规则必须是 read-only,不应出现 write
-    for rule in tmp_rules:
-        assert "write" not in rule.operations, f"/tmp/** 不应被允许写入(防 LLM 在 /tmp 散落文件): {rule}"
+    # permissions 不应包含以 /tmp 为根的规则(但允许 /tmp 作为项目 root 前缀,
+    # 例如 ``/private/tmp/proj/.nexus/**`` —— 这里第一段是 ``private``,合法)
+    for p in perms:
+        for path in p.paths:
+            parts = PurePosixPath(path).parts
+            if parts and parts[0] == "tmp":
+                raise AssertionError(f"permissions 不应包含以 /tmp 为根的规则: {p}")
+
+    # PathAwareHITLMiddleware 应把 /tmp 视为 dangerous
+    with tempfile.TemporaryDirectory() as td:
+        mw = PathAwareHITLMiddleware(project_root=Path(td))
+        tool_call = {
+            "name": "write_file",
+            "id": "tc1",
+            "args": {"file_path": "/tmp/e2e_scratch.md", "content": "x"},
+        }
+        assert mw._should_deny(tool_call), "/tmp 写应被 _should_deny 拦截,直接 deny 不弹 HITL"
+        assert not mw._should_interrupt(tool_call), "/tmp 写不应触发 HITL(走 deny 路径)"
 
 
-def test_no_deny_rules_added_by_design() -> None:
-    """本版本不加 deny(避免和 interrupt 语义重复)。
+def test_no_deny_rules_in_permissions_by_design() -> None:
+    """2026-06-30 重构:permissions 不加 deny — deny 由 PathAwareHITLMiddleware._should_deny 接管。
 
-    WHY:FilesystemPermission 没有 deny-by-default 语义,deny 规则会和
-    interrupt 重复,且 deny 不会触发 HITL(LLM 看到"被拒"提示,体验差)。
-    真正的高敏保护靠 interrupt + QualityGateMiddleware 忠实度评估。
+    WHY:FilesystemPermission 的 deny 规则只对 _PermissionMiddleware 生效,
+    但 HITL 必须由中间件触发 GraphInterrupt 才能让 WS 端发 confirmation_request。
+    把 deny 和 HITL 拆到两层更清晰:permissions 是 _PermissionMiddleware
+    的输入(纯白名单),PathAwareHITLMiddleware 负责 GraphInterrupt 链路。
     """
     perms = build_default_permissions(Path("/tmp/proj"))
     denies = [p for p in perms if p.mode == "deny"]
-    assert denies == [], f"不应有 deny 规则,实际: {denies}"
+    assert denies == [], f"permissions 不应有 deny 规则(改由 PathAwareHITLMiddleware 接管): {denies}"
 
 
 def test_resolve_protected_paths_matches_user_agents_md_only() -> None:
@@ -101,66 +140,83 @@ def test_is_write_to_protected_path_user_agents_md() -> None:
     )
 
 
-def test_interrupt_on_preserves_allowlist() -> None:
-    """``permissions`` allow 规则覆盖 .nexus/ + /tmp/,白名单内写不触发 HITL。
+def test_path_aware_hitl_preserves_allowlist() -> None:
+    """PathAwareHITLMiddleware 的白名单内写不触发 HITL,直接放行。
 
-    新架构:interrupt_on 由 deepagents 从 ``mode="interrupt"`` 派生;
-    ``mode="allow"`` 规则直接放行(LLM 可写)。本测试守住 allow 规则
-    覆盖 .nexus/ + /tmp/ 的不变量,防止未来重构把白名单漏掉导致
-    LLM 写配置/日志时也被 HITL 拦下。
+    新架构:permissions + PathAwareHITLMiddleware 双层都做白名单,
+    permissions 喂 deepagents 自己的 _PermissionMiddleware(纯 allow),
+    PathAwareHITLMiddleware 路径白名单在中间件层 early-return。
     """
     with tempfile.TemporaryDirectory() as td:
         project_root = Path(td).expanduser().resolve()
-        perms = build_default_permissions(project_root)
-        allow_write_rules = [p for p in perms if "write" in p.operations and p.mode == "allow"]
-        assert allow_write_rules, "应至少 1 条 allow-write 规则"
-        # .nexus/ 必须被 allow 规则覆盖(用户级 + 项目级都允许写)
-        all_allowed_paths = [path for rule in allow_write_rules for path in rule.paths]
-        nexus_allowed = any(".nexus/**" in p for p in all_allowed_paths)
-        assert nexus_allowed, f".nexus/** 应在 allow 规则中,实际: {all_allowed_paths}"
+        mw = PathAwareHITLMiddleware(project_root=project_root)
+        # 项目级 .nexus/outputs/ → 白名单内,放行
+        tool_call = {
+            "name": "write_file",
+            "id": "tc1",
+            "args": {
+                "file_path": str(project_root / ".nexus" / "outputs" / "test.md"),
+                "content": "x",
+            },
+        }
+        assert not mw._should_interrupt(tool_call), "项目级 .nexus/outputs/ 写应放行,不触发 HITL"
+        assert not mw._should_deny(tool_call), "白名单内不应被 deny"
+        # 用户级 ~/.nexus/outputs/ → 白名单内,放行
+        tool_call_user = {
+            "name": "write_file",
+            "id": "tc2",
+            "args": {
+                "file_path": str(Path.home() / ".nexus" / "outputs" / "test.md"),
+                "content": "x",
+            },
+        }
+        assert not mw._should_interrupt(tool_call_user), "用户级 .nexus/outputs/ 写应放行"
 
 
-def test_interrupt_on_blocks_project_source() -> None:
-    """``permissions`` interrupt 规则覆盖受保护 AGENTS.md,非白名单项目源码默认 allow。
+def test_path_aware_hitl_blocks_project_source() -> None:
+    """PathAwareHITLMiddleware 对非白名单 + 非 dangerous + 非 protected 路径触发 HITL。
 
-    新架构下,deepagents 的 FilesystemPermission 行为是:
-    - 命中 mode="allow" → 放行
-    - 命中 mode="interrupt" → 弹 HITL
-    - 未命中 → 默认 allow(deny-by-default 禁用,详见 permissions.py 设计原则)
-
-    所以"项目源码"在 allow 规则**不**覆盖的情况下默认 allow,而不是触发 HITL。
-    真正会触发 HITL 的只有 mode="interrupt" 规则明确列出的路径(3 处 AGENTS.md)。
-    本测试验证这层"默认 allow + interrupt 显式列"的语义。
+    新架构下,deepagents FilesystemPermission 已不表达 HITL 语义,
+    所有 HITL 拦截都在 PathAwareHITLMiddleware.wrap_tool_call 完成。
+    项目源码路径(``nexus/backend/foo.py``)是典型的"非白名单" → 触发 HITL。
     """
     with tempfile.TemporaryDirectory() as td:
         project_root = Path(td)
-        perms = build_default_permissions(project_root)
-        interrupt_rules = [p for p in perms if p.mode == "interrupt"]
-        assert interrupt_rules, "应至少 1 条 interrupt 规则"
-        # 全部 interrupt 路径必须是 3 处 AGENTS.md 之一(非源码路径)
-        all_interrupt_paths = [path for rule in interrupt_rules for path in rule.paths]
-        protected_abs = [str(p) for p in resolve_protected_paths(project_root)]
-        for ip in all_interrupt_paths:
-            assert any(ip == p for p in protected_abs), (
-                f"interrupt 规则路径 {ip} 不在受保护 AGENTS.md 列表 {protected_abs} 中 — "
-                "可能把普通源码路径错配为 interrupt 了,会误伤 LLM 改源码"
-            )
+        mw = PathAwareHITLMiddleware(project_root=project_root)
+        tool_call = {
+            "name": "write_file",
+            "id": "tc1",
+            "args": {
+                "file_path": str(project_root / "nexus" / "backend" / "e2e_src.py"),
+                "content": "print('e2e')",
+            },
+        }
+        assert mw._should_interrupt(tool_call), "项目源码路径应触发 PathAwareHITLMiddleware HITL(E2E 7/7 必 PASS)"
+        assert not mw._should_deny(tool_call), "项目源码不应被 deny(允许用户弹窗决策)"
 
 
-def test_interrupt_on_covers_write_file_and_edit_file() -> None:
-    """``permissions`` interrupt 规则的 ``operations`` 必须含 ``"write"``,
-    deepagents 才会把它同时映射到 write_file / edit_file 两个工具。
+def test_path_aware_hitl_covers_write_file_and_edit_file() -> None:
+    """PathAwareHITLMiddleware 拦截必须覆盖 write_file / edit_file 等写工具。"""
+    # _is_write_tool 已覆盖 write_file / edit_file / create_file 等
+    for tool_name in ("write_file", "edit_file", "create_file", "apply_patch", "patch_file"):
+        assert _is_write_tool(tool_name), f"{tool_name} 应被识别为写工具"
 
-    WHY:deepagents 的 FilesystemPermission 用 ``operations`` 字段做"操作类型
-    匹配",``["write"]`` 覆盖 write_file 和 edit_file(两个写工具)。如果
-    写成 ``["write_file"]`` 之类单工具名,edit_file 不会触发 interrupt。
-    """
+    # 只读工具不应被误判
+    for tool_name in ("read_file", "ls", "glob", "grep"):
+        assert not _is_write_tool(tool_name), f"{tool_name} 不应被误判为写工具"
+
+    # PathAwareHITLMiddleware 实例:edit_file 命中 HITL 拦截
     with tempfile.TemporaryDirectory() as td:
-        project_root = Path(td)
-        perms = build_default_permissions(project_root)
-        interrupt_rules = [p for p in perms if p.mode == "interrupt"]
-        assert interrupt_rules, "应至少 1 条 interrupt 规则"
-        for rule in interrupt_rules:
-            assert "write" in rule.operations, (
-                f"interrupt 规则的 operations 必须含 'write' 才能覆盖 write_file/edit_file, 实际: {rule}"
-            )
+        mw = PathAwareHITLMiddleware(project_root=Path(td))
+        for tool_name in ("write_file", "edit_file"):
+            tc = {
+                "name": tool_name,
+                "id": "tc1",
+                "args": {
+                    "file_path": str(Path(td) / "nexus" / "backend" / "x.py"),
+                    "content": "x",
+                    "old_string": "",
+                    "new_string": "x",
+                },
+            }
+            assert mw._should_interrupt(tc), f"{tool_name} 应触发 HITL"
