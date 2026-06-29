@@ -15,7 +15,6 @@ import base64
 import json
 import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from cryptography.fernet import Fernet
@@ -75,6 +74,7 @@ def test_save_and_load_roundtrip_uses_fernet(isolated_state: Path) -> None:
     ciphertext = raw["token"]
     assert len(ciphertext) > 80, f"Fernet ciphertext too short: {len(ciphertext)}"
     import base64
+
     base64.urlsafe_b64decode(ciphertext)  # 不抛即合法
 
     loaded = wechat_account._load_account("test-bot@im.bot")
@@ -163,9 +163,7 @@ def test_secret_file_generated_with_0600_on_first_use(isolated_state: Path) -> N
     Fernet(key)
 
 
-def test_env_var_takes_precedence_over_secret_file(
-    isolated_state: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_env_var_takes_precedence_over_secret_file(isolated_state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """NEXUS_TOKEN_ENCRYPTION_KEY 环境变量优先于 ~/.nexus/.secret。"""
     # 预先在 secret 文件里放一个 key
     secret_key = Fernet.generate_key()

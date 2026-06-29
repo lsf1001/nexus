@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from enum import StrEnum
 from typing import Final
 
@@ -36,6 +37,34 @@ _CONTEXT_LENGTH_CODES: Final[frozenset[str]] = frozenset(
 _CONTENT_FILTER_CODES: Final[frozenset[str]] = frozenset(
     {"content_policy_violation", "content_filter", "content_filter_restore_error"}
 )
+
+
+# 匹配常见 LLM 服务商 API key 前缀(B13 安全修复)
+# - sk- / sk-proj- (OpenAI 官方 / 多数兼容网关)
+# - ghp- (GitHub PAT,常见于 GitHub Models 端点)
+# - xai- / anthropic- (各厂商自家前缀)
+# 后跟 [A-Za-z0-9_-] 至少 20 位 — 太短的不会真出现,提前收口避免误杀正常英文词
+_API_KEY_REDACT_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?<![A-Za-z0-9])"
+    r"(sk-(?:proj-)?[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}"
+    r"|ghp_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}"
+    r"|anthropic-[A-Za-z0-9_-]{20,})"
+)
+# 兜底:任意 32+ 位连续 [A-Za-z0-9_-] (Bearer token / 长 secret)
+_BEARER_TOKEN_REDACT_RE: Final[re.Pattern[str]] = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9])")
+
+
+def _redact_secrets(text: str) -> str:
+    """把异常文案里可能泄漏的 API key / 长 secret 替换为 ``[REDACTED]``。
+
+    LLM 上游 SDK 异常 ``str(exc)`` 里有时会回显请求 header(包括
+    Authorization / x-api-key)或 URL 里的 token。ClassifiedError.message
+    会通过 WS ``error`` 帧回前端,无防护下等于把生产密钥推到用户浏览器。
+    此处先做"已知前缀 + 长串"两道正则;两者命中任一即红化。
+    """
+    text = _API_KEY_REDACT_RE.sub("[REDACTED]", text)
+    text = _BEARER_TOKEN_REDACT_RE.sub("[REDACTED]", text)
+    return text
 
 
 class LLMErrorKind(StrEnum):
@@ -137,9 +166,15 @@ def _is_content_filter_error(exc: BaseException) -> bool:
 
 
 def _build_message(kind: LLMErrorKind, exc: BaseException) -> str:
-    """生成可读的错误摘要，包含错误种类和原始异常类型。"""
-    base = f"{type(exc).__name__}: {exc}"
-    return f"[{kind.value}] {base}"
+    """生成可读的错误摘要,包含错误种类和原始异常类型,并脱敏可能的密钥。
+
+    B13 安全修复:``str(exc)`` 可能回显上游请求里的 Authorization header、
+    API key 或 URL token — 这些会被 WS ``error`` 帧原样推到前端。
+    先经过 :func:`_redact_secrets` 替换为 ``[REDACTED]`` 再返回。
+    """
+    raw = f"{type(exc).__name__}: {exc}"
+    safe = _redact_secrets(raw)
+    return f"[{kind.value}] {safe}"
 
 
 def classify(exc: BaseException) -> ClassifiedError:

@@ -17,10 +17,9 @@ token 格式（3 段，base64url 编码无 padding）：
 签名输入的 payload 形如 "sess-1:42:1717700000"，验证时只要 payload 与签发时一致，
 HMAC 校验通过即视为未被篡改。
 
-secret 取值：
+secret 取值（仅信任独立的高强度 secret，不再回退 ws_token）：
   1. 优先从 CONFIG['resume_secret'] 取（环境变量 NEXUS_RESUME_SECRET）；
-  2. 缺省回退到 CONFIG['ws_token']（避免历史部署直接无法签发）；
-  3. 两者都为空时抛 :class:`RuntimeError`（绝不静默用空 secret）。
+  2. 未配置或长度 < 32 字节时抛 :class:`RuntimeError`（绝不静默用空 / 弱 secret）。
 """
 
 from __future__ import annotations
@@ -49,20 +48,26 @@ class InvalidResumeToken(Exception):  # noqa: N818  # 计划文档固定命名
 
 
 def _get_secret() -> str:
-    """从 CONFIG 取 NEXUS_RESUME_SECRET，缺省用 ws_token 兜底。
+    """从 CONFIG 取 NEXUS_RESUME_SECRET,长度至少 32 字节 (HMAC 最佳实践)。
+
+    原实现缺省回退到 ws_token 兜底 — 但 ws_token 是 WS 端点固定密码,
+    在 DMG / 前端构建里明文可见,断线重连 token 强度被降到同一水平。
+    删除兜底,只信任 NEXUS_RESUME_SECRET,未配置时显式报错。
 
     Raises:
-        RuntimeError: 两个 secret 都没配置时。
+        RuntimeError: 未配置 NEXUS_RESUME_SECRET 或长度 < 32。
     """
     resume_secret = CONFIG.get("resume_secret") or ""
-    if resume_secret:
-        return resume_secret
-
-    ws_token = CONFIG.get("ws_token") or ""
-    if ws_token:
-        return ws_token
-
-    raise RuntimeError("未配置 NEXUS_RESUME_SECRET 或 ws_token，无法签发 resume token")
+    if not resume_secret:
+        raise RuntimeError(
+            "未配置 NEXUS_RESUME_SECRET, 无法签发 resume token; "
+            "请在 .env / 启动环境里设置 NEXUS_RESUME_SECRET (≥ 32 字节随机串)"
+        )
+    if len(resume_secret) < 32:
+        raise RuntimeError(
+            f"NEXUS_RESUME_SECRET 长度 {len(resume_secret)} < 32 字节, 请用 secrets.token_urlsafe(32) 或同等强度生成"
+        )
+    return resume_secret
 
 
 def _b64url_encode(raw: bytes) -> str:

@@ -49,11 +49,18 @@ def _auth_error() -> AuthenticationError:
 
 
 def _authed_token(monkeypatch) -> str:
-    """注入 ws_token + resume_secret，返回一个合法 token。"""
+    """注入 ws_token + resume_secret,返回一个合法 token。
+
+    resume_secret 必须 >= 32 字节(resume.py _get_secret 的硬性约束)。
+    """
     from nexus.backend import config as config_module
 
     monkeypatch.setitem(config_module.CONFIG, "ws_token", "test-token")
-    monkeypatch.setitem(config_module.CONFIG, "resume_secret", "test-resume-secret-xyz")
+    monkeypatch.setitem(
+        config_module.CONFIG,
+        "resume_secret",
+        "test-resume-secret-32bytes-or-more-abcdef0123456789",
+    )
     return "test-token"
 
 
