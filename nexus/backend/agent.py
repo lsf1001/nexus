@@ -15,9 +15,10 @@ import os as _os
 from pathlib import Path
 from typing import Any
 
-# 运行时 import:函数签名注解需要 BaseStore 这个名字在运行时可见
+# 运行时 import:函数签名注解需要 BaseStore / BaseChatModel 在运行时可见
 # (TYPE_CHECKING 只在静态分析时为 True,运行 uvicorn 时为 False)。
 # 延后到运行时而不是函数内:避免每调一次都重新 import。
+from langchain_core.language_models import BaseChatModel
 from langgraph.store.base import BaseStore
 
 # 关键：langchain_openai / deepagents / llm.wrapper 都延后到函数内 import。
@@ -145,8 +146,8 @@ def get_llm(
     fallback=None,
     fallback_policy=None,
     timeout=None,
-):
-    """创建带韧性包装的 LLM 实例（默认即包装）。
+) -> "BaseChatModel":
+    """根据参数构造带韧性包装的 LLM 实例(超时 / 重试 / 降级)。
 
     本函数与历史版本保持向后兼容：
       - 前 4 个参数（``model_name`` / ``api_key`` / ``api_base`` / ``temperature``）

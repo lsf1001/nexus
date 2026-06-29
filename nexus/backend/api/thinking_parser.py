@@ -48,6 +48,19 @@ class ThinkingParser:
         self._thinking_acc: str = ""
 
     def feed(self, content: str) -> list[_Emission]:
+        """喂入一段流式 content,返回当前 chunk 能 emit 的 ``(kind, text)`` 列表。
+
+        状态机入口:检查末尾是否留有半截标签(`<thin` / `</think` 等),
+        不能立刻决定的片段会 hold 到下次 feed。完整标签触发状态切换
+        并递归处理残余文本。
+
+        Args:
+            content: 单次 LLM 流式 chunk 的字符串内容(可为空)。
+
+        Returns:
+            按出现顺序的 ``("chunk" | "thinking", text)`` 元组列表。
+            若输入为空或全部被 hold,返回空列表。
+        """
         if not content:
             return []
         emissions: list[_Emission] = []
@@ -65,6 +78,16 @@ class ThinkingParser:
         return emissions
 
     def flush(self) -> list[_Emission]:
+        """流末兜底:把 hold 残留和未闭合的 thinking 累积 emit 出来。
+
+        流式结束时调用一次,确保:
+          - 末尾未拼成完整标签的 partial 当作 chunk emit (避免丢字);
+          - 已累积但未配 close 的 thinking 文本作为 thinking 帧 emit
+            (避免思考内容随流结束丢失)。
+
+        Returns:
+            兜底 emit 的 ``(kind, text)`` 元组列表。
+        """
         emissions: list[_Emission] = []
         if self._hold:
             emissions.append(("chunk", self._hold))

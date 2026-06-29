@@ -7,6 +7,7 @@
 
 import logging
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -30,8 +31,19 @@ def _get_db_path() -> Path:
 
 
 @contextmanager
-def get_db():
-    """获取数据库连接的上下文管理器。首次访问时自动建表。"""
+def get_db() -> Iterator[sqlite3.Connection]:
+    """获取 SQLite 连接的上下文管理器,首次访问时自动建表。
+
+    启用 PRAGMA:
+      - ``foreign_keys=ON`` (默认关闭)
+      - ``journal_mode=WAL`` (并发读优化)
+      - ``synchronous=NORMAL`` (WAL 模式下 fsync 折中)
+      - ``busy_timeout=30000ms`` (抗 aiosqlite 写锁等待)
+
+    Yields:
+        已配置 row_factory 的 :class:`sqlite3.Connection`,调用方在
+        ``with`` 块退出时会自动 commit,异常时回滚 + 关闭。
+    """
     global _INITED
     conn = sqlite3.connect(str(_get_db_path()))
     conn.row_factory = sqlite3.Row

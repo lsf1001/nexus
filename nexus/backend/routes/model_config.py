@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from threading import Lock
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -132,8 +133,8 @@ async def set_default_model(body: DefaultModelRequest) -> dict:
 
 
 @router.get("")
-async def get_models():
-    """获取所有模型列表。"""
+async def get_models() -> list[dict[str, Any]]:
+    """获取所有模型列表(API key 仅返回末 4 位掩码)。"""
     config = load_models()
     # 出于安全：列表接口不返回真实 api_key，只返回是否已配置。
     masked = []
@@ -148,7 +149,7 @@ async def get_models():
 
 
 @router.post("/switch", response_model=SwitchModelResponse)
-async def switch_model(body: SwitchModelRequest):
+async def switch_model(body: SwitchModelRequest) -> SwitchModelResponse:
     """切换当前激活的模型。"""
     model_id = body.id
 
@@ -193,7 +194,7 @@ async def switch_model(body: SwitchModelRequest):
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_model(body: CreateModelRequest):
+async def create_model(body: CreateModelRequest) -> dict[str, Any]:
     """创建新模型。"""
     config = load_models()
 
@@ -218,7 +219,7 @@ async def create_model(body: CreateModelRequest):
 
 
 @router.put("/{model_id}")
-async def update_model(model_id: str, body: UpdateModelRequest):
+async def update_model(model_id: str, body: UpdateModelRequest) -> dict[str, Any]:
     """更新模型配置。"""
     config = load_models()
 
@@ -245,8 +246,8 @@ async def update_model(model_id: str, body: UpdateModelRequest):
 
 
 @router.delete("/{model_id}")
-async def delete_model(model_id: str):
-    """删除模型。"""
+async def delete_model(model_id: str) -> dict[str, bool]:
+    """删除模型(最后一个有 api_key 的 model 不能删)。"""
     config = load_models()
     models = config.get("models", [])
 
