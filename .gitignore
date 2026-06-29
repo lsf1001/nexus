@@ -80,3 +80,14 @@ desktop/dist/
 test-results/
 frontend/test-results/
 playwright-report/
+
+# 调试 / 手动测试 截图产物(E2E debug spec + manual UI flow 用)
+.e2e-shots/
+frontend/debug-shots/
+frontend/manual-shots/
+
+# 实验性 staging 目录(本地 .laobai-lab / 反复跑出的产物,不入库)
+.laobai-lab-staging/
+
+# Tauri 编译产物(desktop/src-tauri/frontend-dist 由 vite build 出来,产物)
+desktop/src-tauri/frontend-dist/
