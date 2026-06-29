@@ -32,26 +32,16 @@ logger = logging.getLogger(__name__)
 def _build_system_prompt(model_name: str = "") -> str:
     """构建系统提示词的**静态部分** —— 与模型无关的产品层规则。
 
-    重要设计变更(2026-06-29 第三轮重构):
-      旧版本把"当前驱动模型 = X"硬编码进 prompt 字符串,**在 ``create_agent``
-      阶段只跑一次**。当用户从 UI / 命令行 / 第三方工具改 ``models.json``
-      切换激活模型时,已经构造好的 agent 内部 system_prompt **不会**自动
-      更新 → 标题栏(``/api/model`` 端点读 models.json)和 LLM 自报身份
-      不一致(E2E 2026-06-29 真实 bug,用户反馈"标题显示 MiniMax-M3,
-      LLM 答 agnes-2.0-flash")。
-
-      修正方案:
-        - 本函数**不再**拼"当前驱动模型"相关字符串,只输出产品层稳定规则
-          (身份 / 思考格式 / 澄清规则 / 安全 / 禁止事项)。
-        - "当前驱动模型 = ?" 由 :class:`DynamicIdentityMiddleware` 在
-          **每次 LLM 调用前**实时读 ``~/.nexus/models.json`` 注入到
-          ``request.system_message`` 的最前面(``wrap_model_call`` 钩子)。
-        - 这样切模型后下一轮 LLM 调用**立即**反映新值,UI 和 LLM 永远一致。
+    2026-06-29 重构(对齐 DeepAgents 框架):
+      本函数只输出**与激活模型无关**的产品规则(身份 / 思考格式 / 澄清 /
+      安全)。模型特定指令(标准话术、弱模型工具约束等)由
+      :func:`nexus.backend.profiles.tier_routing.register_tier_profiles` 通过
+      deepagents HarnessProfile 按 ``provider:model`` 自动挂载
+      ``system_prompt_suffix``,**不在本函数硬拼**。
 
     Args:
-        model_name: **保留参数仅为向后兼容**,实际不影响本函数输出。早期版本
-            缓存按 ``model_name`` 分桶;现在 FACT 块由 middleware 注入,缓存
-            key 简化为 ``"__default__"``,整个进程一份即可。
+        model_name: **保留参数仅为向后兼容**,实际不影响本函数输出。
+            缓存 key 简化为 ``"__default__"``,整个进程一份即可。
 
     Returns:
         与激活模型无关的 system prompt 字符串。
@@ -68,16 +58,9 @@ def _build_system_prompt(model_name: str = "") -> str:
 ``name`` / ``vendor`` 两个字段,**直接来自 ``~/.nexus/models.json``
 的 is_active=true 那条记录**。
 
-回答"你用的什么模型"等身份问题时:
-  1. **必须**使用上述 FACT 块里系统注入的 ``name`` / ``vendor`` 值。
-  2. **禁止**凭训练记忆瞎答(LLM 训练数据里的"Qwen/Claude/MiniMax-M3"
-     等默认回答**在这里全部不权威**)。
-  3. 标准话术:
-     > 我是 Nexus,由 {name} 驱动。Nexus 是夜小白科技有限公司基于
-     > {name} 模型打造的 AI 智能助理。{name} 由 {vendor} 提供。
-     其中 ``{name}`` / ``{vendor}`` 替换为 FACT 块里的实际值。
-  4. 如果 FACT 块里 name="未配置模型",明确告诉用户"当前没有激活的模型,
-     请到模型设置里选一个",**不要**瞎编一个名字。
+回答身份问题时直接使用 FACT 块注入的 ``name`` / ``vendor`` 值,**禁止**
+凭训练记忆瞎答。如果 FACT 块里 name="未配置模型",明确告诉用户当前没有
+激活的模型,请到模型设置里选一个,**不要**瞎编一个名字。
 
 【回答规则 · 强约束】
 1. 你是 Nexus —— 不是 Cline、Claude 或任何其他 AI
@@ -1011,33 +994,38 @@ def create_agent(
     # 旧 commit ``c6d6f56`` 基于"deepagents 默认 trigger=None"错误前提,
     # 实际是 ``compute_summarization_defaults`` 会按 model profile 给出
     # 非空 trigger,完全够用。
-
     # ``checkpointer`` 已在上面 _create_store() 之前构造(顺序敏感,见那段注释)。
+    # 2026-06-29 重构:在 create_deep_agent 之前注册 HarnessProfile tier 路由。
+    # 必须先于 create_deep_agent 调用,否则 resolve_model 时拿不到 spec 匹配。
+    from .profiles.tier_routing import register_tier_profiles
+
+    register_tier_profiles()
+
+    # 2026-06-29 重构:加 ForceToolMiddleware —— 弱模型(MiniMax-M3)问投资
+    # 类问题不调 yandex_search,LLM 答非所问。本中间件在 LLM 第一次响应没
+    # 调工具时,自动 patch 一个 yandex_search tool_call,强制走事实检索。
+    from .middleware.force_tool import ForceToolMiddleware
+
+    force_tool_mw = ForceToolMiddleware(force_intents=("knowledge", "task"))
 
     agent = create_deep_agent(
         model=llm,
         tools=all_tools,
-        # 2026-06-29 第三轮重构:``_build_system_prompt`` 输出**与激活模型无关**
-        # 的稳定字符串(身份 / 思考格式 / 澄清 / 安全)。当前激活模型信息由
-        # ``middleware=[..., dynamic_identity_middleware]`` 在每次 LLM 调用
-        # 前实时注入(``wrap_model_call`` 钩子读 ``~/.nexus/models.json``)。
-        # 单一数据源,标题栏(``/api/model``)和 LLM 自报身份永远一致。
-        # ``model_name`` 参数保留仅为兼容 ``get_system_prompt`` 老签名,
-        # 实际不影响 prompt 内容(单 bucket 缓存)。
-        # ``model_name`` 为 ``None`` 时回退到 CONFIG["model_name"](跟 get_llm 默认对齐)。
+        # 2026-06-29 重构:``_build_system_prompt`` 只输出与激活模型无关的
+        # 产品规则(身份 / 思考格式 / 澄清 / 安全)。模型特定指令由
+        # HarnessProfile 的 ``system_prompt_suffix`` 按 provider:model 注入。
         system_prompt=get_system_prompt(model_name or CONFIG.get("model_name", "")),
         backend=backend,
         subagents=subagents,
         permissions=permissions,
         memory=memory_files,
         store=store,
-        # middleware 顺序:dynamic_identity 必须**先**执行(prepend FACT 到
-        # system_message),再让 quality_gate 看到。langchain middleware 列表
-        # 的第一个是最外层 → 它最后执行(对 LLM 而言);但 dynamic_identity
-        # 不拦截 / 改写 LLM 响应,只 mutate system_message,实际效果:
-        # handler 进入 LLM 时,system_message 已经被 dynamic_identity 更新为
-        # 最新值。quality_gate 只关心 tool_call,顺序无关紧要。
-        middleware=[quality_gate, dynamic_identity_middleware],
+        # middleware 顺序(由外到内,langchain 第一个是最外层最后执行):
+        #   quality_gate      : 拦截 AGENTS.md 写入忠实度评估(配合 MemoryMiddleware)
+        #   dynamic_identity  : prepend FACT 块(注入当前激活模型)
+        #   force_tool        : knowledge/task 类问题强制 LLM 调 yandex_search
+        # 三者职责互不重叠,顺序敏感度低。
+        middleware=[quality_gate, dynamic_identity_middleware, force_tool_mw],
         checkpointer=checkpointer,
         skills=[
             ".nexus/skills",

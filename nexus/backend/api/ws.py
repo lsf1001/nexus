@@ -237,23 +237,10 @@ async def _finalize_after_stream(
     if pending_interrupts is not None:
         return
 
-    # 质量门(同 user 消息路径原逻辑)
-    pipeline = get_quality_pipeline() if get_quality_pipeline else None
+    # 质量门 2026-06-29 重构:QualityPipeline 自造模块已删除,质量门由
+    # deepagents RubricMiddleware 在 agent 内部驱动(见 agent.py 中间件链)。
+    # ws.py 不再显式调用 pipeline,response_text 直接走后续入库 / resume token 流程。
     final_response: Any = None
-    if pipeline is not None and response_text:
-        try:
-            pipeline.set_session_id(session_id)
-            final_response = await pipeline.run_with_quality(
-                question=user_content,
-                raw_response=response_text,
-                message_id=message_id,
-            )
-            # 不补发 final 帧 —— agent 流式结束时已经在 ``_run_agent_streaming``
-            # 里发过一个 ``final: 长回复`` 帧给客户端,质量门 verdict 只影响
-            # 入库文本,不影响用户视图(详见原 handle_websocket 实现注释)。
-            _emit_quality_verdict(final_response, session_id, message_id)
-        except Exception as exc:  # noqa: BLE001 — 质量门异常不污染主流程
-            logger.warning("QualityPipeline 失败，使用原回复: %s", exc)
 
     # 签发新 resume token 给客户端(仅在配置了 secret 且会话建立后)
     if session_id and last_event_id > 0:
@@ -477,18 +464,20 @@ def _is_retryable_error_code(error_code: str) -> bool:
 
 async def _classify_and_record(
     websocket: WebSocket,
-    get_intent_llm: Callable[[], Any] | None,
     session_id: str,
     user_content: str,
     last_event_id: int = 0,
 ) -> IntentKind:
-    """调主 LLM 分类 + 把 user 消息(含 intent)写库。
+    """正则推断 intent + 把 user 消息(含 intent)写库。
 
-    任何异常 / llm=None 一律兜底 chitchat(最安全:不影响 task 工具链)。
+    2026-06-29 重构:不再调 LLM 分类(对齐 DeepAgents 框架:意图分发由
+    :class:`SubAgent` + Task 工具机制接管,业务级 intent 标记用正则同步
+    推断即可,延迟 0、零 LLM 成本)。
+
+    任何异常一律兜底 chitchat(最安全:不影响 task 工具链)。
 
     Args:
         websocket: WS 连接,用于发心跳帧。
-        get_intent_llm: 返回分类用 LLM 的无参可调用;None/抛错 → 跳过分类。
         session_id: 会话 id,用于把 user 消息入库。
         user_content: 用户原始消息文本。
         last_event_id: 上一次流结束的 event_id(供 resume token 续点);心跳帧
@@ -496,9 +485,9 @@ async def _classify_and_record(
             合法 resume 标记。首轮 / 无历史时传 0。
     """
     # === 心跳:让前端立刻看到反馈,避免 agnes 慢模型 16s+ spinner ===
-    # WHY 2026-06-28:intent 分类可能要 16s+ (agnes),期间前端 isLoading=true
+    # WHY 2026-06-28:agent 流式响应要 16s+ (agnes),期间前端 isLoading=true
     # 但收不到任何 WS 帧,用户体感"卡死"。先发一个 thinking 帧告诉用户
-    # "正在识别意图",哪怕分类慢,用户也知道系统在干活。
+    # "正在识别你的意图",让前端立刻有反馈。
     # event_id=last_event_id+1:与 _run_agent_streaming 的 event_id 计数器
     # 单调衔接,保证客户端用 event_id 续流时心跳也是合法 resume 标记。
     intent_classify_event_id = last_event_id + 1
@@ -514,15 +503,8 @@ async def _classify_and_record(
         # 心跳失败不能让 intent 分类中断(可能 WS 已断但调用链未感知),记日志继续
         logger.warning("WS intent 心跳发送失败: %s", heartbeat_exc)
 
-    intent: IntentKind = DEFAULT_INTENT
-    llm: Any = None
-    if get_intent_llm is not None:
-        try:
-            llm = get_intent_llm()
-        except Exception:  # noqa: BLE001
-            llm = None
-    if llm is not None:
-        intent = await classify_intent(llm, user_content)
+    # 同步正则推断 intent(classify_intent 内部已 try/except 兜底 chitchat)
+    intent: IntentKind = classify_intent(user_content)
     # 入库(用 generate uuid;不传 thinking_content,跟 add_message 默认对齐)
     add_message(str(uuid.uuid4()), session_id, "user", user_content, intent=intent)
     return intent
@@ -1063,12 +1045,15 @@ async def handle_websocket(
     get_agent: Callable[[], Any],
     channel_broadcasts: dict[str, Callable] | None = None,
     get_quality_pipeline: Callable[[], Any] | None = None,
-    get_intent_llm: Callable[[], Any] | None = None,
 ) -> None:
     """WebSocket 主端点的业务逻辑（不含路由装饰器）。
 
     由 ``main.py`` 用 ``@app.websocket(f"{API_PREFIX}/ws")`` 装饰一个薄壳函数
     调用本函数。业务依赖通过参数注入，避免与 ``main.py`` 循环 import。
+
+    2026-06-29 重构:``get_intent_llm`` 参数已删除 — IntentClassifier
+    自造模块下线(intent/router.py 改用纯函数正则推断),不再需要
+    注入 intent LLM。
 
     Args:
         websocket: FastAPI 注入的 WebSocket 连接。
@@ -1079,10 +1064,9 @@ async def handle_websocket(
             给 Gateway 注入广播,Gateway.route_message 走完会把响应推给所有
             注入的 broadcast。``None`` 或空 dict 表示不广播(仅 WS 自用)。
         get_quality_pipeline: Phase 2 Task 2.5：返回 ``QualityPipeline`` 实例
-            的无参可调用。``None`` 或返回 ``None`` 时跳过质量门（向后兼容）。
-        get_intent_llm: Phase 2 Task 3：返回分类用 ``BaseChatModel`` 实例
-            的无参可调用（建议复用 quality pipeline 的 ``judge_llm``）。
-            ``None`` 或返回 ``None`` 时跳过分类，intent 列落 ``chitchat`` 兜底。
+            的无参可调用。``None`` 或返回 ``None`` 时跳过质量门(2026-06-29
+            起 QualityPipeline 已删除,质量门由 deepagents RubricMiddleware
+            驱动;本参数保留为 no-op 兼容层)。
     """
     # 注册客户端
     with _clients_lock:
@@ -1223,7 +1207,7 @@ async def handle_websocket(
                     clarification=clarification,
                     pending_interrupts=pending_interrupts,
                     agent=agent,
-                    get_quality_pipeline=get_quality_pipeline,
+                    get_quality_pipeline=get_quality_pipeline,  # 2026-06-29: 改返 None(quality/pipeline.py 已删)
                 )
                 continue  # 本轮处理完,等下一次输入
 
@@ -1303,7 +1287,6 @@ async def handle_websocket(
             intent_classified_at = time.monotonic()
             intent_result = await _classify_and_record(
                 websocket,
-                get_intent_llm,
                 session_id,
                 user_content,
                 last_event_id=last_event_id,

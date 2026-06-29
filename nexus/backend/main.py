@@ -32,12 +32,6 @@ _agent_lock = threading.RLock()
 # 后台线程构造完成后 set;timeout 60s 后放弃,走原错误路径。
 _agent_ready_event: asyncio.Event | None = None
 
-# 意图识别 LLM:复用 quality pipeline 的 judge_llm(同实例,
-# 避免双倍 token 配额与网络连接)。
-# 在 _ensure_agent_ready 的 daemon 线程中随 judge_llm 一同赋值,
-# 60s 超时场景下该全局保持 None,getter 安全返回 None。
-_intent_llm: Any = None
-
 _main_loop: asyncio.AbstractEventLoop | None = None
 
 
@@ -147,7 +141,6 @@ async def lifespan(app: FastAPI):
         mcp_tools=_mcp_tools,
         create_agent_with_model=_create_agent_with_model,
         set_global_agent=_set_global_agent,
-        rebuild_intent_and_quality=_rebuild_intent_and_quality,
     )
 
     # 初始化 Gateway + ChannelRegistry (C4 重构: Gateway 真接管路由)
@@ -177,8 +170,13 @@ def _ensure_agent_ready(app) -> None:
     由于构造过程涉及 langchain / deepagents 的大量 import，无法在 async 上下文
     内 await。调用方应在第一次 WS 消息到达前在独立线程触发它，构造完成后
     主流程直接使用 _agent。
+
+    2026-06-29 重构:IntentClassifier 自造模块已删除(intent/router.py 改用
+    正则),judge_llm 也不再需要。质量门走 deepagents RubricMiddleware
+    (见 agent.py QualityGateMiddleware + MemoryFilter)。本函数只构造
+    Agent + MCP,不再附加 LLM 全局。
     """
-    global _agent, _mcp_tools, _intent_llm
+    global _agent, _mcp_tools
     with _agent_lock:
         if _agent is not None:
             return
@@ -193,71 +191,6 @@ def _ensure_agent_ready(app) -> None:
         new_agent = _create_agent_with_model(mcp_tools=_mcp_tools)
         if new_agent is not None:
             _agent = new_agent
-        # 构造 QualityPipeline
-        try:
-            from .agent import get_llm
-            from .quality.pipeline import QualityPipeline
-            from .rubrics.judge import RubricJudge
-            from .rubrics.prompts import apply_prompts_to_default_rubrics
-            from .rubrics.repair import RepairStrategy
-
-            apply_prompts_to_default_rubrics()
-            from .models_config import get_active_model as _get_active_model
-
-            _model_config = _get_active_model() or {}
-            judge_api_key = _model_config.get("api_key") or CONFIG.get("minimax_api_key", "")
-            if judge_api_key:
-                # judge LLM 固定 temperature=0:质量门是确定性评估,同样的 raw_response
-                # 应该稳定产出同样的 verdict。沿用主对话 0.7 会让 ACCEPT/REPAIR/REJECT
-                # 在边界态反复横跳,影响 quality gate 稳定性(repair 重生也会跟着抖动)。
-                # 主对话 LLM 是另一个独立实例(new_agent 内部用 get_llm(temperature=0.7)
-                # 构造),互不影响。
-                judge_llm = get_llm(
-                    api_key=judge_api_key,
-                    api_base=_model_config.get("api_base") or CONFIG.get("minimax_api_base"),
-                    model_name=_model_config.get("name", CONFIG.get("model_name", "MiniMax-M3")),
-                    temperature=0,
-                )
-                app.state.quality_pipeline = QualityPipeline(
-                    judge=RubricJudge(llm=judge_llm),
-                    repair_strategy=RepairStrategy(),
-                    main_llm=judge_llm,
-                )
-                # 复用同一个 judge_llm 实例:零新模型、零新网络连接、零 token 配额翻倍
-                # 仍在 daemon 线程内赋值,不会阻塞 WS 事件循环。
-                _intent_llm = judge_llm
-                logger.info("QualityPipeline 已就绪（intent LLM 共用 judge_llm）")
-            else:
-                logger.info("未配置 API Key，质量门已跳过")
-        except Exception as e:  # noqa: BLE001
-            logger.warning("QualityPipeline 构造失败，已跳过: %s", e)
-            # 退化路径:judge_llm 构造过但 QualityPipeline 装配失败时,
-            # 在 daemon 线程内重新构造一个轻量 LLM 作为 intent 兜底,
-            # 仍留在该线程不阻塞 event loop。
-            try:
-                from .agent import get_llm as _get_llm_for_intent
-                from .models_config import get_active_model as _gam
-
-                _model_config = _gam() or {}
-                _intent_llm = _get_llm_for_intent(
-                    api_key=_model_config.get("api_key") or CONFIG.get("minimax_api_key", ""),
-                    api_base=_model_config.get("api_base") or CONFIG.get("minimax_api_base"),
-                    model_name=_model_config.get("name", CONFIG.get("model_name", "MiniMax-M3")),
-                    temperature=0,
-                )
-            except Exception as ex2:  # noqa: BLE001
-                logger.warning("意图识别 LLM 退化构造也失败，留空: %s", ex2)
-                # 退化构造失败时所有输入会被判为 chitchat,质量门仍按原逻辑跑,
-                # 运维需感知这条 INFO 以排查 LLM 不可用根因。
-                logger.info("intent LLM 未就绪,所有用户输入将兜底为 chitchat,质量门继续按原路径运行")
-
-
-def _get_intent_llm() -> Any:
-    """获取意图识别 LLM。返回 ``_intent_llm`` 全局值（在 ``_ensure_agent_ready``
-    的 daemon 线程中随 ``judge_llm`` 一同赋值）；agent 懒构造尚未完成或失败时
-    返回 ``None``，调用方应按 chitchat 兜底处理。
-    """
-    return _intent_llm
 
 
 app = FastAPI(title="Nexus Backend", lifespan=lifespan)
@@ -268,50 +201,6 @@ def _set_global_agent(agent) -> None:
     global _agent
     with _agent_lock:
         _agent = agent
-
-
-def _rebuild_intent_and_quality(app) -> None:
-    """模型切换后重新构建 intent_llm / QualityPipeline,沿用当前激活模型。
-
-    WHY 必须重建:``_ensure_agent_ready`` 里 ``_intent_llm`` 是从首次
-    ``get_active_model()`` 构造的,模型切换 / 默认模型写入后,旧实例仍
-    拿着旧模型的 api_key/base,继续打旧地址。日志里切到 Agnes 之后
-    intent 还在打 ``api.minimaxi.com``、失败重试 191s,就是这个问题。
-    """
-    global _intent_llm
-    app_obj = app or _app_ref
-    if app_obj is None:
-        return
-    try:
-        from .agent import get_llm
-        from .models_config import get_active_model as _get_active_model
-        from .quality.pipeline import QualityPipeline
-        from .rubrics.judge import RubricJudge
-        from .rubrics.prompts import apply_prompts_to_default_rubrics
-        from .rubrics.repair import RepairStrategy
-
-        apply_prompts_to_default_rubrics()
-        model_cfg = _get_active_model() or {}
-        api_key = model_cfg.get("api_key") or CONFIG.get("minimax_api_key", "")
-        if not api_key:
-            _intent_llm = None
-            app_obj.state.quality_pipeline = None
-            return
-        judge_llm = get_llm(
-            api_key=api_key,
-            api_base=model_cfg.get("api_base") or CONFIG.get("minimax_api_base"),
-            model_name=model_cfg.get("name", CONFIG.get("model_name", "MiniMax-M3")),
-            temperature=0,
-        )
-        app_obj.state.quality_pipeline = QualityPipeline(
-            judge=RubricJudge(llm=judge_llm),
-            repair_strategy=RepairStrategy(),
-            main_llm=judge_llm,
-        )
-        _intent_llm = judge_llm
-        logger.info("切换模型后,QualityPipeline / intent_llm 已用 %s 重建", model_cfg.get("name"))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("切换后重建 QualityPipeline 失败,沿用旧实例: %s", exc)
 
 
 API_PREFIX = "/api"
@@ -519,17 +408,15 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.warning("Agent 懒构造 60s 超时,首条消息将走 agent_unavailable 错误路径")
 
     def _get_quality_pipeline() -> Any:
-        return getattr(websocket.app.state, "quality_pipeline", None)
-
-    # intent LLM 已在 _ensure_agent_ready 内的 daemon 线程随 judge_llm 一同赋值,
-    # 60s 超时场景下该全局保持 None,_get_intent_llm() 安全返回 None。
+        # 2026-06-29 重构:QualityPipeline 已删除,质量门由 deepagents RubricMiddleware
+        # 在 agent 内部驱动。返回 None 让 ws.py 的 no-op 分支接管。
+        return None
 
     await handle_websocket(
         websocket,
         get_agent=_get_current_agent,
         channel_broadcasts={"wechat": _build_broadcast_to_ws(websocket)},
         get_quality_pipeline=_get_quality_pipeline,
-        get_intent_llm=_get_intent_llm,
     )
 
 

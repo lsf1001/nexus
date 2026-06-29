@@ -18,7 +18,6 @@ _agent_lock: Lock | None = None
 _mcp_tools: list = []
 _create_agent_with_model = None
 _set_global_agent = None
-_rebuild_intent_and_quality = None
 
 
 def init_router(
@@ -26,15 +25,13 @@ def init_router(
     mcp_tools: list,
     create_agent_with_model,
     set_global_agent,
-    rebuild_intent_and_quality=None,
 ) -> None:
     """由 main.py 在启动时注入共享依赖。"""
-    global _agent_lock, _mcp_tools, _create_agent_with_model, _set_global_agent, _rebuild_intent_and_quality
+    global _agent_lock, _mcp_tools, _create_agent_with_model, _set_global_agent
     _agent_lock = agent_lock
     _mcp_tools = mcp_tools
     _create_agent_with_model = create_agent_with_model
     _set_global_agent = set_global_agent
-    _rebuild_intent_and_quality = rebuild_intent_and_quality
 
 
 class SwitchModelRequest(BaseModel):
@@ -130,8 +127,6 @@ async def set_default_model(body: DefaultModelRequest) -> dict:
         new_agent = await asyncio.get_running_loop().run_in_executor(None, _create_agent_with_model, target, _mcp_tools)
         if new_agent is not None and _set_global_agent is not None:
             _set_global_agent(new_agent)
-        if _rebuild_intent_and_quality is not None:
-            await asyncio.get_running_loop().run_in_executor(None, _rebuild_intent_and_quality, None)
 
     return {"success": True, "model": target}
 
@@ -191,8 +186,6 @@ async def switch_model(body: SwitchModelRequest):
         )
 
     _set_global_agent(new_agent)
-    if _rebuild_intent_and_quality is not None:
-        await asyncio.get_running_loop().run_in_executor(None, _rebuild_intent_and_quality, None)
     return SwitchModelResponse(
         success=True,
         active_model={"id": target.get("id"), "name": target.get("name")},
@@ -300,8 +293,6 @@ async def delete_model(model_id: str):
                 detail=f"无法切换到备用模型 {fallback.get('name')}：构造 Agent 失败",
             )
         _set_global_agent(new_agent)
-        if _rebuild_intent_and_quality is not None:
-            await asyncio.get_running_loop().run_in_executor(None, _rebuild_intent_and_quality, None)
 
     config["models"] = [m for m in models if m.get("id") != model_id]
     save_models(config)
