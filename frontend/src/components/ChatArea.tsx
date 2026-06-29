@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../store/useStore';
 import { openContextMenuAt } from '../lib/useContextMenuTrigger';
-import { useWebSocket } from '../hooks/useWebSocket';
-import { useTauriWs } from '../hooks/useTauriWs';
+import { useWsConnection } from '../hooks/useWsConnection';
 import { useLoadingWatchdog } from '../hooks/useLoadingWatchdog';
 import ChatBubble from './ChatBubble';
 import type { StreamEvent, WSMessage, Message, ConfirmationResponseFrame } from '../types';
@@ -290,22 +289,17 @@ function ChatArea({
 
   // Tauri 模式:WS 走 Rust relay(useTauriWs)
   // 浏览器 dev 模式:WS 直连后端(useWebSocket)
+  // 适配层 useWsConnection 内部根据 isTauri 选择具体 hook,
+  // 同时只能有一个连接实际建立(另一个 enabled=false 时 effect 早返回)。
   // Tauri webview 内 window.location.protocol === 'tauri:',不能用 location.host 拼 URL,
   // 必须用 getApiBase() 拿绝对地址(http://127.0.0.1:30000)再 http→ws 替换。
-  const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   const wsBase = getApiBase().replace(/^http/, 'ws');
   const wsUrl = `${wsBase}/api/ws?token=${encodeURIComponent(getRuntimeToken())}`;
-  const tauriWs = useTauriWs<StreamEvent>({
-    url: wsUrl,
-    onMessage: handleWsMessage,
-    enabled: isTauri,
-  });
-  const browserWs = useWebSocket<StreamEvent>({
-    url: wsUrl,
-    onMessage: handleWsMessage,
-    enabled: !isTauri,
-  });
-  const { connected: wsHookConnected, send: wsSend, getReadyState } = isTauri ? tauriWs : browserWs;
+  const {
+    connected: wsHookConnected,
+    send: wsSend,
+    getReadyState,
+  } = useWsConnection({ url: wsUrl, onMessage: handleWsMessage });
 
   const sendRef = useRef(wsSend);
   sendRef.current = wsSend;
