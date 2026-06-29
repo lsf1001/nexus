@@ -105,8 +105,8 @@ def create_channel_from_config(
     """根据配置创建 Channel 实例(纯工厂,不 register 不 start)。
 
     Raises:
-        NotImplementedError: FEISHU 未实现
-        ValueError: 不支持的 channel_type
+        NotImplementedError: FEISHU 未实现(待后续接入,见 SPEC.md 飞书通道章节)。
+        ValueError: 不支持的 channel_type。
     """
     channel_type = config.channel_type
 
@@ -117,6 +117,7 @@ def create_channel_from_config(
         return WeChatChannel(config=config, token=token)
 
     if channel_type == ChannelType.FEISHU:
+        # SPEC.md 飞书通道章节已规划,实现按需后续接入。
         raise NotImplementedError("Feishu channel not implemented yet")
 
     raise ValueError(f"Unsupported channel type: {channel_type}")

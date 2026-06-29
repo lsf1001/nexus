@@ -120,7 +120,7 @@ class TestRouteMessageError:
 
         async def _boom(input_dict: dict[str, Any], stream_mode: str) -> Any:
             raise RuntimeError("agent down")
-            yield  # noqa: unreachable
+            yield  # noqa: F841  # unreachable but required for async generator signature
 
         gateway._agent.astream = _boom  # type: ignore[assignment]
 
