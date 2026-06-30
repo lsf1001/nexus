@@ -313,4 +313,44 @@ def test_user_identity_question_rule_blocks_preference_field() -> None:
         "LLM 必须直接说不知道,不许拿任何非身份字段凑答案"
     )
 
+
+def test_fact_block_contains_few_shot_and_first_word_constraint() -> None:
+    """2026-06-30 第二轮强化:DMG 1.1.0 实测暴露 — LLM 在 fresh session 仍自报
+    "我是 Agnes-Flash by Sapiens AI"(训练记忆 bias 完全压过 FACT 块头部)。
+
+    修复:FACT 块必须含 few-shot 身份问答示例 + 第一 token 强约束("我是 Nexus"),
+    让 LLM 在第一 token 生成前就被引导到正确格式。
+    """
+    captured_active = {
+        "name": "MiniMax-M3",
+        "vendor": "MiniMax",
+        "is_active": True,
+        "api_base": "https://api.minimaxi.com/v1",
+        "temperature": 0.7,
+    }
+
+    with patch(
+        "nexus.backend.middleware.dynamic_identity.get_active_model_info",
+        return_value=captured_active,
+    ):
+        req = _make_request("你是谁", sm_content="")
+        content = _capture_sm_content(req)
+
+    # few-shot 示例段必须存在
+    assert "few-shot" in content or "示例" in content, (
+        "FACT 块必须含 few-shot 身份问答示例,引导 LLM 模仿正确格式"
+    )
+    # 第一 token 强约束段必须存在
+    assert "第一句的第一个 token" in content or "第一句" in content, (
+        "FACT 块必须含 first-token 约束,强制 LLM 以「我是 Nexus」开头"
+    )
+    # 强建议必须含 get_model_info 工具
+    assert "get_model_info" in content, (
+        "FACT 块必须告诉 LLM: 答身份类问题时先调 get_model_info 工具拿实时数据"
+    )
+    # 强化措辞: 明确禁止 MiniMax-M3 / Claude / Agnes 这些训练记忆默认值
+    assert "MiniMax-M3" in content and "Claude" in content and "Agnes" in content, (
+        "FACT 块必须在禁止列表里点名 MiniMax-M3 / Claude / Agnes 等训练记忆默认值"
+    )
+
     
