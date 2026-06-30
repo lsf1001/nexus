@@ -37,7 +37,7 @@ python nexus/backend/run.py    # 监听 30000
 - **微信通道** - 二维码登录集成
 - **MCP 插件** - 动态加载扩展
 - **质量门** - 4 维度 rubric judge（safety / accuracy / completeness / tool_correctness），REPAIR/REJECT 自动降级
-- **macOS 桌面端** - Electron 打包的 `.dmg`，双击安装即用
+- **macOS 桌面端** - Tauri 2 打包的 `.dmg`(Rust 主进程 + Python sidecar),双击安装即用
 
 ## 安装
 
@@ -87,7 +87,7 @@ bash scripts/build_dmg.sh
 | 架构 | macOS Apple Silicon（Intel 暂未出包） |
 | 签名 | **未签名**（内测版，无 Apple Developer ID） |
 | 端口 | 后端 30000 + WKWebView 弹原生窗口（启动时自动拉起） |
-| 内部结构 | `MacOS/Nexus`(壳脚本)→ exec `Resources/nexus-backend/nexus-backend`(PyInstaller 单二进制 + Python 运行时 + pywebview) |
+| 内部结构 | `MacOS/Nexus`(壳脚本)→ exec `Resources/nexus-backend/nexus-runtime`(Python sidecar 二进制,绑定 127.0.0.1:30000) + 内嵌 WKWebView 加载 `Resources/frontend/`,由 `desktop/src-tauri/src/runtime.rs` supervisor 管理 sidecar 生命周期 |
 
 > **首次启动绕过 Gatekeeper**（仅一次）：
 >
@@ -151,7 +151,9 @@ ws.send(JSON.stringify({ content: '你好' }));
 - [CLAUDE.md](./CLAUDE.md) - 开发规范
 - [CHANGELOG.md](./CHANGELOG.md) - 版本变更
 - [docs/RELEASE_NOTES_v0.1.0.md](./docs/RELEASE_NOTES_v0.1.0.md) - v0.1.0 发布说明
-- [scripts/build_dmg.sh](./scripts/build_dmg.sh) - DMG 打包脚本(PyInstaller + hdiutil)
+- [scripts/build_dmg.sh](./scripts/build_dmg.sh) - DMG 打包脚本(Tauri 2 + hdiutil)
+- [docs/architecture.md](./docs/architecture.md) - 产品模块图 + 逻辑架构图
+- [docs/data-flow/](./docs/data-flow/) - 三条核心数据流时序图(WS / 微信 / 记忆)
 
 ---
 
