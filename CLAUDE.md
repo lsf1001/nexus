@@ -12,15 +12,18 @@
 
 - 名称：Nexus
 - 用途：AI Gateway，三进程/三目录独立构建
-- 技术栈：React 19 + FastAPI + DeepAgents + WebSocket + SQLite + Electron
-- 三进程：Python 后端（端口 30000）、React 前端（端口 30077）、Electron 桌面端（macOS DMG）
+- 技术栈：React 19 + FastAPI + DeepAgents + WebSocket + SQLite + Tauri 2（macOS DMG）
+- 桌面端：DMG 生产 = Tauri 2（`scripts/build_dmg.sh` 走 `cargo tauri build` + hdiutil）
+        pywebview (`launcher.py`) 仅 legacy/dev fallback，不再用于 DMG 构建
+- 三进程：Python 后端（端口 30000）、React 前端（端口 30077）、Tauri 桌面端（macOS DMG）
 - Python 强制使用 `.venv`，不允许系统 Python
 
 ## 架构
 
-- `nexus/backend/`：FastAPI 后端（端口 30000）— `main.py` 入口、`launcher.py` 桌面 APP 启动（pywebview + uvicorn 后台线程）、`agent.py` DeepAgents 封装、`db.py` SQLite + 自动迁移
-- `frontend/`：Vite + React（端口 30077 / DMG 内 `/app/`）— `src/components/` `src/hooks/` `e2e/`
-- `scripts/build_dmg.sh`：PyInstaller onedir + .app bundle 构造 + hdiutil 打 DMG
+- `nexus/backend/`：FastAPI 后端（端口 30000）— `main.py` 入口（共用 app）、`runtime_main.py` Tauri sidecar（生产 DMG）、`launcher.py` pywebview（legacy/dev fallback）、`agent/` DeepAgents 封装（拆 7 个子文件）、`db.py` SQLite + 自动迁移
+- `frontend/`：Vite + React（端口 30077 / DMG 内 `/app/`）— `src/components/`（含 `desktop/` Tauri 专用壳）、`src/hooks/`（含 `useTauriWs`/`useWebSocket`）、`e2e/`
+- `desktop/`：Tauri 2 桌面端（`src-tauri/` Rust 主进程 + WS relay + sidecar supervisor），DMG 生产路径
+- `scripts/build_dmg.sh`：Tauri 2（`cargo tauri build` 产 .app）+ hdiutil 打 DMG；历史 PyInstaller + pywebview 路径已废弃，见 `desktop/src-tauri/`
 - `tests/`：pytest 后端测试
 - `docs/superpowers/`：设计稿 / 计划 / 进度
 - `docs/operations/`：运维文档（含 quality.md 质量门）
@@ -60,7 +63,10 @@ npm run build:frontend|build:dmg|build:all
 
 <立项时从 SPEC 摘录 3-5 条最硬约束>
 
-- **WebSocket 协议** `/api/ws`，流式响应：`thinking` → `chunk` → `final` → `done`，支持多客户端
+- **WebSocket 协议** `/api/ws?token=<NEXUS_WS_TOKEN>`，流式响应（完整 18 种帧，详见 `SPEC.md §WebSocket`）：
+  主路径 `thinking` → `chunk` → `tool_call` / `tool_result` → `final` → `done`
+  辅帧 `error` / `token_usage` / `channel_message` / `session_created` / `resume_token` / `resume_ack` / `invalid_resume_token` / `stats` / `clarification_request` / `confirmation_request`
+  支持多客户端 + 断点续传（resume_token 表 + last_event_id）
 - **WS 跨线程桥接**：流式回调在子线程中用 `asyncio.run_coroutine_threadsafe` 投递回事件循环，**禁止**在子线程直接 `await`
 - **DB PRAGMA**：`db.py` 在连接建立时启用 `foreign_keys=ON / journal_mode=WAL / synchronous=NORMAL`；缺列自动 `ALTER TABLE ADD COLUMN`（无需手工迁移脚本）
 - **`models.json` 写入必须走 `models_config.save_models()`**，**不要**绕过原子写流程
