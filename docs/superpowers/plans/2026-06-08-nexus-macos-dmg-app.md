@@ -2,6 +2,8 @@
 
 > 面向执行者：按阶段推进，每个阶段完成后运行对应验证。文档正文使用简体中文；命令、文件路径、接口名和技术专有名词保留原文。
 
+> ⚠️ **[SUPERSEDED — 2026-07-01 标注]**：本计划基于 **Electron + PyInstaller onedir** 路径,2026-06 中止执行,已被 Tauri 2 migration 计划全面替代(见 [[2026-06-26-tauri-migration.md]])。历史快照保留,仅供追溯 — **请勿按本计划执行**。当前 DMG 构建命令见仓库根 `scripts/build_dmg.sh`(走 `cargo tauri build`)。
+
 ## 目标
 
 把 Nexus 做成一个 macOS 个人 AI 助手应用。用户从 GitHub Release 下载一个 DMG，拖入 Applications 后即可使用，不需要理解 Python、Node、后端端口、虚拟环境或命令行。
