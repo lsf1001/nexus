@@ -6,6 +6,8 @@
 > **总测试数**：378 passed (backend) + Playwright E2E (DMG CDP 真环境)
 > **产物**：`release/Nexus-1.0.0-arm64.dmg` (175 MB,macOS arm64,未签名)
 
+> ⚠️ **历史快照(2026-07-01 标注)**：本文描述 v0.1.0(2026-05/06)发布状态;v0.2+ DMG 已迁移到 **Tauri 2**(Rust 主进程 + Python sidecar),Electron / PyInstaller-onedir 路径已废弃(commit `02a4db0`+)。当前架构/桌面端描述见 [[../CLAUDE.md]] §架构 + [[../docs/architecture.md]] §2。
+
 ---
 
 ## 🎯 这次交付了什么
