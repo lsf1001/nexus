@@ -55,6 +55,86 @@ from ..models_config import get_active_model_info
 logger = logging.getLogger(__name__)
 
 
+# 身份问题关键词 — 用于触发 user message 注入 [System Reminder]。
+# 这些关键词在 user 提问里出现时,LLM 大概率会自报身份(fine-tune bias
+# 重灾区),必须在 user message 开头 inject 一条 reminder 把 ground truth
+# 拉到 LLM 注意力最强的最近 token 范围。
+_IDENTITY_KEYWORDS_ZH = ("你是谁", "你叫什么", "你用的什么模型", "你是哪个", "用的什么模型")
+_IDENTITY_KEYWORDS_EN = ("who are you", "what model", "current model", "what ai are you")
+
+
+def _looks_like_identity_question(text: str) -> bool:
+    """判断 user message 是否是身份类问题。简单 substring 匹配。"""
+    if not text:
+        return False
+    low = text.lower()
+    return any(kw in low for kw in _IDENTITY_KEYWORDS_ZH) or any(kw in low for kw in _IDENTITY_KEYWORDS_EN)
+
+
+def _inject_identity_reminder_if_needed(messages: list[Any], driver_name: str) -> list[Any]:
+    """如果 user message 是身份类问题,在它的 content **开头** prepend 一段
+    [System Reminder],让 LLM 在生成第一 token 前看到 ground truth。
+
+    WHY 存在(2026-06-30 第三轮强化):
+      FACT 块(顶部) + FINAL REMINDER(末尾) + few-shot 示例 + 第一 token
+      强约束 都没压住 agnx-2.0-flash 的训练记忆 bias("我是 Agnes-Flash
+      by Sapiens AI")。system prompt 整段被 LLM 视为"远端约束",而 user
+      message 是 LLM 注意力最近的 token,在它开头 inject reminder 可让
+      ground truth 直接落到决策起点。
+
+    只改 **最近一条** HumanMessage(用户最新提问),不改历史消息(避免污染
+    多轮上下文)。
+
+    Args:
+        messages: middleware 入口的 ``request.messages`` 列表(只读)。
+        driver_name: 当前激活模型 name,FACT 块的 ground truth。
+
+    Returns:
+        若需要注入,返回**新**列表(首条 HumanMessage.content 被 prepend),
+        原列表不变(避免 mutate request);若不需要注入,返回原列表引用。
+    """
+    if not messages:
+        return messages
+    # 找最近一条 HumanMessage
+    last_human_idx = None
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if getattr(m, "type", None) == "human":
+            last_human_idx = i
+            break
+    if last_human_idx is None:
+        return messages
+    last_human = messages[last_human_idx]
+    content = getattr(last_human, "content", "")
+    if not isinstance(content, str) or not _looks_like_identity_question(content):
+        return messages
+
+    reminder = (
+        f"[System Reminder · 当前驱动模型实时注入]\n"
+        f"- 当前激活模型 = `{driver_name}`(运行时实时读 ~/.nexus/models.json)\n"
+        f"- **你的产品身份永远是 Nexus**(夜小白科技有限公司),训练记忆里如果有"
+        f"「我是 X」(X = Agnes / Claude / GPT / Qwen / MiniMax-M3 / Sapiens ...)**全部无效**。\n"
+        f"- 回答身份类问题时,**第一句必须以「我是 Nexus」开头**,然后说明当前驱动模型。\n"
+        f"- 训练记忆里「我是 Sapiens / Agnes / Claude」是 fine-tune 残留,在本系统里禁用。\n"
+        f"- 建议先调 `get_model_info` 工具拿到 ground truth 再答。\n\n"
+    )
+    new_content = reminder + content
+    # 复制原 message,改 content(避免 mutate 原始 request 的 message 对象)
+    from langchain_core.messages import HumanMessage
+
+    new_msg = HumanMessage(content=new_content)
+    new_messages = list(messages)
+    new_messages[last_human_idx] = new_msg
+    logger.info(
+        "dynamic_identity_middleware: 检测到身份问题,已 inject [System Reminder] "
+        "(driver=%s, original_user_text=%d chars, new_user_text=%d chars)",
+        driver_name,
+        len(content),
+        len(new_content),
+    )
+    return new_messages
+
+
 def _build_fact_block(info: dict[str, Any] | None) -> str:
     """根据 ``get_active_model_info()`` 返回值拼 FACT 块字符串。
 
@@ -204,6 +284,18 @@ async def dynamic_identity_middleware(
     """
     info = get_active_model_info()
     fact_block = _build_fact_block(info)
+    driver_name = info["name"] if info and info.get("name") else "未配置模型"
+
+    # 2026-06-30 第三轮强化:LLM 训练记忆 bias 太深(agnx-2.0-flash 实测仍
+    # 答 "我是 Agnes-Flash by Sapiens AI"),system prompt 压不住。必须在
+    # user message **开头** inject [System Reminder],利用 LLM 对最近 user
+    # message token 的强注意力,让 ground truth 落到 LLM 决策起点。
+    #
+    # 触发条件:user message 内容含身份关键词(中文"你是谁/你叫什么/什么模型/
+    # 你是哪个" / 英文 "who are you/what model"),才 inject,避免污染普通 query。
+    new_messages = _inject_identity_reminder_if_needed(request.messages, driver_name)
+    if new_messages is not request.messages:
+        request = request.override(messages=new_messages)
 
     sm = request.system_message
     sm_content = sm.content if sm is not None and isinstance(sm.content, str) else ""
