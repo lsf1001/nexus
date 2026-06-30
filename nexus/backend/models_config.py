@@ -4,7 +4,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-MODELS_FILE = Path.home() / ".nexus" / "models.json"
+# 模型配置文件路径。优先级:NEXUS_HOME 环境变量 > ~/.nexus/models.json。
+# WHY:NEXUS_HOME 由 Tauri 桌面端 / 测试 fixture 显式设置,把数据目录和系统 home
+# 解耦(避免污染用户 home);desktop install 路径必须可移植,不能假设 macOS user
+# home 即可。CI Playwright 也通过 NEXUS_HOME 隔离,修 2026-06-28 27 spec 全 fail。
+MODELS_FILE = Path(os.environ.get("NEXUS_HOME") or Path.home()) / ".nexus" / "models.json"
 
 
 def load_models() -> dict[str, Any]:
