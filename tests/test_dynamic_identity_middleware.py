@@ -273,3 +273,44 @@ def test_final_reminder_present_in_nonempty_branch() -> None:
 
     assert "FINAL REMINDER" in content, "非空分支也必须 append FINAL REMINDER"
     assert "name = MiniMax-M3" in content, "FINAL REMINDER 必须含当前 ground truth"
+
+
+def test_user_identity_question_rule_blocks_preference_field() -> None:
+    """2026-06-30 强化:用户问"我是谁"时,LLM 不许拿"水果偏好 / 职业 /
+    兴趣"等非身份字段填空(E2E 暴露:AGENTS.md 只有"最喜欢的水果:榴莲"
+    时 LLM 答"你最喜欢的水果是榴莲",答非所问)。
+
+    本测试守住:static prompt 必须含"用户身份问答规则"段,明确禁止
+    用偏好/职业/兴趣等非身份字段答"我是谁"。
+    """
+    captured_active = {
+        "name": "agnes-2.0-flash",
+        "vendor": "agnes-ai",
+        "is_active": True,
+        "api_base": "https://apihub.agnes-ai.com/v1",
+        "temperature": 0.7,
+    }
+
+    with patch(
+        "nexus.backend.middleware.dynamic_identity.get_active_model_info",
+        return_value=captured_active,
+    ):
+        req = _make_request("我是谁", sm_content="")
+        content = _capture_sm_content(req)
+
+    # 用户身份问答规则段必须存在
+    assert "用户身份问答规则" in content, (
+        "static prompt 必须含【用户身份问答规则】段,告诉 LLM "
+        "回答'我是谁'时只能用 AGENTS.md 里的身份字段,不能用偏好/职业/兴趣填空"
+    )
+    # 必须明确禁止"水果偏好"作为"我是谁"的答案(具体例子, 防退化)
+    assert "水果" in content and "不是身份" in content, (
+        "用户身份问答规则必须明确禁止 LLM 用'水果'等偏好字段答'我是谁'"
+    )
+    # 必须明确"没有就老实说不知道"的兜底
+    assert "没记下你的名字" in content or "不知道" in content, (
+        "用户身份问答规则必须有兜底:AGENTS.md 没有身份字段时,"
+        "LLM 必须直接说不知道,不许拿任何非身份字段凑答案"
+    )
+
+    
