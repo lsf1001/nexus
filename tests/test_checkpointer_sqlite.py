@@ -144,3 +144,52 @@ class TestSqliteSaverPersistence:
                     r[0] for r in check_conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
                 }
             assert any("checkpoint" in t.lower() for t in tables), f"应创建 checkpoint 相关表,实际 {tables}"
+
+
+class TestCheckpointSqliteInPyproject:
+    """守门测试:防止 ``langgraph-checkpoint-sqlite`` 依赖被误从 ``pyproject.toml`` 删除。
+
+    WHY:E2E 2026-06-30 暴露 — 干净环境 ``pip install -e .`` 不会装这个子包
+    (langgraph / deepagents 都不传递依赖它),导致 ``_create_checkpointer``
+    在 import 时 ``ModuleNotFoundError``,agent 懒构造失败,所有依赖 LLM 的
+    E2E test 拿到空回复。本测试直接读 ``pyproject.toml`` 校验声明存在,
+    比纯靠 import 测试更稳 — import 失败在本地 venv 装过就不暴露,CI 干净
+    环境才暴露。
+    """
+
+    def test_pyproject_declares_langgraph_checkpoint_sqlite(self) -> None:
+        """``pyproject.toml`` 必须显式声明 ``langgraph-checkpoint-sqlite`` 依赖。"""
+        import re
+        from pathlib import Path
+
+        pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+        content = pyproject_path.read_text(encoding="utf-8")
+        # 匹配 dependencies 段里出现的包名 — 简单 regex 即可,避免引入 toml 解析器
+        # 只看 ``dependencies = [ ... ]`` 段(不看 dev / optional)
+        # 注意:不能用 non-greedy ``\[(.*?)\]`` — ``uvicorn[standard]`` 里的
+        # ``]`` 会让匹配提前结束,只匹配到 ``uvicorn[standard`` 就停下。
+        # 用 greedy + DOTALL 找最后那个 ``]``(更鲁棒)。
+        match = re.search(r"^dependencies\s*=\s*\[(.*)\]", content, re.MULTILINE | re.DOTALL)
+        assert match is not None, "pyproject.toml 缺少 dependencies 段"
+        deps_block = match.group(1)
+        # 包名可能带版本约束也可能不带,匹配裸包名 + 任何后续规格
+        pattern = re.compile(r"""["'](langgraph-checkpoint-sqlite)(?:\s*[><=!~].*?)?["']""")
+        assert pattern.search(deps_block) is not None, (
+            "pyproject.toml dependencies 必须显式声明 langgraph-checkpoint-sqlite, "
+            "否则干净环境 pip install -e . 会漏装,导致 _create_checkpointer "
+            "ModuleNotFoundError,所有 LLM E2E test 拿空回复"
+        )
+
+    def test_checkpoint_sqlite_module_importable(self) -> None:
+        """干净 venv 必须能 import AsyncSqliteSaver,否则 checkpoint 初始化失败。
+
+        配合 TestPyprojectDeclaresLanggraphCheckpointSqlite 一起守门:
+          - 第一个测试保证 ``pyproject.toml`` 写对了
+          - 第二个测试保证**当前 venv** 已经按声明装上了
+        """
+        try:
+            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver  # noqa: F401
+        except ModuleNotFoundError as e:
+            pytest.fail(
+                f"AsyncSqliteSaver 不可 import — pyproject.toml 漏声明 langgraph-checkpoint-sqlite?原始错误: {e}"
+            )

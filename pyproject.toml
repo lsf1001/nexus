@@ -27,6 +27,17 @@ dependencies = [
     "deepagents>=0.6.0",
     "langchain-openai>=1.0.0",
     "langchain-community>=0.0.20",
+    # WHY 显式声明 ``langgraph-checkpoint-sqlite``:
+    #   ``langgraph`` 1.2.x / ``deepagents`` 0.6.x 都不传递依赖这个子包
+    #   (langgraph-checkpoint 是基类,sqlite 实现是独立可选包)。
+    #   干净环境 ``pip install -e .`` 不会装它,导致
+    #   ``nexus.backend.agent._checkpoint`` 在 import 时
+    #   ``ModuleNotFoundError: No module named 'langgraph.checkpoint.sqlite'``,
+    #   agent 懒构造失败,所有依赖 LLM 的 E2E test 拿到空回复
+    #   (E2E multi-turn 2026-06-30 真实踩坑)。
+    #   范围锁 2.0-4.0:跟 langgraph 1.x 配套,``<5`` 留给未来
+    #   langgraph 2.0 重新评估。
+    "langgraph-checkpoint-sqlite>=2.0,<4.0",
     "ddgs>=5.0.0",
     "beautifulsoup4>=4.12.0",
     "aiosqlite>=0.19.0",
