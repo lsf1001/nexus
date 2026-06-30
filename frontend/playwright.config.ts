@@ -19,6 +19,7 @@ const e2eNexusHome = process.env.NEXUS_HOME ?? `${tmpdir()}/nexus-playwright-${p
  *   - 失败时保留 trace + video + screenshot，方便 CI 排错
  */
 export default defineConfig({
+  globalSetup: './e2e-setup.ts',
   testDir: './e2e',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
