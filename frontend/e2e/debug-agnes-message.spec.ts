@@ -7,7 +7,7 @@
  * 同时:把 active 切成 minimax,看发消息是否还工作(测试 2 个模型)
  */
 
-import { test, expect, type Page } from '@playwright/test';
+import { test, type Page } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -26,7 +26,7 @@ test('用户场景: agnes 模型, 发消息', async ({ page }) => {
   await page.waitForSelector('button.prompt-card', { timeout: 30_000 });
   await page.waitForTimeout(2000);
 
-  let topbarText = await page.locator('.topbar-topic span').first().innerText().catch(() => 'NOT_FOUND');
+  const topbarText = await page.locator('.topbar-topic span').first().innerText().catch(() => 'NOT_FOUND');
   console.log(`  [initial topbar] "${topbarText}"`);
 
   // 发消息

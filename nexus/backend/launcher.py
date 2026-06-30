@@ -65,9 +65,9 @@ def _patch_cocoa_close_behavior() -> None:
     except ImportError:
         return  # 非 macOS 平台,无 patch
 
-    _BrowserView = _cocoa.BrowserView
+    _BrowserView = _cocoa.BrowserView  # noqa: N806 - macOS Cocoa API 命名固定
 
-    def _patched_windowShouldClose_(self, window):  # noqa: ANN001 - NSWindowDelegate 签名
+    def _patched_windowShouldClose_(self, window):  # noqa: ANN001, N802 - NSWindowDelegate 签名固定
         """点 X 时:隐藏窗口不销毁,返回 NO 阻止关闭。"""
         instance = _BrowserView.get_instance("window", window)
         if instance is not None:
@@ -77,7 +77,7 @@ def _patch_cocoa_close_behavior() -> None:
                 pass
         return False  # Foundation.NO - 不要让 NSWindow 关闭
 
-    def _patched_applicationShouldHandleReopen_hasVisibleWindows_(self, app, flag):  # noqa: ANN001
+    def _patched_applicationShouldHandleReopen_hasVisibleWindows_(self, app, flag):  # noqa: ANN001, N802 - NSApplicationDelegate 签名固定
         """Dock 点击图标:重新显示被隐藏的窗口。"""
         try:
             import webview
