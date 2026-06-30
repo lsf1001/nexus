@@ -3,18 +3,69 @@
 ## 架构
 
 ```
-┌─────────────┐         HTTP/WebSocket        ┌─────────────┐
-│   React     │ ◄─────────────────────────────► │   FastAPI   │
-│   Frontend  │                              │   Backend   │
-│   (:30077)  │                              │   (:30000)  │
-└─────────────┘                              └──────┬──────┘
-                                                    │
-                           ┌────────────────────────┼────────────────────────┐
-                           │                        │                        │
-                    ┌──────▼──────┐          ┌──────▼──────┐          ┌──────▼──────┐
-                    │  Session    │          │   Memory    │          │    MCP      │
-                    │  Manager    │          │   Service   │          │   Plugin    │
-                    └─────────────┘          └─────────────┘          └─────────────┘
+┌───────────────────────┐     HTTP / WebSocket      ┌──────────────────────────────────────────┐
+│   React Frontend      │  ◄──────────────────────► │   FastAPI Backend (:30000)               │
+│   Vite (:30077 dev)   │                           │                                          │
+│   Tauri WebView (DMG) │                           │  入口(三选一):                              │
+│                       │                           │   ├─ launcher.py     pywebview(legacy)   │
+│  ├─ ChatArea          │                           │   ├─ runtime_main.py sidecar (Tauri DMG) │
+│  ├─ Sidebar           │                           │   └─ main.py :app   FastAPI 共用入口     │
+│  └─ ChannelInbox      │                           │                                          │
+└───────────────────────┘                           │  ┌─ api/ws/* ─ WS 协议(6 子模块) ─────┐  │
+                                                   │  │  auth / streaming / finalize /      │  │
+                                                   │  │  observability / registry / handlers │  │
+                                                   │  └─────────────────────────────────────┘  │
+                                                   │  ┌─ channels/* ─ IM 通道 ──────────────┐  │
+                                                   │  │  base / gateway / registry + 9 个     │  │
+                                                   │  │  wechat_*.py / feishu / telegram    │  │
+                                                   │  └─────────────────────────────────────┘  │
+                                                   │  ┌─ agent/* ─ DeepAgents 封装 ─────────┐  │
+                                                   │  │  _agent_builder / _system_prompt /   │  │
+                                                   │  │  _subagents / _llm_factory /         │  │
+                                                   │  │  _checkpoint / _backend              │  │
+                                                   │  └─────────────────────────────────────┘  │
+                                                   │  ┌─ middleware/* ── LLM 中间件链 ──────┐  │
+                                                   │  │  dynamic_identity / force_tool /     │  │
+                                                   │  │  hitl(path-aware 三态路由)            │  │
+                                                   │  └─────────────────────────────────────┘  │
+                                                   │  ┌─ quality/* + rubrics/* ─ 质量门 ────┐  │
+                                                   │  │  QualityGateMiddleware /             │  │
+                                                   │  │  MemoryFilter / RubricJudge /        │  │
+                                                   │  │  Repair / Exporter / Meta-eval       │  │
+                                                   │  └─────────────────────────────────────┘  │
+                                                   │  ┌─ observability/* + intent/* ────────┐  │
+                                                   │  │  EventSink / NexusLogHandler /       │  │
+                                                   │  │  intent router (chitchat/knowledge)  │  │
+                                                   │  └─────────────────────────────────────┘  │
+                                                   │  ┌─ resilience/* ─ 韧性层 ─────────────┐  │
+                                                   │  │  StreamGuard(重试) / Resume(续传)    │  │
+                                                   │  └─────────────────────────────────────┘  │
+                                                   │  ┌─ profiles/* + llm/* + mcp.py ──────┐  │
+                                                   │  │  tier_routing / wrapper / policies   │  │
+                                                   │  └─────────────────────────────────────┘  │
+                                                   │  ┌─ db.py + sessions.py + routes/* ───┐  │
+                                                   │  │  SQLite(WAL+FK) / SessionManager    │  │
+                                                   │  └─────────────────────────────────────┘  │
+                                                   └──────────────────────────────────────────┘
+                                                                   │
+                                                                   ▼
+                                                   ┌──────────────────────────────────────────┐
+                                                   │  持久层 (~/.nexus/)                       │
+                                                   │  ├─ nexus.db   SQLite(sessions/messages/  │
+                                                   │  │              quality_scores/resume_   │
+                                                   │  │              tokens/memory_legacy)    │
+                                                   │  ├─ AGENTS.md  用户级长期记忆(可手编)      │
+                                                   │  ├─ models.json 模型配置(原子写)         │
+                                                   │  └─ logs/      EventSink JSONL 日志      │
+                                                   └──────────────────────────────────────────┘
+                                                                   │
+                              deepagents MemoryMiddleware 自动注入  │
+                                                                   ▼
+                                                   ┌──────────────────────────────────────────┐
+                                                   │  项目级记忆 nexus/.deepagents/AGENTS.md  │
+                                                   │  (Nexus 身份/规则,**禁止手编**,Quality  │
+                                                   │   GateMiddleware 拦截 LLM 写入做忠实度评估)│
+                                                   └──────────────────────────────────────────┘
 ```
 
 ## 技术栈
@@ -22,39 +73,175 @@
 | 组件 | 技术 |
 |------|------|
 | 前端 | React + TypeScript + Vite + Tailwind CSS + Zustand |
-| 后端 | FastAPI + DeepAgents + SQLite + pywebview(WKWebView) |
+| 后端 | FastAPI + DeepAgents + SQLite + Pydantic |
 | 模型 | MiniMax / DeepSeek / Qwen (OpenAI SDK 兼容) |
-| 桌面 APP | **单二进制**:PyInstaller onedir + pywebview(无 Electron / 无 Chromium) |
+| 桌面 APP | **Tauri 2**(Rust 主进程 + Python sidecar + 内嵌 WebView2/WKWebView,无 Electron / 无 Chromium) |
 
 ## 项目结构
-
 ```
-nexus/                 # 仓库根
-├── frontend/          # React SPA (独立目录)
+nexus/                              # 仓库根
+├── frontend/                       # React 19 SPA (独立目录)
 │   ├── src/
-│   │   ├── components/   # ChatArea, Sidebar, ChatBubble...
-│   │   ├── hooks/        # 自定义 Hook
-│   │   ├── store/        # Zustand 状态
-│   │   ├── types/        # TypeScript 类型
-│   │   └── App.tsx
-│   ├── tests/e2e/     # Node 端到端 (Playwright + WS)
-│   └── vite.config.ts
-├── nexus/             # Python 包
-│   ├── backend/        # FastAPI 后端
-│   │   ├── main.py     # 入口 + lifespan + WebSocket
-│   │   ├── config.py   # 配置加载 (env 优先级)
-│   │   ├── agent.py    # DeepAgents 封装
-│   │   ├── sessions.py # SessionManager
-│   │   ├── memory.py   # MemoryService + BM25 + 进化
-│   │   ├── db.py       # SQLite + 迁移
-│   │   ├── models_config.py # models.json 原子写
-│   │   ├── routes/     # REST 路由 (model_config 等)
-│   │   ├── channels/   # wechat, base, registry
-│   │   └── plugins/    # MCP / 工具插件
-└── tests/             # pytest (后端)
+│   │   ├── components/
+│   │   │   ├── ChatArea.tsx        # WS 流式渲染 + HITL/Clarification 弹窗
+│   │   │   ├── Sidebar.tsx         # 会话列表
+│   │   │   ├── ChatBubble.tsx      # 单条消息
+│   │   │   ├── ModelConfigModal.tsx
+│   │   │   ├── WechatPluginModal.tsx
+│   │   │   ├── ToastHost.tsx       # 全局 toast
+│   │   │   ├── ErrorBoundary.tsx
+│   │   │   └── desktop/            # 仅 Tauri DMG 用的壳组件
+│   │   │       ├── DesktopShell.tsx
+│   │   │       ├── ShellLayout.tsx
+│   │   │       ├── SplashView.tsx  # 监听 runtime-status
+│   │   │       ├── SettingsView.tsx
+│   │   │       ├── SetupView.tsx
+│   │   │       ├── ChatView.tsx
+│   │   │       ├── ContextMenuHost.tsx
+│   │   │       ├── WechatAssistantView.tsx
+│   │   │       ├── SketchLines.tsx
+│   │   │       ├── hooks/{useBootstrap,useConversationCrud,useDarkModeRoot}.ts
+│   │   │       └── channels/{ChannelInbox,ChannelViewBase}.tsx
+│   │   ├── hooks/                  # 通用 hooks
+│   │   │   ├── useWebSocket.ts     # 浏览器 dev 模式
+│   │   │   ├── useTauriWs.ts       # Tauri DMG 模式 (Rust relay)
+│   │   │   ├── useWsConnection.ts  # WS 连接 + 重试
+│   │   │   ├── useChannelStatusPolling.ts
+│   │   │   └── useLoadingWatchdog.ts
+│   │   ├── lib/{api,useContextMenuTrigger}.ts
+│   │   ├── store/{useStore,useContextMenu,useToast}.ts   # Zustand
+│   │   ├── types/index.ts          # StreamEvent union (18 种帧)
+│   │   ├── App.tsx, main.tsx, vite-env.d.ts
+│   ├── e2e/                        # Playwright 端到端
+│   │   ├── helpers.ts
+│   │   ├── chat-happy-path.spec.ts
+│   │   ├── clarification.spec.ts
+│   │   ├── hitl-confirm.spec.ts / hitl-confirm-mock.spec.ts
+│   │   ├── multi-turn.spec.ts / reconnect.spec.ts
+│   │   ├── reject-display.spec.ts / settings.spec.ts
+│   │   ├── wechat-channel.spec.ts
+│   │   ├── debug-agnes-message.spec.ts / diag-ws-page.spec.ts
+│   ├── eslint.config.js, vite.config.ts, playwright.config.ts
+│
+├── desktop/                        # Tauri 2 桌面端 (当前生产 DMG)
+│   ├── package.json                # cargo tauri dev/build
+│   ├── frontend-dist/              # build 时由 frontend/dist 复制
+│   └── src-tauri/
+│       ├── src/
+│       │   ├── main.rs             # Tauri 主进程入口
+│       │   ├── runtime.rs          # sidecar supervisor (atexit kill, AppState, RuntimeStatus)
+│       │   └── ws_relay.rs         # WS relay (ws_open / ws_send / ws_close)
+│       └── build.rs
+│
+├── nexus/                          # Python 包 (src 布局)
+│   ├── __init__.py
+│   └── backend/
+│       ├── main.py                 # FastAPI app + lifespan + 路由注册
+│       ├── launcher.py             # macOS pywebview 入口 (legacy/dev)
+│       ├── runtime_main.py         # Tauri sidecar 入口 (生产 DMG 用)
+│       ├── run.py                  # dev 模式 `python nexus/backend/run.py`
+│       ├── config.py               # 环境变量加载 + 优先级
+│       ├── db.py                   # SQLite + PRAGMA + 自动 _ensure_column 迁移
+│       ├── sessions.py             # SessionManager (idempotent / soft-delete)
+│       ├── models.py               # Pydantic schema (WSMessage / Session / Message / HITL)
+│       ├── models_config.py        # models.json 原子写 (tmp + fsync + os.replace)
+│       ├── permissions.py          # 工具权限白名单
+│       ├── mcp.py                  # MCP 插件加载
+│       ├── tools.py                # 工具注册表
+│       ├── api/
+│       │   ├── ws/                 # WS 子包 (2026-06-30 拆分)
+│       │   │   ├── __init__.py     # re-export 保证 monkeypatch 路径稳定
+│       │   │   ├── auth.py         # token 校验 + 心跳
+│       │   │   ├── streaming.py    # 流式 chunk + thinking_parser
+│       │   │   ├── finalize.py     # final/done 帧 + add_message 持久化
+│       │   │   ├── observability.py # intent 分类 + quality score 集成
+│       │   │   ├── registry.py     # WS 客户端注册表
+│       │   │   └── handlers.py     # 业务编排
+│       │   └── thinking_parser.py  # <thinking> 标签状态机
+│       ├── agent/                  # DeepAgents 封装
+│       │   ├── _agent_builder.py   # create_agent() + middleware 链装配
+│       │   ├── _system_prompt.py   # 静态 system prompt (身份/规则)
+│       │   ├── _subagents.py       # code_writer / researcher
+│       │   ├── _llm_factory.py     # get_llm() 实例
+│       │   ├── _checkpoint.py      # AsyncSqliteSaver / MemorySaver 切换
+│       │   └── _backend.py         # Filesystem / LocalShell / LangSmith / ContextHub
+│       ├── middleware/             # deepagents AgentMiddleware 链
+│       │   ├── dynamic_identity.py # [FACT] 块每次 LLM 调用前注入
+│       │   ├── force_tool.py       # knowledge 类强制 yandex_search
+│       │   └── hitl.py             # PathAwareHITLMiddleware (三态路由)
+│       ├── quality/                # 质量门
+│       │   ├── middleware.py       # QualityGateMiddleware (拦截 AGENTS.md 写)
+│       │   └── memory_filter.py    # MemoryFilter (faithfulness 评分)
+│       ├── rubrics/                # Phase 2 Rubric 系统
+│       │   ├── judge.py            # RubricJudge (faithfulness / helpfulness 等)
+│       │   ├── repair.py           # RepairService (低分自动修复)
+│       │   ├── exporter.py         # DPO preference 导出
+│       │   ├── meta_eval.py        # 元评测
+│       │   ├── tool_evaluator.py
+│       │   ├── prompts.py / schemas.py
+│       ├── channels/               # IM 通道 (C5 重构)
+│       │   ├── base.py / registry.py / gateway.py
+│       │   ├── wechat_account.py / wechat_api.py / wechat_channel.py
+│       │   ├── wechat_login.py / wechat_protocol.py / wechat_state.py
+│       │   └── wechat_tokens.py / wechat_types.py
+│       ├── observability/          # 产品事件 + LangChain callback
+│       │   ├── events.py / sink.py (EventSink, JSONL 轮转)
+│       │   ├── handler.py (NexusLogHandler, llm/tool/chain 回调)
+│       │   └── logger.py
+│       ├── intent/                 # 意图分类 (chitchat/knowledge/task/identity)
+│       │   └── router.py
+│       ├── llm/                    # LLM 包装层
+│       │   ├── wrapper.py          # ResilientRunnable + StreamGuard
+│       │   ├── policies.py         # 重试 / 降级策略
+│       │   ├── errors.py           # 错误码 + 重试判定
+│       │   └── e2e_mock.py         # 测试用 mock LLM
+│       ├── profiles/               # 模型分层
+│       │   └── tier_routing.py     # register_tier_profiles (弱/强模型 suffix)
+│       ├── resilience/
+│       │   ├── stream_guard.py     # 流式重试 + 事件计数
+│       │   └── resume.py           # resume_token HMAC + 续传
+│       ├── routes/
+│       │   └── model_config.py     # REST /api/models CRUD
+│       └── memory/__init__.py
+│
+├── scripts/                        # 维护脚本 (不入 wheel)
+│   ├── build_dmg.sh                # cargo tauri build + hdiutil 打 DMG
+│   ├── migrate_legacy_memory.py    # 一次性迁 v0.1 memory 表 → AGENTS.md
+│   ├── seed_user_agents_md.py      # 幂等创建用户级 AGENTS.md
+│   ├── eval_rubrics.py / verify_phase2.py
+│   └── test_clarification_live.py
+│
+├── tests/                          # pytest 后端 (65 个测试文件)
+│   ├── conftest.py / e2e_driver.py / real_llm_driver.py
+│   ├── test_*.py                   # 按模块拆: agent_*, ws_*, db_*, rubric_*, ...
+│
+├── docs/
+│   ├── architecture.md             # 产品模块图 + 逻辑架构图 (新增)
+│   ├── data-flow/                  # 三张时序图 (新增)
+│   │   ├── ws-main.md
+│   │   ├── wechat-channel.md
+│   │   └── memory-write.md
+│   ├── operations/                 # 运维文档
+│   ├── superpowers/                # 设计稿 / 计划 / 进度
+│   ├── prototypes/ / refactor/
+│   └── RELEASE_NOTES_v0.1.0.md
+│
+├── CLAUDE.md                       # AI 协作入口 (顶部 @python_project.md)
+├── SPEC.md                         # 技术规格 (本文件)
+├── README.md / CHANGELOG.md / AGENTS.md
+├── python_project.md               # Python 工程硬性约束
+├── pyproject.toml / package.json
+└── verify-full.js                  # 顶层 e2e 入口
 ```
 
-桌面 APP 不再是独立工程:`scripts/build_dmg.sh` 一步完成 PyInstaller onedir + .app bundle 构造 + hdiutil 打 DMG。APP 内只有一个 Python 进程,uvicorn 起在后台线程,pywebview 主线程弹 WKWebView。
+桌面 APP 当前是 **Tauri 2**:`scripts/build_dmg.sh` 走 `cargo tauri build` 产 .app,再 hdiutil 打 DMG。
+- 主进程 `desktop/src-tauri/src/main.rs`(Rust)
+- 后端通过 spawn **sidecar** `nexus-runtime`(`runtime_main.py`,轻量 FastAPI/uvicorn 二进制,**无 webview**)
+- 前端 `frontend/dist` 由 Tauri 静态托管
+- atexit 钩子在主进程退出时 SIGKILL sidecar,防止孤儿进程(`desktop/src-tauri/src/runtime.rs`)
+
+legacy 入口 `launcher.py`(pywebview WKWebView)仍在仓库,仅作 dev 模式或回退使用,DMG 构建已不再走它。
+
 
 ## 核心模块
 
@@ -125,12 +312,29 @@ WHY 走 middleware 不走 permissions:deepagents 0.5.3 不支持 permissions 写
 
 ### WebSocket (main.py)
 
-- `/api/ws` - 实时对话端点
-- 流式响应：`thinking` → `chunk` → `confirmation_request`(HITL 路径)→ `final` → `done`
-- 支持多客户端 + 断线重连(resume token)
+- `/api/ws?token=<NEXUS_WS_TOKEN>` - 实时对话端点(鉴权用 `hmac.compare_digest` 防时序攻击)
+- 流式响应(完整 18 种帧,定义在 `frontend/src/types/index.ts::StreamEvent`):
+
+  **主路径帧(server → client)**: `thinking` → `chunk` → `tool_call` / `tool_result` → `final` → `done`
+
+  **辅帧(server → client)**:
+  - `error` — 错误(LLM / WS 启动失败 / 通用)
+  - `token_usage` — token 计数 + 上下文使用率
+  - `channel_message` — IM 通道消息广播(替代 v0.1 的 `wechat_message`)
+  - `session_created` — 新会话创建
+  - `resume_token` / `resume_ack` / `invalid_resume_token` — 断点续传握手
+  - `stats` — 可观测元事件(retries / fallbacks / events_emitted)
+  - `clarification_request` — ask_user 工具触发的前端澄清弹窗
+  - `confirmation_request` — HITL 待审批动作(对应 langchain `GraphInterrupt`)
+
+  **反向帧(client → server)**:
+  - `WSMessage(content, session_id?, title?)` — 主对话消息
+  - `ConfirmationResponseFrame(decision)` — HITL 决策回传
+
+- 支持多客户端 + 断线重连(resume_token 表 + `last_event_id` 续传)
 - **`ws/` 包结构**(2026-06-30 拆分,回落到 §1.2 单文件 ≤ 800 行):
   - `__init__.py` — re-export `add_message` / `handle_websocket` 等公开符号,保证 `mock.patch("nexus.backend.api.ws.add_message")` 路径稳定
-  - `connection.py` — WS 鉴权 / 心跳 / 重连 resume
+  - `auth.py` — WS 鉴权(token 校验 + 心跳)
   - `streaming.py` — 流式 chunk + thinking parser
   - `finalize.py` — final / done 帧 + add_message 持久化
   - `observability.py` — intent 分类 / quality score 集成
@@ -144,31 +348,102 @@ WHY 走 middleware 不走 permissions:deepagents 0.5.3 不支持 permissions 写
 
 ## 数据库
 
+`nexus.db`(单文件 SQLite,位置 `~/.nexus/nexus.db`)。`db.py::get_db()` 在连接建立时执行 PRAGMA:
 ```sql
--- 会话
-sessions(id, title, channel, deleted_at, created_at, updated_at)
-
--- 消息
-messages(id, session_id, role, content, thinking_content, created_at)
-
--- 记忆（单数表名）
-memory(
-  id, session_id, category, memory_type, key, value,
-  source, confidence, is_active, created_at, updated_at
-)
-
--- 工具调用统计
-tool_stats(tool_name, call_count, success_count, last_called_at)
-
--- 会话级统计
-session_stats(session_id, message_count, total_tokens, last_active_at)
+PRAGMA foreign_keys=ON       -- 默认关闭,显式开启级联
+PRAGMA journal_mode=WAL      -- 并发读优化
+PRAGMA synchronous=NORMAL    -- WAL 模式下 fsync 折中
+PRAGMA busy_timeout=30000    -- 抗 aiosqlite 写锁等待(30s 是 SQLite 默认上限)
 ```
 
-迁移：`db.py` 通过 `_ensure_column()` 兼容老库（缺列则 `ALTER TABLE ADD COLUMN`），无需手工脚本。
+### 表结构(共 5 张)
+
+```sql
+-- 会话 (主索引 channel, 支持主会话 / 微信 / 飞书 / Telegram 多通道)
+sessions(
+  id TEXT PRIMARY KEY,
+  title TEXT,
+  channel TEXT DEFAULT 'main',        -- main / wechat / feishu / telegram
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT                       -- 软删除,purge_old_sessions 30 天后清
+)
+CREATE INDEX idx_sessions_updated_at ON sessions(updated_at DESC);
+CREATE INDEX idx_sessions_deleted_at  ON sessions(deleted_at);
+
+-- 消息 (FK → sessions ON DELETE CASCADE)
+messages(
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  role TEXT CHECK (role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  thinking_content TEXT,                -- 可空,assistant 的 <thinking> 块
+  intent TEXT,                          -- chitchat / knowledge / task / NULL
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+)
+CREATE INDEX idx_messages_session_id ON messages(session_id);
+
+-- 质量评分 (Phase 2 rubric LLM 评分,accept/repair/reject 决策依据)
+quality_scores(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  message_id TEXT,                      -- 可空(评分可不对应具体消息)
+  rubric TEXT NOT NULL,                 -- faithfulness / helpfulness / ...
+  score REAL NOT NULL,                  -- 0.0-1.0
+  verdict TEXT NOT NULL,                -- accept / repair / reject
+  reasoning TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+CREATE INDEX idx_quality_session ON quality_scores(session_id);
+
+-- 断点续传 token (resilience/resume.py HMAC, 续传时校验)
+resume_tokens(
+  token TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  last_event_id INTEGER NOT NULL,       -- 该 session 流到的最后 event_id
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+CREATE INDEX idx_resume_tokens_session ON resume_tokens(session_id);
+
+-- v0.1 旧记忆表 (只读, v0.2+ 数据已迁到 AGENTS.md, 保留供 grep 历史)
+memory_legacy(
+  id TEXT PRIMARY KEY,
+  memory_type TEXT CHECK (memory_type IN ('explicit', 'evolved', 'session')),
+  category TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  metadata TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  expires_at TEXT,
+  is_active INTEGER DEFAULT 1
+)
+CREATE INDEX idx_memory_type     ON memory_legacy(memory_type);
+CREATE INDEX idx_memory_category ON memory_legacy(category);
+CREATE INDEX idx_memory_key      ON memory_legacy(key);
+CREATE INDEX idx_memory_updated  ON memory_legacy(updated_at DESC);
+CREATE INDEX idx_memory_active   ON memory_legacy(is_active);
+```
+
+### 迁移策略
+
+- **新增列**:`db.py::get_db()` 通过 `_ensure_column()` 兼容老库(缺列则 `ALTER TABLE ADD COLUMN`),**无需手工迁移脚本**。
+- **v0.1 → v0.2 记忆迁移**(一次性):`scripts/migrate_legacy_memory.py` 把旧 `memory` 表 `is_active=1 AND memory_type='explicit'` 的行迁到 `~/.nexus/AGENTS.md`,然后 `ALTER TABLE memory RENAME TO memory_legacy` + `VACUUM`。**幂等**:已迁过的(`memory_legacy` 已存在)直接退出 0。
+
+### 当前未使用 / 已废弃
+
+| 表 | 状态 | 说明 |
+|----|------|------|
+| `memory` | ❌ 废弃 | 已 RENAME TO `memory_legacy`(v0.2 重构) |
+| `memory_legacy` | 🟡 只读 | 数据保留供 grep 历史,新代码不写 |
+| `tool_stats` / `session_stats` | ❌ 不存在 | SPEC v0.1 提及但代码从未实现,已删除 |
+
 
 ## CLI
 
-2026-06 清理：产品不再提供 CLI（`nexus/cli/` 整包删除）。终端用户走 macOS DMG APP（`/Applications/Nexus.app`，Electron 拉起后端），开发者从 git clone 走源码直跑：
+2026-06 清理：产品不再提供 CLI（`nexus/cli/` 整包删除）。终端用户走 macOS DMG APP（`/Applications/Nexus.app`，Tauri 主进程 spawn sidecar `nexus-runtime` 拉起后端），开发者从 git clone 走源码直跑：
 
 ```bash
 # 后端（一个 terminal，30000 端口）
