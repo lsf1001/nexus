@@ -2,7 +2,11 @@ import { defineConfig, devices } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
-const e2eNexusHome = process.env.NEXUS_HOME ?? `${tmpdir()}/nexus-playwright-${process.pid}`;
+// 路径必须与 webServer.env.NEXUS_HOME 完全一致:
+// seedCmd 写到 $NEXUS_HOME/.nexus/models.json,但后端 load_models() 读
+// NEXUS_HOME/.nexus/models.json。两边都得是同一个值,否则 CI 写一份、
+// 后端读 ~/.nexus/models.json(api_key=空)→ useBootstrap 进 'setup' 视图。
+const e2eNexusHome = `${tmpdir()}/nexus-playwright-${process.pid}`;
 
 /**
  * Nexus 前端 E2E 测试配置。
@@ -51,11 +55,41 @@ export default defineConfig({
       command: (() => {
         const nexusHome = e2eNexusHome;
         const nexusVenv = `${nexusHome}/.venv/bin/python`;
+        // 在 uvicorn 启动前 seed models.json(api_key 占位),否则 backend
+        // load_models() 看到文件不存在 → 创建 default(api_key=空) →
+        // useBootstrap 走 'setup' 视图 → ChatView .prompt-card 不渲染 →
+        // 所有 E2E 在 30s 超时 fail (2026-06-28 事故 27 spec 全 fail)。
+        // 必须 inline 到 uvicorn 启动前 — globalSetup 与 webServer 并行,
+        // 实测会晚 1s 写文件(后端已加载 default),仍 fail。
+        // 用 python -c 写文件(无 heredoc,无 shell 解析陷阱),spawn shell 拿
+        // JSON.stringify(...) 直接当 args,避开 heredoc 在某些 shell 下被吞的
+        // 问题(2026-07-01 实测 local + CI heredoc 不工作,/tmp/.../models.json
+        // 根本不存在)。
+        const isMock = process.env.NEXUS_E2E_MOCK === '1';
+        const apiKey = isMock
+          ? 'e2e-mock-placeholder'
+          : (process.env.MINIMAX_API_KEY ?? 'e2e-placeholder');
+        const seedPayload = JSON.stringify({
+          models: [{
+            id: 'e2e-default',
+            name: process.env.MODEL_NAME ?? 'MiniMax-M3',
+            api_key: apiKey,
+            api_base: process.env.ANTHROPIC_BASE_URL ?? 'https://api.minimaxi.com/v1',
+            temperature: 0.7,
+            is_active: true,
+          }],
+        });
+        // python -c 写文件 + 起 uvicorn 一气呵成,seed 一定在 uvicorn 启动前完成。
+        // WHY 用绝对路径,不依赖 os.environ['NEXUS_HOME']:Playwright 的 webServer
+        // env 不会自动注入到 command 内 python3 子进程(实测 2026-07-01 KeyError),
+        // 直接把 nexusHome 拼进 python 脚本里(shell 转义 JSON.stringify 已经处理
+        // 引号),保证 seed 100% 落到正确路径。
+        const seedCmd = `mkdir -p ${nexusHome}/.nexus && python3 -c 'import json; open(${JSON.stringify(`${nexusHome}/.nexus/models.json`)},"w").write(${JSON.stringify(seedPayload)})'`;
         if (existsSync(nexusVenv)) {
           // 装了 nexus CLI 的环境：切到 NEXUS_HOME 跑（NEXUS_HOME 路径下有 nexus 包）
-          return `cd ${nexusHome} && ${nexusVenv} -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000`;
+          return `${seedCmd} && cd ${nexusHome} && ${nexusVenv} -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000`;
         }
-        return 'cd .. && ./.venv/bin/python -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000';
+        return `${seedCmd} && cd .. && ./.venv/bin/python -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000`;
       })(),
       url: 'http://127.0.0.1:30000/health',
       reuseExistingServer: !process.env.CI,
