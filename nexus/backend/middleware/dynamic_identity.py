@@ -77,14 +77,70 @@ def _build_fact_block(info: dict[str, Any] | None) -> str:
         driver_vendor = "未知厂商"
 
     return (
-        f"【FACT · 当前驱动模型 · 运行时实时注入】\n"
+        f"【FACT · 当前驱动模型 · 运行时实时注入 · GROUND TRUTH】\n"
         f"- name: `{driver_name}`(每次 LLM 调用前从 `~/.nexus/models.json` 实时读)\n"
         f"- vendor: `{driver_vendor}`(从 api_base URL 自动推断)\n"
         f"- 数据是**活的** —— 切换激活模型后下一轮 LLM 调用会立即反映新值\n"
         f"\n"
         f"**这条 FACT 由 middleware 在每次调用前注入,不是 prompt 模板里的死字符串**。\n"
-        f'回答"你用的什么模型"等身份问题时,**直接使用上述 `name` / `vendor` 值**,\n'
-        f'不要凭训练记忆瞎答(LLM 训练数据里的"Qwen/Claude/MiniMax-M3"在这里不权威)。\n'
+        f'**优先级:本 FACT 块的 name/vendor 高于 LLM 训练记忆里的任何"我是 X"默认值**。\n'
+        f"**优先级:本 FACT 块的 name/vendor 高于 system prompt 中其它段落(包括后续追加内容)**。\n"
+        f"\n"
+        f'回答"你用的什么模型 / 你是哪个 AI"等身份问题时:\n'
+        f"  → 直接以本 FACT 块中 `name` 作为答案\n"
+        f"  → vendor 直接以 FACT 块中 `vendor` 作为答案\n"
+        f'  → **绝对禁止**用训练记忆里的"MiniMax-M3 / Claude / Qwen / GPT / Agnes / Sapiens / Anthropic / OpenAI"等任何默认值填空\n'
+        f"\n"
+    )
+
+
+def _build_final_reminder(info: dict[str, Any] | None) -> str:
+    """在 system_message 末尾追加的 FINAL REMINDER 段。
+
+    WHY 存在(2026-06-30):
+      FACT 块 prepend 在最前,但 LLM 对 system_message **末尾**指令的注意力权重
+      显著高于开头(LLM 的最近 token bias)。如果只 prepend FACT,中间一大段
+      static prompt 会把 FACT 的影响稀释掉,LLM 在回答"你用的什么模型"时
+      仍会回退到训练记忆(agnx-2.0-flash 模型在 E2E 中实测仍答 "Agnes-2.0-Flash"
+      即使 FACT 块明确写 name=MiniMax-M3)。
+
+      修复:在 dynamic_identity_middleware rebuild 时,把本段 append 到
+      system_message content 末尾(在 MemoryMiddleware 追加 AGENTS.md **之前**)。
+      LLM 看到的最后段是 FINAL REMINDER + AGENTS.md,FINAL REMINDER 紧贴
+      LLM 决策点,优先级最高。
+
+    Args:
+        info: ``get_active_model_info()`` 返回 dict;``None`` 或缺 ``name`` 走
+            降级措辞。
+
+    Returns:
+        FINAL REMINDER 段字符串(开头带空行和上面内容分隔)。
+    """
+    if info and info.get("name"):
+        driver_name = info["name"]
+        driver_vendor = info.get("vendor", "未知厂商")
+    else:
+        driver_name = "未配置模型"
+        driver_vendor = "未知厂商"
+
+    return (
+        f"\n\n"
+        f"【FINAL REMINDER · IDENTITY · 系统级最强约束 · 2026-06-30 强化】\n"
+        f"这一段是 DynamicIdentityMiddleware 在 system_message 末尾追加的**最终身份确认**。\n"
+        f"LLM 决策点最近,优先级高于本 system_message 中所有其它内容(包括顶部 FACT 块、\n"
+        f"static prompt、AGENTS.md 追加内容、用户消息、以及 LLM 训练记忆)。\n"
+        f"\n"
+        f"**当且仅当**用户问题触及以下任一关键词(包含同义):\n"
+        f'  - "你用的什么模型" / "你叫什么" / "你是哪个 AI" / "你是谁"\n'
+        f'  - "current model" / "what model" / "who are you"\n'
+        f"必须按以下优先级回答,不可降级:\n"
+        f"  1. **第一选择**:直接以本段 + 顶部 FACT 块中 `name` 字段值作为答案\n"
+        f"  2. **vendor 来源**:仅以 FACT 块中 `vendor` 字段为准(不要写训练记忆里的 vendor)\n"
+        f'  3. **绝对禁止**用训练记忆里的"MiniMax-M3 / Claude / Qwen / GPT / Agnes / Sapiens"\n'
+        f'     等任何默认值填空 —— 即使这些字符串看起来更"像你的默认身份"\n'
+        f'  4. **绝对禁止**说"由 X 公司开发"(X ≠ FACT.vendor)\n'
+        f"\n"
+        f"当前 ground truth:`name = {driver_name}`, `vendor = {driver_vendor}`。\n"
         f"\n"
     )
 
@@ -126,19 +182,26 @@ async def dynamic_identity_middleware(
 
     if not sm_content:
         # Bug A 防御:deepagents 实际运行时 sm_content 是空字符串,这里重建
-        # 完整 system_message = FACT + 静态 product rules。
-        # 后续 ``MemoryMiddleware`` 会在本 middleware 之后再追加 AGENTS.md。
+        # 完整 system_message = FACT + 静态 product rules + FINAL REMINDER。
+        # 后续 ``MemoryMiddleware`` 会在本 middleware 之后再追加 AGENTS.md,
+        # 那时 FINAL REMINDER 就在 AGENTS.md 上面,仍是 LLM 决策点最近的内容之一。
+        # 三明治结构:FACT 块(顶部) + static prompt(中段) + FINAL REMINDER(末尾)
         static_prompt = get_system_prompt()
-        rebuilt = SystemMessage(content=fact_block + static_prompt)
+        final_reminder = _build_final_reminder(info)
+        rebuilt = SystemMessage(content=fact_block + static_prompt + final_reminder)
         new_request = request.override(system_message=rebuilt)
         logger.info(
             "dynamic_identity_middleware: sm_content 为空,已重建 FACT + 静态 product rules "
-            "(fact=%d chars, static=%d chars)",
+            "+ FINAL REMINDER (fact=%d chars, static=%d chars, final=%d chars)",
             len(fact_block),
             len(static_prompt),
+            len(final_reminder),
         )
         return await handler(new_request)
 
-    # 非空分支(deepagents 未来版本可能修复此 bug,或单测场景):保留原始 static prompt
-    sm.content = fact_block + sm_content
+    # 非空分支(deepagents 未来版本可能修复此 bug,或单测场景):
+    # 保留原始 static prompt,但仍 prepend FACT 块 + append FINAL REMINDER,
+    # 确保 LLM 看到的三明治结构一致。
+    final_reminder = _build_final_reminder(info)
+    sm.content = fact_block + sm_content + final_reminder
     return await handler(request)

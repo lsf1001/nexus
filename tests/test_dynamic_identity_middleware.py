@@ -182,3 +182,94 @@ def test_none_sm_content_gets_fact_and_static() -> None:
     assert "MiniMax-M3" in content
     # 静态 prompt 必须存在(同 Bug A 修法)
     assert "Nexus" in content, "sm=None 边界也必须含静态 prompt"
+
+
+def test_final_reminder_appended_to_system_message() -> None:
+    """2026-06-30 强化:LLM 训练 bias 强到 FACT 块(头部)压不住,必须再在
+    system_message 末尾追加 FINAL REMINDER 段(三明治结构)。LLM 对末尾
+    指令注意力权重最高,这才是 ground truth 落到决策点的关键。
+
+    本测试守住:sm_content="" 时,FACT + static + FINAL REMINDER 都在,
+    且 FINAL REMINDER 含 ground truth 的 name/vendor。
+    """
+    captured_active = {
+        "name": "MiniMax-M3",
+        "vendor": "MiniMax",
+        "is_active": True,
+        "api_base": "https://api.minimaxi.com/v1",
+        "temperature": 0.7,
+    }
+
+    with patch(
+        "nexus.backend.middleware.dynamic_identity.get_active_model_info",
+        return_value=captured_active,
+    ):
+        req = _make_request("你是谁", sm_content="")
+        content = _capture_sm_content(req)
+
+    # FINAL REMINDER 段必须存在
+    assert "FINAL REMINDER" in content, "system_message 末尾必须追加 FINAL REMINDER 段"
+    # FINAL REMINDER 必须含 ground truth 字段值(直接说"name = X"和"vendor = Y")
+    assert "name = MiniMax-M3" in content, (
+        "FINAL REMINDER 必须直接以 'name = X' 形式声明当前驱动模型,让 LLM 一眼就能在末尾看到 ground truth"
+    )
+    # FINAL REMINDER 位置必须在 static prompt 之后(防退化)
+    reminder_idx = content.index("FINAL REMINDER")
+    nexus_idx = content.index("Nexus")
+    assert reminder_idx > nexus_idx, "FINAL REMINDER 必须排在 static prompt(Nexus 标识)之后"
+    # FACT 块仍然在最前(三明治结构:头部 FACT + 中段 static + 尾部 FINAL REMINDER)
+    fact_idx = content.index("FACT · 当前驱动模型")
+    assert fact_idx < nexus_idx, "FACT 块(头部)必须在 static prompt 之前"
+    assert fact_idx < reminder_idx, "FACT 块(头部)必须在 FINAL REMINDER(尾部)之前"
+
+
+def test_fact_block_uses_strongest_priority_wording() -> None:
+    """2026-06-30 强化:FACT 块头部措辞必须包含"GROUND TRUTH"和"优先级高于"字样,
+    让 LLM 一进 system prompt 就能看到这是最高优先级的事实块,不是建议/参考。
+    """
+    captured_active = {
+        "name": "agnes-2.0-flash",
+        "vendor": "agnes-ai",
+        "is_active": True,
+        "api_base": "https://apihub.agnes-ai.com/v1",
+        "temperature": 0.7,
+    }
+
+    with patch(
+        "nexus.backend.middleware.dynamic_identity.get_active_model_info",
+        return_value=captured_active,
+    ):
+        req = _make_request("你是谁", sm_content="")
+        content = _capture_sm_content(req)
+
+    # FACT 块头部必须有 GROUND TRUTH 标识
+    assert "GROUND TRUTH" in content, "FACT 块头部必须有 GROUND TRUTH 标识,告诉 LLM 这是事实"
+    # FACT 块必须声明优先级高于训练记忆(防 LLM 用训练记忆填空)
+    assert "训练记忆" in content, "FACT 块必须明确声明优先级高于 LLM 训练记忆"
+    # static prompt 的 FINAL AUTHORITATIVE IDENTITY 段也必须存在
+    assert "FINAL AUTHORITATIVE IDENTITY" in content, (
+        "static prompt 必须含 FINAL AUTHORITATIVE IDENTITY 段(系统级最强约束)"
+    )
+
+
+def test_final_reminder_present_in_nonempty_branch() -> None:
+    """2026-06-30 强化:即使 sm_content 非空(legacy / 测试场景),FINAL REMINDER
+    也必须 append,保证三明治结构一致,不依赖 deepagents 是否给空字符串。
+    """
+    captured_active = {
+        "name": "MiniMax-M3",
+        "vendor": "MiniMax",
+        "is_active": True,
+        "api_base": "https://api.minimaxi.com/v1",
+        "temperature": 0.7,
+    }
+
+    with patch(
+        "nexus.backend.middleware.dynamic_identity.get_active_model_info",
+        return_value=captured_active,
+    ):
+        req = _make_request("你是谁", sm_content="我是 Nexus")
+        content = _capture_sm_content(req)
+
+    assert "FINAL REMINDER" in content, "非空分支也必须 append FINAL REMINDER"
+    assert "name = MiniMax-M3" in content, "FINAL REMINDER 必须含当前 ground truth"
