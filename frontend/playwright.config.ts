@@ -19,7 +19,6 @@ const e2eNexusHome = process.env.NEXUS_HOME ?? `${tmpdir()}/nexus-playwright-${p
  *   - 失败时保留 trace + video + screenshot，方便 CI 排错
  */
 export default defineConfig({
-  globalSetup: './e2e-setup.ts',
   testDir: './e2e',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
@@ -52,11 +51,31 @@ export default defineConfig({
       command: (() => {
         const nexusHome = e2eNexusHome;
         const nexusVenv = `${nexusHome}/.venv/bin/python`;
+        // 在 uvicorn 启动前 seed models.json(api_key 占位),否则 backend
+        // load_models() 看到文件不存在 → 创建 default(api_key=空) →
+        // useBootstrap 走 'setup' 视图 → ChatView .prompt-card 不渲染 →
+        // 所有 E2E 在 30s 超时 fail (2026-06-28 事故 27 spec 全 fail)。
+        // 必须 inline 到 uvicorn 启动前 — globalSetup 与 webServer 并行,
+        // 实测会晚 1s 写文件(后端已加载 default),仍 fail。
+        const isMock = process.env.NEXUS_E2E_MOCK === '1';
+        const apiKey = isMock
+          ? 'e2e-mock-placeholder'
+          : (process.env.MINIMAX_API_KEY ?? 'e2e-placeholder');
+        const seedCmd = `mkdir -p ${nexusHome} && cat > ${nexusHome}/models.json <<'EOF'\n${JSON.stringify({
+          models: [{
+            id: 'e2e-default',
+            name: process.env.MODEL_NAME ?? 'MiniMax-M3',
+            api_key: apiKey,
+            api_base: process.env.ANTHROPIC_BASE_URL ?? 'https://api.minimaxi.com/v1',
+            temperature: 0.7,
+            is_active: true,
+          }],
+        }, null, 2)}\nEOF\n`;
         if (existsSync(nexusVenv)) {
           // 装了 nexus CLI 的环境：切到 NEXUS_HOME 跑（NEXUS_HOME 路径下有 nexus 包）
-          return `cd ${nexusHome} && ${nexusVenv} -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000`;
+          return `${seedCmd}cd ${nexusHome} && ${nexusVenv} -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000`;
         }
-        return 'cd .. && ./.venv/bin/python -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000';
+        return `${seedCmd}cd .. && ./.venv/bin/python -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000`;
       })(),
       url: 'http://127.0.0.1:30000/health',
       reuseExistingServer: !process.env.CI,
