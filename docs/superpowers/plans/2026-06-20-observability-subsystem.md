@@ -1540,6 +1540,8 @@ jq 'select(.event=="intent.classified") | .intent' ~/.nexus/logs/nexus.log | sor
 
 ## DMG 桌面端
 
+> ⚠️ **历史快照(2026-07-01 标注)**：本节描述 2026-06-20 当时的 DMG 桌面端(Electron + PyInstaller frozen)。**当前 DMG 已切 Tauri 2**(Rust 主进程 + Python sidecar supervisor,见 [[2026-06-26-tauri-migration.md]] + [[../../../docs/architecture.md]] §2)。日志路径与重定向语义不变,只是 desktop `backend.ts` 改为 Tauri `runtime.rs` 设 env。**当前实现**:`desktop/src-tauri/src/runtime.rs` spawn sidecar + `MainProcessBuilder::setup` 设 `NEXUS_LOG_FILE`。
+
 Electron 主进程拉起 PyInstaller 打包的 backend(`./Nexus.app/Contents/Resources/nexus-backend/nexus-backend`)。
 日志路径:
 
