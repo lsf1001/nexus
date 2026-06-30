@@ -23,6 +23,7 @@ WHY 存在:
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import patch
 
 from langchain.agents.middleware.types import ModelRequest
@@ -351,6 +352,80 @@ def test_fact_block_contains_few_shot_and_first_word_constraint() -> None:
     # 强化措辞: 明确禁止 MiniMax-M3 / Claude / Agnes 这些训练记忆默认值
     assert "MiniMax-M3" in content and "Claude" in content and "Agnes" in content, (
         "FACT 块必须在禁止列表里点名 MiniMax-M3 / Claude / Agnes 等训练记忆默认值"
+    )
+
+
+def test_user_message_injects_reminder_on_identity_question() -> None:
+    """2026-06-30 第三轮强化:即使 FACT 块 + FINAL REMINDER 都做了,DMG 1.1.1
+    实测 broad query 仍答 "我是 Agnes-Flash by Sapiens AI"(训练记忆 bias
+    完全压过 system prompt)。
+
+    修复:在 user message **开头** inject [System Reminder],利用 LLM 对最近
+    user message token 的强注意力,让 ground truth 落到决策起点。触发条件:
+    user 内容含身份关键词("你是谁"等)。
+
+    本测试守住:
+      1. 身份问题 → 最后一条 HumanMessage content **开头** prepend reminder
+      2. 非身份问题 → 不 inject(避免污染普通 query)
+    """
+    captured_active = {
+        "name": "MiniMax-M3",
+        "vendor": "MiniMax",
+        "is_active": True,
+        "api_base": "https://api.minimaxi.com/v1",
+        "temperature": 0.7,
+    }
+
+    # 身份问题:应该 inject reminder
+    captured_user_content: dict[str, str | None] = {}
+
+    async def capture_identity_handler(r: ModelRequest) -> AIMessage:
+        last = r.messages[-1]
+        captured_user_content["text"] = (
+            last.content if isinstance(last.content, str) else str(last.content)
+        )
+        return AIMessage(content="(stub)")
+
+    with patch(
+        "nexus.backend.middleware.dynamic_identity.get_active_model_info",
+        return_value=captured_active,
+    ):
+        req = _make_request("你是谁 我是谁 现在用的什么模型", sm_content="")
+        asyncio.run(dynamic_identity_middleware.awrap_model_call(req, capture_identity_handler))
+
+    text = captured_user_content.get("text") or ""
+    assert "System Reminder" in text, (
+        "身份问题应在 user message 开头 inject [System Reminder], "
+        f"实际 user content 前 200 字符: {text[:200]}"
+    )
+    assert "MiniMax-M3" in text, "[System Reminder] 必须含当前驱动模型 name"
+    assert "我是 Nexus" in text, "[System Reminder] 必须明确「第一句以我是 Nexus 开头」"
+    # reminder 必须在 user 原文本**之前**(prepend,不是 append)
+    reminder_idx = text.index("System Reminder")
+    user_orig_idx = text.index("你是谁")
+    assert reminder_idx < user_orig_idx, "[System Reminder] 必须 prepend 在 user 原文本之前"
+
+    # 非身份问题:不应该 inject(避免污染)
+    captured_user_content.clear()
+    req2 = _make_request("今天天气怎么样", sm_content="")
+
+    async def capture_normal_handler(r: ModelRequest) -> AIMessage:
+        last = r.messages[-1]
+        captured_user_content["text"] = (
+            last.content if isinstance(last.content, str) else str(last.content)
+        )
+        return AIMessage(content="(stub)")
+
+    with patch(
+        "nexus.backend.middleware.dynamic_identity.get_active_model_info",
+        return_value=captured_active,
+    ):
+        asyncio.run(dynamic_identity_middleware.awrap_model_call(req2, capture_normal_handler))
+
+    text2 = captured_user_content.get("text") or ""
+    assert "System Reminder" not in text2, (
+        "非身份问题不应 inject reminder,避免污染普通 query. "
+        f"实际 user content: {text2[:200]}"
     )
 
     
