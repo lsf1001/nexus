@@ -4,6 +4,8 @@
 > 范围：macOS 桌面安装包、内置运行时、UI 改版、微信通道入口  
 > 原型：[docs/prototypes/nexus-handdrawn-assistant-ui-v2.html](../../prototypes/nexus-handdrawn-assistant-ui-v2.html)
 
+> ⚠️ **[SUPERSEDED — 2026-07-01 标注]**：本设计稿基于 **Electron + PyInstaller onedir**,已被 2026-06-26 的 Tauri 2 migration 替代。当前生产 DMG 走 Tauri 2(Rust 主进程 + Python sidecar supervisor),Electron 路径未实现即被放弃。详见 [[2026-06-26-tauri-migration-design.md]] + [[../../../docs/architecture.md]] §2。
+
 ## 目标
 
 Nexus 从“AI 网关”调整为面向个人用户的 macOS 个人 AI 助手。用户在 GitHub Release 下载一个 DMG，双击安装后即可打开 Nexus，不需要理解 Python、虚拟环境、Node、后端端口或命令行。
