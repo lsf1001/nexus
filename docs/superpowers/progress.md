@@ -215,7 +215,7 @@ open /Applications/Nexus.app   # 首次需右键 → 打开(绕 Gatekeeper)
 ### 不在本轮范围(下次会话可做)
 
 - v0.4 计划:`backend/agent.py` / `frontend/ChatArea.tsx` 仍超 800 行(由重构分块逐文件处理,4 commit 已落,但 ChatArea 是 TBD)
-- `pywebview` 替代 Electron 整体迁移(目前 DMG 仍用 PyInstaller + pywebview,SPEC 已更新)
+- ~~`pywebview` 替代 Electron 整体迁移~~ **已于 2026-06-26 切到 Tauri 2,2026-07-01 文档对齐(commit `02a4db0`+)**: DMG 走 `cargo tauri build` + Python sidecar,pywebview (`launcher.py`) 退化为 dev/legacy fallback,不再用于 DMG 构建。详见 [[../docs/architecture.md]] §2 + [[../CLAUDE.md]] §架构。
 - Tier routing 是否需要更多 tier(目前只有 weak / full 两级)
 
 ---
