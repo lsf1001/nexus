@@ -18,13 +18,26 @@ WHY 存在:
     3. LLM 不需要主动调 ``get_model_info`` 也能答对(第一防线);工具仍存在
        作为第二防线。
 
+Bug A 修复(2026-06-30):
+  实测发现 deepagents 0.6.x / langchain 1.4.x 在 middleware chain 早期
+  调用本 middleware 时,``request.system_message.content`` 经常是**空字符串**
+  (deepagents 内部把 ``system_prompt`` 字符串先吃掉,后由
+  ``MemoryMiddleware`` 在本 middleware 之后再追加 AGENTS.md 内容)。
+  如果仅 prepend FACT 块到空字符串,LLM 收到的只有 FACT,丢失了:
+    - Nexus 身份 / 思考格式 / 澄清规则 / 安全规则(静态 product rules)
+  LLM 自报身份时不说"我是 Nexus",LLM 不遵守 ``<thinking>`` 格式。
+  修复:检测 ``sm_content`` 为空/None 时,**用
+  ``request.override(system_message=...)`` 重建完整 system_message
+  = FACT + 静态 product rules(``get_system_prompt()`` 缓存读取,O(1))。
+  非空分支保持原行为(FACT prepend),不退化。
+
 契约:
-  - 输入 ``request.system_message.content`` 必须是 ``str``(deepagents / langgraph
-    ``create_agent`` 走 ``system_prompt: str | SystemMessage`` 路径,本 middleware
-    只处理 str 分支,其他情况 noop)。
+  - 输入 ``request.system_message.content`` 可以是 ``str``、空字符串、或
+    ``None``(全部 case 都处理)。
   - ``get_active_model_info()`` 是 cheap 操作(单次 ``json.loads`` 6KB 文件) →
     每次 LLM 调用读一次完全可接受(LLM 调用本身几十毫秒到几秒,加 1ms 文件
     读可忽略)。
+  - ``get_system_prompt()`` 走单 bucket 缓存,本进程内只构建一次,O(1) 读取。
 """
 
 from __future__ import annotations
@@ -34,7 +47,9 @@ from typing import Any
 
 from langchain.agents.middleware import wrap_model_call
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.messages import SystemMessage
 
+from ..agent._system_prompt import get_system_prompt
 from ..models_config import get_active_model_info
 
 logger = logging.getLogger(__name__)
@@ -83,10 +98,18 @@ async def dynamic_identity_middleware(
 
     实现要点:
       - **不**缓存 FACT 块字符串(每次都重算)—— 缓存就是 bug 来源。
-      - 如果 ``request.system_message`` 为 ``None``(理论上 create_agent
-        必须传 system_prompt,这里只是防御),新建一个空 SystemMessage 再 prepend。
-      - mutate 的是 ``request.system_message.content``(in-place 改 str),
-        然后 ``handler(request)`` 透传 —— handler 拿到的就是带最新 FACT 的版本。
+      - **Bug A 修复**:如果 ``request.system_message.content`` 是空字符串或
+        ``request.system_message`` 为 ``None``,用 ``request.override()`` 重建
+        SystemMessage = FACT + 静态 product rules(``get_system_prompt()``)。
+        这是因为 deepagents 0.6.x 在调用本 middleware 时,``sm_content`` 经常
+        已经是空字符串(原始 ``system_prompt`` 被 langchain 内部吃掉,稍后
+        才由 ``MemoryMiddleware`` 追加 AGENTS.md)。如果仅 prepend FACT 到
+        空字符串,LLM 会丢失 Nexus 身份 / 思考格式 / 澄清规则 / 安全规则。
+      - 如果 ``sm_content`` 非空(legacy / 测试路径),仍 prepend FACT 块,
+        保留原始 static prompt —— 不退化。
+      - 用 ``request.override(system_message=...)`` 而非直接
+        ``request.system_message = ...``(langchain 1.4 提示
+        ``__setattr__`` 已 deprecate)。
       - 如果 handler 抛异常,**不**重试,直接向上抛(LLM 异常由 ResilientRunnable
         兜底重试,本 middleware 不应该吞错)。
       - **async 签名**:deepagents 在 ws.py 里走 ``agent.astream(...)``(async
@@ -99,16 +122,23 @@ async def dynamic_identity_middleware(
     fact_block = _build_fact_block(info)
 
     sm = request.system_message
-    if sm is None:
-        # 防御性:create_agent 不应该走到这分支(传了 system_prompt)。
-        # 如果走到,造一个空 SystemMessage 注入 FACT,保证 LLM 至少知道当前驱动。
-        from langchain_core.messages import SystemMessage
+    sm_content = sm.content if sm is not None and isinstance(sm.content, str) else ""
 
-        request.system_message = SystemMessage(content=fact_block)
-        logger.warning("dynamic_identity_middleware: request.system_message 为 None,已新建空 SystemMessage")
-    else:
-        # mutate content:prepend FACT,后跟原始 system_prompt
-        existing = sm.content if isinstance(sm.content, str) else str(sm.content)
-        sm.content = fact_block + existing
+    if not sm_content:
+        # Bug A 防御:deepagents 实际运行时 sm_content 是空字符串,这里重建
+        # 完整 system_message = FACT + 静态 product rules。
+        # 后续 ``MemoryMiddleware`` 会在本 middleware 之后再追加 AGENTS.md。
+        static_prompt = get_system_prompt()
+        rebuilt = SystemMessage(content=fact_block + static_prompt)
+        new_request = request.override(system_message=rebuilt)
+        logger.info(
+            "dynamic_identity_middleware: sm_content 为空,已重建 FACT + 静态 product rules "
+            "(fact=%d chars, static=%d chars)",
+            len(fact_block),
+            len(static_prompt),
+        )
+        return await handler(new_request)
 
+    # 非空分支(deepagents 未来版本可能修复此 bug,或单测场景):保留原始 static prompt
+    sm.content = fact_block + sm_content
     return await handler(request)
