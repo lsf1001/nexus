@@ -24,6 +24,7 @@ import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from time import monotonic as _monotonic
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -49,6 +50,74 @@ __all__ = ["handle_websocket"]
 
 
 logger = logging.getLogger(__name__)
+
+
+# 模块级 ``get_agent`` shim:运行时透传 ``main._get_current_agent``。
+# 为什么不在 ``import`` 时直接 ``from ...main import _get_current_agent as get_agent``:
+# ``main.py`` 顶层 ``from .api.ws import handle_websocket`` 引入循环。延后到首次调用
+# 时解析:本模块是 leaf(无反向 import 副作用),首次进 handle_websocket 时
+# main 已经 import 完,可安全引用。测试可通过 ``monkeypatch.setattr(h, "get_agent", ...)``
+# 在模块级替换,行为与生产一致。
+def get_agent() -> Any:
+    """返回当前 Agent 实例(从 main 模块懒解析,见上方说明)。"""
+    from ... import main as _main
+
+    return _main._get_current_agent()
+
+
+# confirmation_response 路径 aget_state 进程内缓存:
+# 同 session 在用户决策窗口(< 1s)内连续读复用缓存,避免每次都走 SQLite hit。
+# 失败结果不缓存(transient 故障需要下次重试);HITL 完成时显式 invalidate。
+_INTERRUPTS_CACHE_TTL_SECONDS: float = 1.0
+_interrupts_cache: dict[str, tuple[float, tuple[Any, ...]]] = {}
+
+
+async def _resolve_pending_interrupts(session_id: str) -> tuple[Any, ...]:
+    """读 session 待处理 interrupts,带 1s TTL 进程内缓存。
+
+    WHY 缓存:同一 session 在短时间内的连续 confirmation_response / 续流
+    操作会重复调 ``agent.aget_state`` 读 checkpoint(每次都走 SQLite hit)。
+    1s TTL 覆盖典型 confirmation_response 流程(用户决策时间通常 < 1s),
+    同时保证 stale 数据不会停留过久。
+
+    缓存命中条件:
+      - session_id 存在于 ``_interrupts_cache``
+      - 当前时间距上次写入 < ``_INTERRUPTS_CACHE_TTL_SECONDS``
+
+    失败结果**不**写入缓存(transient 故障让下次重试,HITL 状态可恢复)。
+
+    Args:
+        session_id: 会话 id,作为缓存 key 和 aget_state 的 thread_id。
+
+    Returns:
+        ``(Interrupt, ...)`` tuple;无挂起中断或 aget_state 失败时为空 tuple。
+    """
+    now = _monotonic()
+    cached = _interrupts_cache.get(session_id)
+    if cached is not None and (now - cached[0]) < _INTERRUPTS_CACHE_TTL_SECONDS:
+        return cached[1]
+    agent = get_agent()
+    try:
+        snapshot = await agent.aget_state({"configurable": {"thread_id": session_id}})
+        interrupts: tuple[Any, ...] = tuple(snapshot.interrupts) if snapshot.interrupts else ()
+        _interrupts_cache[session_id] = (now, interrupts)
+    except Exception as gs_exc:  # noqa: BLE001 — 边界统一收口,失败不缓存
+        logger.warning("WS confirmation_response get_state 失败: %s", gs_exc)
+        interrupts = ()
+    return interrupts
+
+
+def _invalidate_interrupts_cache(session_id: str) -> None:
+    """HITL 完成一轮后显式失效缓存,确保下一次会重读。
+
+    调时机:
+      - ``_run_agent_streaming`` 末尾(无论成功 / HITL 完成 / 错误)
+      - 任何写 checkpoint 状态的副作用之后(目前没有其它写路径,留扩展位)
+
+    Args:
+        session_id: 要失效的会话 id;不存在时静默 no-op(``pop`` 默认行为)。
+    """
+    _interrupts_cache.pop(session_id, None)
 
 
 async def handle_websocket(
@@ -149,17 +218,19 @@ async def handle_websocket(
                 # 从 checkpoint 读挂起 interrupt:langgraph 0.6+ 把 interrupt 存到
                 # ``__interrupt__`` channel,aget_state().interrupts 拿回。
                 # 多 worker 部署天然兼容(共享 nexus.db)。
-                agent = get_agent()
-                try:
-                    snapshot = await agent.aget_state({"configurable": {"thread_id": session_id}})
-                    pending_interrupts_for_resume = tuple(snapshot.interrupts) if snapshot.interrupts else ()
-                except Exception as gs_exc:  # noqa: BLE001
-                    logger.warning("WS confirmation_response get_state 失败: %s", gs_exc)
-                    pending_interrupts_for_resume = ()
+                # 走 1s TTL 进程内缓存避免重复 SQLite hit(详见 _resolve_pending_interrupts)。
+                pending_interrupts_for_resume = await _resolve_pending_interrupts(session_id)
+                cached_entry = _interrupts_cache.get(session_id)
+                cache_status = (
+                    "hit"
+                    if cached_entry is not None and (_monotonic() - cached_entry[0]) < _INTERRUPTS_CACHE_TTL_SECONDS
+                    else "miss"
+                )
                 logger.info(
-                    "WS confirmation_response aget_state: session=%s pending=%d",
+                    "WS confirmation_response aget_state: session=%s pending=%d (cache=%s)",
                     session_id,
                     len(pending_interrupts_for_resume),
+                    cache_status,
                 )
                 if not pending_interrupts_for_resume:
                     await websocket.send_json(
@@ -178,6 +249,7 @@ async def handle_websocket(
                 # 等流程,但 _run_agent_streaming 仍要 prompt 入参。command_resume
                 # 非空时,prompt["messages"] 会被忽略(改走 Command(resume=...))。
                 resume_prompt: dict[str, Any] = {"messages": []}
+                agent = get_agent()
                 (
                     last_event_id,
                     response_text,
@@ -220,6 +292,10 @@ async def handle_websocket(
                     agent=agent,
                     get_quality_pipeline=get_quality_pipeline,  # 2026-06-29: 改返 None(quality/pipeline.py 已删)
                 )
+                # invalidate 时机:resume 完成后 checkpoint 状态已变化,
+                # 必须显式失效缓存让下一次 confirmation_response 重读最新状态。
+                # 无论成功 / HITL 二次挂起 / 错误都要 invalidate。
+                _invalidate_interrupts_cache(session_id)
                 continue  # 本轮处理完,等下一次输入
 
             # 2) 普通用户消息帧
