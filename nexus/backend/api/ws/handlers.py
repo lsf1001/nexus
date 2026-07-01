@@ -243,7 +243,9 @@ async def handle_websocket(
                 # 从 checkpoint 读挂起 interrupt:langgraph 0.6+ 把 interrupt 存到
                 # ``__interrupt__`` channel,aget_state().interrupts 拿回。
                 # 多 worker 部署天然兼容(共享 nexus.db)。
-                # 走 1s TTL 进程内缓存避免重复 SQLite hit(详见 _resolve_pending_interrupts)。
+                # 走 1s TTL 进程内缓存(_resolve_pending_interrupts)避免重复 SQLite hit;
+                # 同 session 短时间内的 confirmation_response 复用上次读,失败结果不缓存。
+                # 续流后 _run_agent_streaming 返回时调用 _invalidate_interrupts_cache 失效。
                 result = await _resolve_pending_interrupts(session_id)
                 pending_interrupts_for_resume = result.interrupts
                 logger.info(
