@@ -205,16 +205,37 @@ def test_ws_emit_chunk_realtime_not_buffered() -> None:
     assert "from ..thinking_parser import ThinkingParser" in src or "from .api.thinking_parser" in src, (
         "ws/streaming.py 必须 import ThinkingParser,实时 emit chunk"
     )
-    # on_chat_model_stream 分支必须调用 parser.feed 并 send_json
+    # on_chat_model_stream 分支必须经 _emit_chat_model_chunk 委托(2026-07-01 Task 6.2
+    # 把 inline parser.feed 提到 helper),helper 内部仍走 parser.feed + send_json 实时 emit。
     stream_match = re.search(
         r"event_type\s*==\s*['\"]on_chat_model_stream['\"][\s\S]+?continue",
         src,
     )
     assert stream_match, "未找到 on_chat_model_stream 处理分支"
     body = stream_match.group(0)
-    assert "parser.feed" in body, "必须用 parser.feed 实时处理 chunk"
-    assert "send_json" in body, "必须实时 send_json emit"
-    assert "full_response +=" not in body, "禁止 full_response += content 缓存模式(会导致转圈 bug 回潮)"
+    assert "_emit_chat_model_chunk" in body, "on_chat_model_stream 必须委托 _emit_chat_model_chunk(实时 emit helper)"
+    # 配套:helper 内部必须仍走 _emit_chunks(里面走 parser.feed + send_json),
+    # 禁止缓存模式。Task 6.1 已把 parser.feed + send_json 抽到 _emit_chunks,
+    # Task 6.2 把 _emit_chunks 进一步包到 _emit_chat_model_chunk / _emit_chat_model_end_fallback。
+    helper_match = re.search(
+        r"async def _emit_chat_model_chunk[\s\S]+?return counter",
+        src,
+    )
+    assert helper_match, "未找到 _emit_chat_model_chunk 实现"
+    helper_body = helper_match.group(0)
+    assert "_emit_chunks" in helper_body, (
+        "helper 内部必须委托 _emit_chunks(实时 emit 路径,内部走 parser.feed + send_json)"
+    )
+    # _emit_chunks 内部才是 parser.feed + send_json 实际调用点
+    chunks_helper_match = re.search(
+        r"async def _emit_chunks[\s\S]+?return None",
+        src,
+    )
+    assert chunks_helper_match, "未找到 _emit_chunks 实现"
+    chunks_body = chunks_helper_match.group(0)
+    assert "parser.feed" in chunks_body, "_emit_chunks 内部必须调 parser.feed 实时处理 chunk"
+    assert "send_json" in chunks_body, "_emit_chunks 内部必须实时 send_json emit"
+    assert "full_response +=" not in src, "禁止 full_response += content 缓存模式(会导致转圈 bug 回潮)"
 
 
 def test_settings_view_reads_models_from_store() -> None:

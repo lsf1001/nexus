@@ -228,30 +228,12 @@ async def _run_agent_streaming(
     *,
     command_resume: dict[str, Any] | None = None,
 ) -> tuple[int, str, bool, tuple[str, list[str]] | None, tuple | None]:
-    """运行 agent 流式响应,把事件转发到 WebSocket。
+    """WS 流式响应总编排(≤ 80 行,§1.2)。
 
-    使用 :class:`StreamGuard` 包装 ``agent.astream_events``:
-      - 给每个事件附加进程内单调递增的 ``event_id``
-      - 可重试错误自动重试;不可重试 / 重试用尽 → yield 1 个 error 事件
-      - 永不抛异常(StreamGuard 已保证),调用方不需要再 try/except
-      - 检测到 LLM 调用 ``ask_user`` 工具时,发送 ``clarification_request``
-        帧并挂起(不再发 final / done),用户回答通过新 turn 注入历史。
-      - 检测到 ``GraphInterrupt``(langchain HITL 中断)时,发 ``confirmation_request``
-        帧 + 把 ``pending_interrupts`` 填入返回值第 5 元组,handle_websocket 据此
-        挂起本轮流,等客户端发 ``confirmation_response`` 后用 ``Command(resume=...)``
-        新 astream 续流。
-
-    Args:
-        websocket: 目标 WebSocket 连接。
-        session_id: 会话 ID(用于日志上下文 / HITL thread_id)。
-        prompt: 已构建好的 prompt dict(含 ``messages``)。
-        agent: 当前 Agent 实例(由 ``main.py`` 在调用时通过 ``get_agent()`` 注入)。
-        resume_from_event_id: 客户端断点续传位置;Phase 1 简化模型下
-            仅作为"客户端告知 server 上次看到哪",不做真正的去重过滤
-            (每次流都有新的 event_id 序列)。
-        command_resume: HITL 续流 payload(``{"decisions": [...]}``)。非空时
-            跳过 messages 输入,改用 ``Command(resume=command_resume)`` 续流
-            已挂起的图。
+    编排 3 步:
+      1. 拼 astream input (``_emit_astream_kwargs``)
+      2. 消费 astream 事件 (``_consume_astream_events``)
+      3. 收尾 flush + final 帧 (``_finalize_stream``)
 
     Returns:
         ``(last_event_id, response_text, completed, clarification, pending_interrupts)``:
@@ -278,9 +260,78 @@ async def _run_agent_streaming(
         )
         return 1, "", False, None, None
 
-    # StreamGuard 包 astream_events;每次重试会重新调一次 astream_events
-    # (幂等重试,由上游 LLM 自行决定是否真幂等)。
-    # 挂 NexusLogHandler(必挂,生产 JSONL 落盘) + StdOutCallbackHandler(仅 verbose 模式)
+    guard, astream_kwargs_with_version, _counter, parser = _build_stream_guard(agent, session_id)
+    astream_input = _emit_astream_kwargs(prompt, command_resume=command_resume)
+
+    last_event_id, emitted_chunk_text, had_error, clarification, pending = await _consume_astream_events(
+        agent,
+        astream_input,
+        websocket,
+        parser,
+        _counter,
+        astream_kwargs=astream_kwargs_with_version,
+        session_id=session_id,
+        stream_guard=guard,
+        resume_from_event_id=resume_from_event_id,
+    )
+
+    if had_error or clarification is not None or pending is not None:
+        return last_event_id, "", False, clarification, pending
+
+    last_event_id, response_text, completed = await _finalize_stream(
+        websocket,
+        parser,
+        _counter,
+        session_id=session_id,
+        prompt=prompt,
+        agent=agent,
+        stream_guard=guard,
+        last_event_id=last_event_id,
+    )
+    return last_event_id, response_text, completed, None, None
+
+
+def _build_stream_guard(
+    agent: Any,
+    session_id: str,
+) -> tuple[StreamGuard, dict[str, Any], dict[str, Any], ThinkingParser]:
+    """组装 StreamGuard + astream kwargs + 状态 counter + parser。
+
+    WHY 独立:StreamGuard 包装逻辑(GraphInterrupt 透传 + callback 挂载
+    + thread_id 注入 + version=v2)与主流程无关;抽出来后主函数只看
+    ``setup → consume → finalize`` 编排,§1.2 80 行限制可达。
+    """
+    astream_kwargs = _build_astream_kwargs_with_callbacks(agent, session_id)
+    guard = StreamGuard(
+        astream_events=_make_astream_factory(agent),
+        retry_policy=WS_RETRY_POLICY,
+        max_total_retries=2,
+    )
+    # v1 is deprecated since langchain-core 1.0; v2 keeps the same event
+    # names (on_chat_model_stream / on_tool_start / on_tool_end) and the
+    # same data shape (data.chunk / data.output), so the rest of the loop
+    # works unchanged.
+    astream_kwargs_with_version = {**astream_kwargs, "version": "v2"}
+    counter: dict[str, Any] = {
+        "event_id": 0,
+        "last_event_id": 0,
+        "emitted_chunk_text": "",
+    }
+    # 实时 chunk / thinking 分发器:每个 on_chat_model_stream 事件立即送进
+    # parser,解析产出的 (kind, text) 帧立刻 send_json。ThinkingParser 同时
+    # 识别 ``<thinking>...</thinking>`` 跨 chunk 标签分片,thinking 内容也
+    # 实时送,不再缓存到流末做 re.findall。WHY 2026-06-28:旧实现把 chunk
+    # 攒到 LLM 跑完才切碎发出,Agnes 慢模型场景前端 26 秒收不到帧;改为实时。
+    parser = ThinkingParser()
+    return guard, astream_kwargs_with_version, counter, parser
+
+
+def _build_astream_kwargs_with_callbacks(agent: Any, session_id: str) -> dict[str, Any]:
+    """拼 astream kwargs:挂 NexusLogHandler / verbose_handler + thread_id。
+
+    checkpointer 必须配 thread_id 才能让 Command(resume=...) 找回挂起状态。
+    session_id 单进程内唯一,直接当 thread_id。
+    """
     log_handler = getattr(agent, "_nexus_log_handler", None)
     verbose_handler = getattr(agent, "_nexus_verbose_handler", None)
     astream_kwargs: dict[str, Any] = {}
@@ -291,9 +342,6 @@ async def _run_agent_streaming(
         callbacks.append(verbose_handler)
     if callbacks:
         astream_kwargs["config"] = {"callbacks": callbacks}
-
-    # checkpointer 必须配 thread_id 才能让 Command(resume=...) 找回挂起状态。
-    # session_id 单进程内唯一,直接当 thread_id。
     existing_config = astream_kwargs.get("config") or {}
     astream_kwargs["config"] = {
         **existing_config,
@@ -302,26 +350,21 @@ async def _run_agent_streaming(
             "thread_id": session_id,
         },
     }
+    return astream_kwargs
 
-    # astream 输入:HITL 续流用 Command(resume=...),正常 turn 用 messages dict。
-    # langgraph astream_events overload 接受 Command 作为 input(
-    # langgraph/pregel/main.py:3691),从 checkpointer 找回挂起的图状态。
-    if command_resume is not None:
-        from langgraph.types import Command
 
-        astream_input: Any = Command(resume=command_resume)
-    else:
-        astream_input = {"messages": prompt["messages"]}
+def _make_astream_factory(agent: Any):
+    """构造 astream 工厂:透传 GraphInterrupt(不让 StreamGuard 吞掉)。
 
-    # 关键:把 GraphInterrupt 透传出来。StreamGuard 默认 ``except Exception``
-    # 会把 GraphInterrupt 当 classified 错误吞掉,yield 一个 error 事件——
-    # 但 HITL 不是错误,它是 langgraph 设计的"图挂起"机制(继承 GraphBubbleUp)。
-    #
-    # 实现要点:``agent.astream_events`` 内部抛 GraphInterrupt 是发生在
-    # async generator 的 ``__anext__`` 阶段,不在工厂调用瞬间。所以工厂必须
-    # 自己消费 generator 并在内部 ``async for`` 处 try/except,再 raise 出来
-    # —— 这样 StreamGuard 的 ``async for event in _call_factory(...)`` 就会
-    # 捕获到 GraphInterrupt,从外层 try/except 透传到 _run_agent_streaming。
+    StreamGuard 默认 ``except Exception`` 会把 GraphInterrupt 当 classified
+    错误吞掉 yield error 事件——但 HITL 不是错误,它是 langgraph 设计的
+    "图挂起"机制(继承 GraphBubbleUp)。``agent.astream_events`` 内部抛
+    GraphInterrupt 发生在 async generator 的 ``__anext__`` 阶段,不在工厂
+    调用瞬间,所以工厂必须自己消费 generator 并在内部 ``async for`` 处
+    try/except 再 raise,让 StreamGuard 的外层 ``async for`` 捕获到。
+    """
+    from langgraph.errors import GraphInterrupt
+
     async def _astream_factory(input_: Any, **kw: Any) -> Any:
         agen = agent.astream_events(input_, **kw)
         try:
@@ -330,293 +373,412 @@ async def _run_agent_streaming(
         except GraphInterrupt:
             raise
 
-    guard = StreamGuard(
-        astream_events=_astream_factory,
-        retry_policy=WS_RETRY_POLICY,
-        max_total_retries=2,
-    )
+    return _astream_factory
+
+
+def _emit_astream_kwargs(
+    prompt: dict,
+    *,
+    command_resume: dict[str, Any] | None = None,
+) -> Any:
+    """构造 astream_events 的 input:Command(resume) 或 messages=prompt。
+
+    WHY 独立:构造逻辑与主事件循环无关;抽出来后 ``_run_agent_streaming``
+    主函数可以只看流程。
+    """
+    if command_resume is not None:
+        from langgraph.types import Command
+
+        return Command(resume=command_resume)
+    return {"messages": prompt["messages"]}
+
+
+async def _consume_astream_events(
+    agent: Any,
+    astream_input: Any,
+    websocket: WebSocket,
+    parser: ThinkingParser,
+    counter: dict[str, Any],
+    *,
+    astream_kwargs: dict[str, Any],
+    session_id: str,
+    stream_guard: StreamGuard,
+    resume_from_event_id: int | None,
+) -> tuple[int, str, bool, tuple[str, list[str]] | None, tuple | None]:
+    """主 astream 事件循环,封装 on_chat_model_stream / _end / on_tool_* /
+    GraphInterrupt / state.interrupts 五类事件分发。
+
+    Returns:
+        ``(last_event_id, emitted_chunk_text, had_error, clarification, pending_interrupts)``
+    """
+    from langgraph.errors import GraphInterrupt
 
     last_event_id = 0
     had_error = False
-    # 实时 chunk / thinking 分发器:每个 on_chat_model_stream 事件立即送进 parser,
-    # 解析产出的 (kind, text) 帧立刻 send_json。ThinkingParser 同时识别
-    # ``<thinking>...</thinking>`` 跨 chunk 标签分片,thinking 内容也实时送,
-    # 不再缓存到流末做 re.findall。
-    # WHY 2026-06-28:旧实现 ``full_response += content`` 把所有 chunk 攒到 LLM
-    # 跑完才按 16 字符切碎发出,Agnes 慢模型场景前端 26 秒收不到任何帧,体感
-    # "转圈"。改为实时 emit,前端每个 token 立即可见。
-    parser = ThinkingParser()
-    emitted_chunk_text = ""  # 累积已发 chunk 文本(供 final / DB 入库复用)
-    # _counter:把 event_id / last_event_id / emitted_chunk_text 三个相关状态打成
-    # dict,按引用传给 _emit_chunks helper(三个调用点共享同一份状态)。
-    # 初始化时 event_id=0(首次循环会被 event.get("event_id", 0) 覆盖);
-    # 流末再同步回局部变量供后续 token_usage / final / stats 帧使用。
-    _counter: dict[str, Any] = {
-        "event_id": 0,
-        "last_event_id": 0,
-        "emitted_chunk_text": "",
-    }
-
-    # v1 is deprecated since langchain-core 1.0; v2 keeps the same event
-    # names (on_chat_model_stream / on_tool_start / on_tool_end) and the
-    # same data shape (data.chunk / data.output), so the rest of the loop
-    # works unchanged.
-    astream_kwargs_with_version = {**astream_kwargs, "version": "v2"}
-
-    # HITL 处理:HITL 抛 GraphInterrupt(继承 GraphBubbleUp)是 langgraph
-    # 的"图挂起"协议,不是 LLM 错误。在 StreamGuard 外层捕获后翻译成
-    # confirmation_request 帧,不要让 StreamGuard 把它当 unknown error 吞。
-    from langgraph.errors import GraphInterrupt
+    emitted_chunk_text = counter["emitted_chunk_text"]
 
     try:
-        async for event in guard.astream_events(astream_input, **astream_kwargs_with_version):
+        async for event in stream_guard.astream_events(astream_input, **astream_kwargs):
             event_id = int(event.get("event_id", 0))
             event_type = event.get("event")
 
-            # StreamGuard 错误事件
             if event.get("type") == "error":
-                error_code = event.get("error_code", "unknown")
-                retryable = _is_retryable_error_code(error_code)
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "content": event.get("message", "未知错误"),
-                        "event_id": event_id,
-                        "error_code": error_code,
-                        "retryable": retryable,
-                    }
-                )
-                last_event_id = event_id
-                had_error = True
-                # 不可重试 / 已耗尽:停止流(不再发 done)。
-                # 返回空字符串,避免在错误路径下把 raw 文本(含 thinking 标签)写入 DB。
-                if not retryable:
-                    return last_event_id, "", False, None, None
-                # 可重试但 StreamGuard 仍 yield error,意味着情况特殊
-                # (理论上不会到这里,StreamGuard 内部就用尽了)。安全起见停止。
-                return last_event_id, "", False, None, None
+                return await _handle_stream_guard_error(websocket, event, event_id, emitted_chunk_text)
 
             # Phase 1 resume 过滤:跳过 event_id <= resume_from_event_id 的事件
             if resume_from_event_id is not None and event_id > 0 and event_id <= resume_from_event_id:
                 last_event_id = max(last_event_id, event_id)
                 continue
 
-            # 业务事件转发
             if event_type == "on_chat_model_stream":
-                chunk = event.get("data", {}).get("chunk")
-                content = getattr(chunk, "content", "") if chunk else ""
-                if content:
-                    # 实时发出:每个 chunk 立刻经 ThinkingParser 解析后 send_json,
-                    # 不再缓存到流末 burst。Agnes 慢模型场景下,前端每个 token
-                    # 立即可见,消除 26s 转圈体感。委托 _emit_chunks(feed 分支)
-                    # 统一处理 event_id 自增 + send_json + chunk 文本累积。
-                    # 把 event 级 event_id 当作 helper 内部自增的 seed,
-                    # helper 返回后把状态同步回局部变量。
-                    _counter["event_id"] = event_id
-                    _counter["last_event_id"] = last_event_id
-                    await _emit_chunks(websocket, parser, content, _counter)
-                    event_id = _counter["event_id"]
-                    last_event_id = _counter["last_event_id"]
-                    emitted_chunk_text = _counter["emitted_chunk_text"]
+                event_id, last_event_id, emitted_chunk_text = await _emit_chat_model_chunk(
+                    websocket, parser, event, event_id, last_event_id, emitted_chunk_text, counter
+                )
             elif event_type == "on_chat_model_end":
-                # 非流式 LLM(mock / 老式客户端)只发 end 不发 stream —
-                # 此时 on_chat_model_stream 整个流里没有累积,需要从 end 拿全量
-                # content 兜底,否则 reject 反思 / mock LLM 这类"一次性返回"的
-                # 场景 emitted_chunk_text 始终为空,前端收不到任何 chunk/final。
-                # WHY 仅在 emitted_chunk_text 为空时兜底:避免与 stream 事件重复
-                # emit — 测试用 mock agent 会同时发 N 个 stream + 1 个 end
-                # 携带全量,无脑合并会让前端看到同样的内容出现两次。
-                output = event.get("data", {}).get("output")
-                end_content = getattr(output, "content", "") if output else ""
-                if isinstance(end_content, str) and end_content and not emitted_chunk_text:
-                    _counter["event_id"] = event_id
-                    _counter["last_event_id"] = last_event_id
-                    await _emit_chunks(websocket, parser, end_content, _counter)
-                    event_id = _counter["event_id"]
-                    last_event_id = _counter["last_event_id"]
-                    emitted_chunk_text = _counter["emitted_chunk_text"]
+                event_id, last_event_id, emitted_chunk_text = await _emit_chat_model_end_fallback(
+                    websocket, parser, event, event_id, last_event_id, emitted_chunk_text, counter
+                )
             elif event_type == "on_tool_start":
-                tool_name = event.get("name", "未知工具")
-                tool_input = event.get("data", {}).get("input") or {}
-                logger.info(
-                    "WS on_tool_start: session=%s tool=%s event_id=%s input=%s",
-                    session_id,
-                    tool_name,
-                    event_id,
-                    str(tool_input)[:200],
+                result = await _handle_tool_start_event(
+                    websocket, session_id, event, event_id, last_event_id, emitted_chunk_text
                 )
-                if tool_name == _CLARIFY_TOOL_NAME:
-                    # === 澄清挂起 ===
-                    # LLM 决定追问用户:把工具入参(问题 + 候选项)作为
-                    # clarification_request 帧发出,然后**挂起本轮流**——
-                    # 不发 final / done,让客户端在 UI 弹表单。
-                    # 用户回答通过新 turn 的用户消息注入,LLM 看到 ask_user 调
-                    # 用历史 + 用户回答,继续原任务。
-                    tool_input = event.get("data", {}).get("input") or {}
-                    question = str(tool_input.get("question", "")).strip()
-                    raw_options = tool_input.get("options") or []
-                    options: list[str] = []
-                    if isinstance(raw_options, list):
-                        # LLM 既可能传 ["火锅","烧烤"] 纯字符串列表,
-                        # 也可能传 [{key:"classic",label:"经典必玩",description:"..."}]
-                        # 字典列表(更丰富)。前端只展示纯文本按钮,所以这里
-                        # 把字典规范化为 label 字符串 — 优先 label/content/text/
-                        # value/name(覆盖各家 LLM 命名习惯;content 是 MiniMax
-                        # 默认风格,label 是 OpenAI/Anthropic 风格),都缺再 str()
-                        # 兜底。空字符串 / 纯空白丢弃。
-                        for opt in raw_options:
-                            label: str | None = None
-                            if isinstance(opt, str):
-                                label = opt if opt.strip() else None
-                            elif isinstance(opt, dict):
-                                # 优先 label/content/text/value/name 字段
-                                for key in ("label", "content", "text", "value", "name"):
-                                    v = opt.get(key)
-                                    if isinstance(v, str) and v.strip():
-                                        label = v
-                                        break
-                                # 都没匹配 → 退化到 key 字段(MiniMax 习惯用
-                                # {key: "本周末", description: "..."})
-                                if label is None:
-                                    key_field = opt.get("key")
-                                    if isinstance(key_field, str) and key_field.strip():
-                                        label = key_field
-                                # 仍没找到可读字段 → 跳过(避免把 "{'label': ''}"
-                                # 这种噪音字典转字符串塞给用户,宁可让前端走自由输入)
-                            # None / 空字符串 / 字典无有效字段 → 不追加
-                            if label is None:
-                                continue
-                            options.append(label.strip())
-                            if len(options) >= 6:
-                                break
-
-                    if not question:
-                        # 工具入参异常 —— 走默认分支,继续按普通工具处理
-                        logger.warning("ask_user 工具入参缺少 question,降级为普通工具调用")
-                        await websocket.send_json(
-                            {
-                                "type": "thinking",
-                                "content": f"[调用工具] {tool_name}",
-                                "event_id": event_id,
-                            }
-                        )
-                    else:
-                        if event_id > last_event_id:
-                            last_event_id = event_id
-                        await websocket.send_json(
-                            {
-                                "type": _EVT_CLARIFICATION_REQUEST,
-                                "content": question,
-                                "options": options,
-                                "event_id": last_event_id,
-                            }
-                        )
-                        logger.info(
-                            "WS clarification_request 发送: session=%s, q=%s, options=%d",
-                            session_id,
-                            question[:60],
-                            len(options),
-                        )
-                        return last_event_id, "", False, (question, options), None
-                else:
-                    await websocket.send_json(
-                        {
-                            "type": "thinking",
-                            "content": f"[调用工具] {tool_name}",
-                            "event_id": event_id,
-                        }
-                    )
+                if result is not None:
+                    return result
+                last_event_id = max(last_event_id, event_id)
+                continue
             elif event_type == "on_tool_end":
-                tool_name = event.get("name", "未知工具")
-                output = event.get("data", {}).get("output")
-                logger.info(
-                    "WS on_tool_end: session=%s tool=%s event_id=%s output_chars=%d",
-                    session_id,
-                    tool_name,
-                    event_id,
-                    len(str(output)) if output else 0,
-                )
-                await websocket.send_json(
-                    {
-                        "type": "thinking",
-                        "content": f"[工具返回] {str(output)[:100]}..." if output else "",
-                        "event_id": event_id,
-                    }
-                )
-            # 其它事件(chain start/end、retriever、agent 节点等)→ 忽略,仅跟踪 event_id
+                await _handle_tool_end_event(websocket, session_id, event, event_id)
 
             if event_id > last_event_id:
                 last_event_id = event_id
     except GraphInterrupt as gi:
-        # HITL 中断(理论路径,langgraph 0.6+ 实际会在 _loop.__exit__ 中主动 suppress,
-        # 见下方 ``agent.get_state(...).interrupts`` fallback):把 langgraph Interrupt
-        # 序列翻成 confirmation_request 帧,pending 状态存入 _session_hitl_state 供
-        # confirmation_response 续流。
-        interrupts = gi.args[0] or ()  # GraphInterrupt(interrupts=[...])
-        logger.info(
-            "WS HITL GraphInterrupt 捕获: session=%s, interrupts=%d",
-            session_id,
-            len(interrupts),
-        )
-        for intr in interrupts:
-            last_event_id += 1
-            frame = _serialize_hitl_request(intr.value, interrupt_id=str(intr.id), event_id=last_event_id)
-            await websocket.send_json(frame)
-            first_action = frame["actions"][0] if frame["actions"] else {}
-            logger.info(
-                "WS confirmation_request 发送: session=%s, tool=%s, target=%s",
-                session_id,
-                first_action.get("tool_name", "?"),
-                first_action.get("target_path", "?"),
-            )
-        pending: tuple | None = tuple(interrupts) if interrupts else None
-        # WHY 不写 _session_hitl_state:挂起 interrupt 已经存到 checkpoint 的
-        # ``__interrupt__`` channel,续流时通过 ``agent.aget_state(thread_id)``
-        # 读回,无需进程内缓存(多 worker 部署天然兼容)。
-        return last_event_id, "", False, None, pending
+        return await _handle_graph_interrupt(websocket, session_id, gi, last_event_id, emitted_chunk_text)
 
-    # langgraph 0.6+ 关键修正:Pregel._loop.__exit__ 会主动 ``return True`` 抑制
-    # GraphInterrupt(把 interrupt 信息存到 checkpoint 的 ``__interrupt__`` channel),
-    # 所以 ``agent.astream_events`` 不抛异常而正常结束。HITL 状态只能从
-    # ``agent.get_state(config).interrupts`` 读取 — 这是 langgraph 0.6+ 暴露
-    # pending interrupt 的官方 API。
+    last_event_id, emitted_chunk_text, pending_interrupts = await _drain_pending_hitl_interrupts(
+        agent, websocket, session_id, astream_kwargs, last_event_id, emitted_chunk_text
+    )
+    if pending_interrupts is not None:
+        return last_event_id, emitted_chunk_text, False, None, pending_interrupts
+
+    counter["last_event_id"] = last_event_id
+    counter["emitted_chunk_text"] = emitted_chunk_text
+    return last_event_id, emitted_chunk_text, had_error, None, None
+
+
+async def _handle_stream_guard_error(
+    websocket: WebSocket,
+    event: dict,
+    event_id: int,
+    emitted_chunk_text: str,
+) -> tuple[int, str, bool, tuple[str, list[str]] | None, tuple | None]:
+    """处理 StreamGuard 错误事件:发 error 帧并终止流。
+
+    不可重试 / 已耗尽:停止流(不再发 done);返回空字符串避免把 raw 文本
+    (含 thinking 标签)写入 DB。
+    """
+    error_code = event.get("error_code", "unknown")
+    retryable = _is_retryable_error_code(error_code)
+    await websocket.send_json(
+        {
+            "type": "error",
+            "content": event.get("message", "未知错误"),
+            "event_id": event_id,
+            "error_code": error_code,
+            "retryable": retryable,
+        }
+    )
+    return event_id, emitted_chunk_text, True, None, None
+
+
+async def _emit_chat_model_chunk(
+    websocket: WebSocket,
+    parser: ThinkingParser,
+    event: dict,
+    event_id: int,
+    last_event_id: int,
+    emitted_chunk_text: str,
+    counter: dict,
+) -> tuple[int, int, str]:
+    """on_chat_model_stream 实时 chunk 上行。
+
+    委托 _emit_chunks(feed 分支)统一处理 event_id 自增 + send_json + chunk
+    文本累积。把 event 级 event_id 当作 helper 内部自增的 seed,helper
+    返回后把状态同步回局部变量。
+    """
+    chunk = event.get("data", {}).get("chunk")
+    content = getattr(chunk, "content", "") if chunk else ""
+    if not content:
+        return event_id, last_event_id, emitted_chunk_text
+    counter["event_id"] = event_id
+    counter["last_event_id"] = last_event_id
+    await _emit_chunks(websocket, parser, content, counter)
+    return counter["event_id"], counter["last_event_id"], counter["emitted_chunk_text"]
+
+
+async def _emit_chat_model_end_fallback(
+    websocket: WebSocket,
+    parser: ThinkingParser,
+    event: dict,
+    event_id: int,
+    last_event_id: int,
+    emitted_chunk_text: str,
+    counter: dict,
+) -> tuple[int, int, str]:
+    """on_chat_model_end 兜底:非流式 LLM 只发 end 不发 stream 时从这里拿全量。
+
+    WHY 仅在 emitted_chunk_text 为空时兜底:避免与 stream 事件重复 emit —
+    测试用 mock agent 会同时发 N 个 stream + 1 个 end 携带全量。
+    """
+    output = event.get("data", {}).get("output")
+    end_content = getattr(output, "content", "") if output else ""
+    if not (isinstance(end_content, str) and end_content and not emitted_chunk_text):
+        return event_id, last_event_id, emitted_chunk_text
+    counter["event_id"] = event_id
+    counter["last_event_id"] = last_event_id
+    await _emit_chunks(websocket, parser, end_content, counter)
+    return counter["event_id"], counter["last_event_id"], counter["emitted_chunk_text"]
+
+
+async def _handle_tool_start_event(
+    websocket: WebSocket,
+    session_id: str,
+    event: dict,
+    event_id: int,
+    last_event_id: int,
+    emitted_chunk_text: str,
+) -> tuple[int, str, bool, tuple[str, list[str]] | None, tuple | None] | None:
+    """on_tool_start 事件分发:clarify 工具 → 挂起;其它工具 → thinking 帧。
+
+    Returns:
+        ``None`` 表示继续流;非 None 表示挂起并返回(澄清挂起时填入
+        ``(question, options)``,handle_websocket 据此跳过质量门 + 跳过 done)。
+    """
+    tool_name = event.get("name", "未知工具")
+    tool_input = event.get("data", {}).get("input") or {}
+    logger.info(
+        "WS on_tool_start: session=%s tool=%s event_id=%s input=%s",
+        session_id,
+        tool_name,
+        event_id,
+        str(tool_input)[:200],
+    )
+    if tool_name != _CLARIFY_TOOL_NAME:
+        await websocket.send_json(
+            {
+                "type": "thinking",
+                "content": f"[调用工具] {tool_name}",
+                "event_id": event_id,
+            }
+        )
+        return None
+    # === 澄清挂起 ===
+    # LLM 决定追问用户:把工具入参(问题 + 候选项)作为 clarification_request
+    # 帧发出,然后挂起本轮流——不发 final / done。用户回答通过新 turn 注
+    # 入,LLM 看到 ask_user 历史 + 用户回答,继续原任务。
+    question, options = _parse_clarify_tool_input(event)
+    if not question:
+        # 工具入参异常 —— 走默认分支,继续按普通工具处理
+        logger.warning("ask_user 工具入参缺少 question,降级为普通工具调用")
+        await websocket.send_json(
+            {
+                "type": "thinking",
+                "content": f"[调用工具] {tool_name}",
+                "event_id": event_id,
+            }
+        )
+        return None
+    if event_id > last_event_id:
+        last_event_id = event_id
+    await websocket.send_json(
+        {
+            "type": _EVT_CLARIFICATION_REQUEST,
+            "content": question,
+            "options": options,
+            "event_id": last_event_id,
+        }
+    )
+    logger.info(
+        "WS clarification_request 发送: session=%s, q=%s, options=%d",
+        session_id,
+        question[:60],
+        len(options),
+    )
+    return last_event_id, emitted_chunk_text, False, (question, options), None
+
+
+def _parse_clarify_tool_input(event: dict) -> tuple[str, list[str]]:
+    """解析 ask_user 工具入参,返回 ``(question, options)``。
+
+    LLM 既可能传纯字符串列表 ``["火锅","烧烤"]`` 也可能传字典列表
+    ``[{key:"classic",label:"经典必玩",description:"..."}]``。前端只展示
+    纯文本按钮,所以把字典规范化为 label 字符串 — 优先 label/content/text
+    /value/name,都缺再 str() 兜底;空字符串 / 纯空白丢弃。
+    """
+    tool_input = event.get("data", {}).get("input") or {}
+    question = str(tool_input.get("question", "")).strip()
+    raw_options = tool_input.get("options") or []
+    options: list[str] = []
+    if not isinstance(raw_options, list):
+        return question, options
+    for opt in raw_options:
+        label: str | None = None
+        if isinstance(opt, str):
+            label = opt if opt.strip() else None
+        elif isinstance(opt, dict):
+            for key in ("label", "content", "text", "value", "name"):
+                v = opt.get(key)
+                if isinstance(v, str) and v.strip():
+                    label = v
+                    break
+            if label is None:
+                key_field = opt.get("key")
+                if isinstance(key_field, str) and key_field.strip():
+                    label = key_field
+        if label is None:
+            continue
+        options.append(label.strip())
+        if len(options) >= 6:
+            break
+    return question, options
+
+
+async def _handle_tool_end_event(
+    websocket: WebSocket,
+    session_id: str,
+    event: dict,
+    event_id: int,
+) -> None:
+    """on_tool_end 事件:发 thinking 帧(工具返回内容,截 100 字符)。"""
+    tool_name = event.get("name", "未知工具")
+    output = event.get("data", {}).get("output")
+    logger.info(
+        "WS on_tool_end: session=%s tool=%s event_id=%d output_chars=%d",
+        session_id,
+        tool_name,
+        event_id,
+        len(str(output)) if output else 0,
+    )
+    await websocket.send_json(
+        {
+            "type": "thinking",
+            "content": f"[工具返回] {str(output)[:100]}..." if output else "",
+            "event_id": event_id,
+        }
+    )
+
+
+async def _handle_graph_interrupt(
+    websocket: WebSocket,
+    session_id: str,
+    gi: Any,
+    last_event_id: int,
+    emitted_chunk_text: str,
+) -> tuple[int, str, bool, tuple[str, list[str]] | None, tuple | None]:
+    """GraphInterrupt 异常:发 confirmation_request 帧并挂起。
+
+    WHY 理论路径:langgraph 0.6+ 实际在 _loop.__exit__ 主动 suppress,
+    见 ``_drain_pending_hitl_interrupts`` fallback。
+    """
+    interrupts = gi.args[0] or ()  # GraphInterrupt(interrupts=[...])
+    logger.info(
+        "WS HITL GraphInterrupt 捕获: session=%s, interrupts=%d",
+        session_id,
+        len(interrupts),
+    )
+    last_event_id = await _emit_hitl_confirmation_frames(websocket, session_id, interrupts, last_event_id)
+    pending: tuple | None = tuple(interrupts) if interrupts else None
+    # WHY 不写 _session_hitl_state:挂起 interrupt 已经存到 checkpoint 的
+    # ``__interrupt__`` channel,续流时通过 ``agent.aget_state(thread_id)``
+    # 读回,无需进程内缓存(多 worker 部署天然兼容)。
+    return last_event_id, emitted_chunk_text, False, None, pending
+
+
+async def _drain_pending_hitl_interrupts(
+    agent: Any,
+    websocket: WebSocket,
+    session_id: str,
+    astream_kwargs: dict[str, Any],
+    last_event_id: int,
+    emitted_chunk_text: str,
+) -> tuple[int, str, tuple | None]:
+    """langgraph 0.6+:从 ``agent.aget_state(config).interrupts`` 读 pending interrupt。
+
+    Pregel._loop.__exit__ 会主动 ``return True`` 抑制 GraphInterrupt(把
+    interrupt 信息存到 checkpoint 的 ``__interrupt__`` channel),所以
+    ``agent.astream_events`` 不抛异常而正常结束。HITL 状态只能从
+    ``agent.get_state(config).interrupts`` 读取 — langgraph 0.6+ 暴露
+    pending interrupt 的官方 API。
+
+    WHY ``agent.aget_state``(不是 ``get_state``):agent 用 AsyncSqliteSaver
+    时,``checkpointer.aget_tuple`` 是 async;同步 ``get_state`` 内部
+    ``checkpointer.get_tuple(config)`` 在 AsyncSqliteSaver 上拿到的是
+    coroutine(没 await),触发 "coroutine 'aget_tuple' was never awaited"
+    warning,interrupts 永远空。
+
+    Returns:
+        ``(last_event_id, emitted_chunk_text, pending_interrupts_or_none)``:
+        ``pending_interrupts_or_none`` 为 ``None`` 时表示无 HITL 挂起,继续
+        主流程。
+    """
     try:
-        # WHY ``agent.aget_state``(不是 ``get_state``):agent 用 AsyncSqliteSaver
-        # 时,``checkpointer.aget_tuple`` 是 async;同步 ``get_state`` 内部
-        # ``checkpointer.get_tuple(config)`` 在 AsyncSqliteSaver 上拿到的是
-        # coroutine(没 await),触发 "coroutine 'aget_tuple' was never awaited"
-        # warning,interrupts 永远空。aget_state 是 langgraph 0.6+ 暴露的 async
-        # 变体,会 await checkpointer.aget_tuple。同步 MemorySaver / SqliteSaver
-        # 也能正常用 aget_state(await 对非 coroutine 是 no-op)。
         snapshot = await agent.aget_state(astream_kwargs["config"])
         pending_interrupts = tuple(snapshot.interrupts) if snapshot.interrupts else ()
     except Exception as gs_exc:  # noqa: BLE001 — 边界统一收口
         logger.warning("WS get_state 失败,跳过 HITL state 兜底: %s", gs_exc)
         pending_interrupts = ()
-    if pending_interrupts:
+    if not pending_interrupts:
+        return last_event_id, emitted_chunk_text, None
+    logger.info(
+        "WS HITL state.interrupts 捕获: session=%s, interrupts=%d",
+        session_id,
+        len(pending_interrupts),
+    )
+    last_event_id = await _emit_hitl_confirmation_frames(websocket, session_id, pending_interrupts, last_event_id)
+    return last_event_id, emitted_chunk_text, pending_interrupts
+
+
+async def _emit_hitl_confirmation_frames(
+    websocket: WebSocket,
+    session_id: str,
+    interrupts: Any,
+    last_event_id: int,
+) -> int:
+    """把 langgraph Interrupt 序列翻成 confirmation_request 帧。
+
+    共用于 ``_handle_graph_interrupt`` 和 ``_drain_pending_hitl_interrupts``。
+    挂起状态由 checkpoint 的 ``__interrupt__`` channel 持久化(多 worker
+    部署天然兼容),不在进程内缓存。
+    """
+    for intr in interrupts:
+        last_event_id += 1
+        frame = _serialize_hitl_request(intr.value, interrupt_id=str(intr.id), event_id=last_event_id)
+        await websocket.send_json(frame)
+        first_action = frame["actions"][0] if frame["actions"] else {}
         logger.info(
-            "WS HITL state.interrupts 捕获: session=%s, interrupts=%d",
+            "WS confirmation_request 发送: session=%s, tool=%s, target=%s",
             session_id,
-            len(pending_interrupts),
+            first_action.get("tool_name", "?"),
+            first_action.get("target_path", "?"),
         )
-        for intr in pending_interrupts:
-            last_event_id += 1
-            frame = _serialize_hitl_request(intr.value, interrupt_id=str(intr.id), event_id=last_event_id)
-            await websocket.send_json(frame)
-            first_action = frame["actions"][0] if frame["actions"] else {}
-            logger.info(
-                "WS confirmation_request 发送: session=%s, tool=%s, target=%s",
-                session_id,
-                first_action.get("tool_name", "?"),
-                first_action.get("target_path", "?"),
-            )
-        # 挂起状态已写到 checkpoint(__interrupt__ channel),无需进程内缓存
-        return last_event_id, "", False, None, pending_interrupts
+    return last_event_id
 
-    if had_error:
-        # 已经有 error 事件发出,StreamGuard 走完就不要再发 done
-        return last_event_id, "", False, None, None
 
+async def _finalize_stream(
+    websocket: WebSocket,
+    parser: ThinkingParser,
+    counter: dict[str, Any],
+    *,
+    session_id: str,
+    prompt: dict,
+    agent: Any,
+    stream_guard: StreamGuard,
+    last_event_id: int,
+) -> tuple[int, str, bool]:
+    """astream 收尾:flush parser,emit token_usage / final / stats 帧。
+
+    Returns:
+        ``(last_event_id, response_text, stream_completed)``
+    """
     # 正常结束:先 flush parser 残留内容,再发 token_usage → final → stats。
     # chunk / thinking 已在循环里实时送出,这里不再做 16 字符切碎 / re.findall。
     # response_text 给下游 add_message / 质量门使用,语义与旧版一致:
@@ -628,62 +790,80 @@ async def _run_agent_streaming(
     # 流末 flush:parser 末尾留的 hold / 未闭合 thinking 块,作为兜底帧发出。
     # WHY 必须调:流式标签可能最后一刻才凑齐(比如 "<thinking>思考</th" 在
     # 最后 chunk 才凑完),parser 内部 hold 不发,flush 把残余 emit 出去。
-    # 委托 _emit_chunks(flush=True 分支),把流末 event_id / last_event_id
-    # 作为 seed 传入,helper 自增后回写。
-    _counter["event_id"] = event_id
-    _counter["last_event_id"] = last_event_id
-    await _emit_chunks(websocket, parser, None, _counter, flush=True)
-    event_id = _counter["event_id"]
-    last_event_id = _counter["last_event_id"]
-    emitted_chunk_text = _counter["emitted_chunk_text"]
+    counter["event_id"] = last_event_id
+    counter["last_event_id"] = last_event_id
+    await _emit_chunks(websocket, parser, None, counter, flush=True)
+    last_event_id = counter["last_event_id"]
+    emitted_chunk_text = counter["emitted_chunk_text"]
 
     if emitted_chunk_text:
         response_text = emitted_chunk_text.strip()
+        last_event_id = await _emit_token_usage_and_final(websocket, prompt, response_text, last_event_id)
 
-        # token_usage:估算 token + context 占用率
-        # 范围:累积 prompt["messages"] + 本轮 assistant 响应 = 整个对话上下文,
-        # 而不是只看本轮响应 —— UI 显示的 % 才跟 deepagents 实际 trigger
-        # 决策用的 token 计数同源(都是 count_tokens_approximately)。
-        # prompt 是 _run_agent_streaming 入参,自带 system 段 + 历史 + 本轮
-        # user 消息;这里再 append 一个 assistant 角色 dict 模拟刚生成的回
-        # 复入库后的样子(下游 add_message 也是 assistant role,所以格式对齐)。
-        # 改用 emitted_chunk_text(不含 thinking 标签),与 DB 入库 / 质量门
-        # raw_response 同源。
-        full_context_messages: list[dict[str, Any]] = list(prompt["messages"]) + [
-            {"role": "assistant", "content": response_text}
-        ]
-        estimated_tokens, context_usage = _estimate_tokens(
-            full_context_messages, context_window=CONFIG["context_window"]
-        )
-        token_usage_event_id = last_event_id + 1
-        await websocket.send_json(
-            {
-                "type": "token_usage",
-                "content": "",
-                "token_count": estimated_tokens,
-                "context_usage": context_usage,
-                "event_id": token_usage_event_id,
-            }
-        )
-        last_event_id = token_usage_event_id
+    last_event_id = await _emit_stream_stats_frame(websocket, agent, stream_guard, last_event_id)
+    return last_event_id, response_text, True
 
-        # final 帧:用实时 emit 累积的 chunk 文本(已剥 thinking 标签)。
-        # WHY 不在流期间发 final:旧实现在流末才发,前端 spinner 一直转;
-        # 新实现 chunk 实时发,但 final 仅在结束时发一次,客户端据此停止
-        # spinner 并把 chunks 拼成完整回复展示。
-        final_event_id = last_event_id + 1
-        await websocket.send_json(
-            {
-                "type": "final",
-                "content": response_text,
-                "event_id": final_event_id,
-            }
-        )
-        last_event_id = final_event_id
 
-    # 可观测:发送 ``type=stats`` 元事件,把本次流的 StreamGuard 统计
-    # 暴露给前端。顺序在 done 之前,确保 done 始终是流的最后一帧。
-    # 错误路径不会发 stats(前面已 return),符合"错误即终止"语义。
+async def _emit_token_usage_and_final(
+    websocket: WebSocket,
+    prompt: dict,
+    response_text: str,
+    last_event_id: int,
+) -> int:
+    """流末发 token_usage + final 两帧,返回新 last_event_id。
+
+    WHY 独立:final 帧格式固定,但 token_usage 涉及 ``_estimate_tokens`` 调
+    用(走 count_tokens_approximately,与 deepagents 决策同源);抽出后
+    ``_finalize_stream`` 只负责编排 flush → 收尾帧 → stats 三步,§1.2 可达。
+    """
+    # token_usage:估算 token + context 占用率。范围是 prompt["messages"]
+    # + 本轮 assistant 响应 = 整个对话上下文(不只看本轮响应),这样 UI %
+    # 才跟 deepagents 实际 trigger 决策用的 token 计数同源。
+    # prompt 是 _run_agent_streaming 入参,自带 system 段 + 历史 + 本轮 user
+    # 消息;这里再 append 一个 assistant 角色 dict 模拟刚生成的回复入库后
+    # 的样子(下游 add_message 也是 assistant role,所以格式对齐)。
+    full_context_messages: list[dict[str, Any]] = list(prompt["messages"]) + [
+        {"role": "assistant", "content": response_text}
+    ]
+    estimated_tokens, context_usage = _estimate_tokens(full_context_messages, context_window=CONFIG["context_window"])
+    token_usage_event_id = last_event_id + 1
+    await websocket.send_json(
+        {
+            "type": "token_usage",
+            "content": "",
+            "token_count": estimated_tokens,
+            "context_usage": context_usage,
+            "event_id": token_usage_event_id,
+        }
+    )
+    last_event_id = token_usage_event_id
+
+    # final 帧:用实时 emit 累积的 chunk 文本(已剥 thinking 标签)。
+    # WHY 不在流期间发 final:旧实现在流末才发,前端 spinner 一直转;
+    # 新实现 chunk 实时发,但 final 仅在结束时发一次,客户端据此停止
+    # spinner 并把 chunks 拼成完整回复展示。
+    final_event_id = last_event_id + 1
+    await websocket.send_json(
+        {
+            "type": "final",
+            "content": response_text,
+            "event_id": final_event_id,
+        }
+    )
+    return final_event_id
+
+
+async def _emit_stream_stats_frame(
+    websocket: WebSocket,
+    agent: Any,
+    stream_guard: StreamGuard,
+    last_event_id: int,
+) -> int:
+    """发送 ``type=stats`` 元事件,返回新 last_event_id。
+
+    顺序在 done 之前,确保 done 始终是流的最后一帧。错误路径不会发 stats
+    (前面已 return),符合"错误即终止"语义。
+    """
     stats_event_id = last_event_id + 1
     fallbacks_count = 0
     if hasattr(agent, "stats") and isinstance(agent.stats, dict):
@@ -693,11 +873,9 @@ async def _run_agent_streaming(
             "type": "stats",
             "content": "",
             "event_id": stats_event_id,
-            "retries": int(guard.stats.get("retries", 0)),
-            "events_emitted": int(guard.stats.get("events_emitted", 0)),
+            "retries": int(stream_guard.stats.get("retries", 0)),
+            "events_emitted": int(stream_guard.stats.get("events_emitted", 0)),
             "fallbacks": fallbacks_count,
         }
     )
-    last_event_id = stats_event_id
-
-    return stats_event_id, response_text, True, None, None
+    return stats_event_id
