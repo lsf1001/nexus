@@ -64,6 +64,38 @@ _EVT_CONFIRMATION_REQUEST = "confirmation_request"
 _EVT_CONFIRMATION_RESPONSE = "confirmation_response"
 
 
+async def _emit_chunks(
+    websocket: WebSocket,
+    parser: ThinkingParser,
+    text: str | None,
+    counter: dict,
+    *,
+    flush: bool = False,
+) -> None:
+    """三种调用点共用的 chunk 上行逻辑。
+
+    Args:
+        websocket: WS 连接
+        parser: ThinkingParser 或同形接口(具 .feed() / .flush() 返回 ``[(kind, text), ...]``)
+        text: feed 输入(None 时仅在 flush=True 用)
+        counter: dict 含 event_id / last_event_id / emitted_chunk_text,按引用累加
+        flush: True 走 parser.flush();否则 feed(text)
+    """
+    pairs = parser.flush() if flush else parser.feed(text or "")
+    for kind, chunk_text in pairs:
+        counter["event_id"] += 1
+        counter["last_event_id"] = counter["event_id"]
+        await websocket.send_json(
+            {
+                "type": kind,
+                "content": chunk_text,
+                "event_id": counter["event_id"],
+            }
+        )
+        if kind == "chunk":
+            counter["emitted_chunk_text"] += chunk_text
+
+
 def _is_retryable_error_code(error_code: str) -> bool:
     """根据 wire 上的 ``error_code`` 判断是否还可重试。
 
@@ -315,6 +347,15 @@ async def _run_agent_streaming(
     # "转圈"。改为实时 emit,前端每个 token 立即可见。
     parser = ThinkingParser()
     emitted_chunk_text = ""  # 累积已发 chunk 文本(供 final / DB 入库复用)
+    # _counter:把 event_id / last_event_id / emitted_chunk_text 三个相关状态打成
+    # dict,按引用传给 _emit_chunks helper(三个调用点共享同一份状态)。
+    # 初始化时 event_id=0(首次循环会被 event.get("event_id", 0) 覆盖);
+    # 流末再同步回局部变量供后续 token_usage / final / stats 帧使用。
+    _counter: dict[str, Any] = {
+        "event_id": 0,
+        "last_event_id": 0,
+        "emitted_chunk_text": "",
+    }
 
     # v1 is deprecated since langchain-core 1.0; v2 keeps the same event
     # names (on_chat_model_stream / on_tool_start / on_tool_end) and the
@@ -367,20 +408,16 @@ async def _run_agent_streaming(
                 if content:
                     # 实时发出:每个 chunk 立刻经 ThinkingParser 解析后 send_json,
                     # 不再缓存到流末 burst。Agnes 慢模型场景下,前端每个 token
-                    # 立即可见,消除 26s 转圈体感。parser.feed 返回值是
-                    # ``[(kind, text), ...]`` 列表,kinds ∈ {"chunk","thinking"}。
-                    for kind, text in parser.feed(content):
-                        event_id += 1
-                        last_event_id = event_id
-                        await websocket.send_json(
-                            {
-                                "type": kind,
-                                "content": text,
-                                "event_id": event_id,
-                            }
-                        )
-                        if kind == "chunk":
-                            emitted_chunk_text += text
+                    # 立即可见,消除 26s 转圈体感。委托 _emit_chunks(feed 分支)
+                    # 统一处理 event_id 自增 + send_json + chunk 文本累积。
+                    # 把 event 级 event_id 当作 helper 内部自增的 seed,
+                    # helper 返回后把状态同步回局部变量。
+                    _counter["event_id"] = event_id
+                    _counter["last_event_id"] = last_event_id
+                    await _emit_chunks(websocket, parser, content, _counter)
+                    event_id = _counter["event_id"]
+                    last_event_id = _counter["last_event_id"]
+                    emitted_chunk_text = _counter["emitted_chunk_text"]
             elif event_type == "on_chat_model_end":
                 # 非流式 LLM(mock / 老式客户端)只发 end 不发 stream —
                 # 此时 on_chat_model_stream 整个流里没有累积,需要从 end 拿全量
@@ -392,18 +429,12 @@ async def _run_agent_streaming(
                 output = event.get("data", {}).get("output")
                 end_content = getattr(output, "content", "") if output else ""
                 if isinstance(end_content, str) and end_content and not emitted_chunk_text:
-                    for kind, text in parser.feed(end_content):
-                        event_id += 1
-                        last_event_id = event_id
-                        await websocket.send_json(
-                            {
-                                "type": kind,
-                                "content": text,
-                                "event_id": event_id,
-                            }
-                        )
-                        if kind == "chunk":
-                            emitted_chunk_text += text
+                    _counter["event_id"] = event_id
+                    _counter["last_event_id"] = last_event_id
+                    await _emit_chunks(websocket, parser, end_content, _counter)
+                    event_id = _counter["event_id"]
+                    last_event_id = _counter["last_event_id"]
+                    emitted_chunk_text = _counter["emitted_chunk_text"]
             elif event_type == "on_tool_start":
                 tool_name = event.get("name", "未知工具")
                 tool_input = event.get("data", {}).get("input") or {}
@@ -597,12 +628,14 @@ async def _run_agent_streaming(
     # 流末 flush:parser 末尾留的 hold / 未闭合 thinking 块,作为兜底帧发出。
     # WHY 必须调:流式标签可能最后一刻才凑齐(比如 "<thinking>思考</th" 在
     # 最后 chunk 才凑完),parser 内部 hold 不发,flush 把残余 emit 出去。
-    for kind, text in parser.flush():
-        event_id += 1
-        last_event_id = event_id
-        await websocket.send_json({"type": kind, "content": text, "event_id": event_id})
-        if kind == "chunk":
-            emitted_chunk_text += text
+    # 委托 _emit_chunks(flush=True 分支),把流末 event_id / last_event_id
+    # 作为 seed 传入,helper 自增后回写。
+    _counter["event_id"] = event_id
+    _counter["last_event_id"] = last_event_id
+    await _emit_chunks(websocket, parser, None, _counter, flush=True)
+    event_id = _counter["event_id"]
+    last_event_id = _counter["last_event_id"]
+    emitted_chunk_text = _counter["emitted_chunk_text"]
 
     if emitted_chunk_text:
         response_text = emitted_chunk_text.strip()
