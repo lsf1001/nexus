@@ -147,7 +147,14 @@ static prompt、AGENTS.md 追加内容、用户消息、以及 LLM 训练记忆)
 
 
 def _bad_examples_text() -> str:
-    """few-shot 反例段:每行一条,展示典型训练记忆渗漏。"""
+    """few-shot 反例段:每行一条,展示典型训练记忆渗漏。
+
+    WHY 不与 ``DIRECTIVES.training_bias_blacklist`` 同源:
+      few-shot 反例是**教学示例**,刻意窄于 blacklist(blacklist 是黑名单全集,
+      反例只挑最具代表性的几条给 LLM 看"我是 X" 错误模式)。如果新增 blacklist
+      条目,本段不强制同步;反例更新走 PR review,显式判断是否纳入。
+      测试见 ``test_bad_examples_count_le_blacklist_count``。
+    """
     return "\n".join(
         f"✗ 「我是 {name},由 {vendor} 开发」 → 训练记忆默认值,与 FACT 不一致"
         for name, vendor in (
@@ -158,8 +165,24 @@ def _bad_examples_text() -> str:
     )
 
 
+# 空 blacklist 兜底文案。中文"无"让 LLM 看到「"无"等任何默认值」句式时仍构成
+# 通顺语法,避免「""」「"无"」这种空占位符 / 半占位符泄漏 (review 2026-07-01)。
+_EMPTY_BLACKLIST_PLACEHOLDER: str = "<无>"
+
+
 def _banned_examples_text() -> str:
-    """FACT/FINAL_REMINDER 禁止前缀串,拼接自 DIRECTIVES.training_bias_blacklist。"""
+    """FACT/FINAL_REMINDER 禁止前缀串,拼接自 DIRECTIVES.training_bias_blacklist。
+
+    WHY 兜底("空 blacklist → ``<无>``"):
+      空 blacklist 直接产 ``""`` 会被 template 替换进「以「{banned}」开头」,渲染
+      出「以「」开头」零宽禁止前缀 —— 中文语法不通、且容易被 LLM 当作 system
+      prompt 注入空角括号信号。返回 ``<无>`` 占位后,模板渲染出「以「<无>」开头」,
+      仍是合法中文短语,LLM 不会误把"看起来像 prompt injection 的空角括号"当漏洞。
+      两个模板 (``_FACT_BLOCK_TEMPLATE`` / ``_FINAL_REMINDER_TEMPLATE``) 都走
+      此函数,空兜底逻辑一处维护。
+    """
+    if not DIRECTIVES.training_bias_blacklist:
+        return _EMPTY_BLACKLIST_PLACEHOLDER
     return " / ".join(f"我是 {name}" for name in sorted(DIRECTIVES.training_bias_blacklist))
 
 
@@ -174,9 +197,15 @@ def render_fact_block(driver_name: str, driver_vendor: str) -> str:
 
 
 def render_final_reminder(driver_name: str, driver_vendor: str) -> str:
-    """渲染 FINAL REMINDER 段(system_message 末尾)。"""
+    """渲染 FINAL REMINDER 段(system_message 末尾)。
+
+    WHY delegate ``_banned_examples_text()``:以前此处内联
+    ``" / ".join(sorted(DIRECTIVES.training_bias_blacklist))``,空 blacklist 兜底
+    逻辑与 FACT 块分叉,review 2026-07-01 命中。两条模板统一走 ``_banned_examples_text``
+    后,空兜底逻辑收敛在一处。
+    """
     return _FINAL_REMINDER_TEMPLATE.format(
         driver_name=driver_name,
         driver_vendor=driver_vendor,
-        banned_examples=" / ".join(sorted(DIRECTIVES.training_bias_blacklist)),
+        banned_examples=_banned_examples_text(),
     )

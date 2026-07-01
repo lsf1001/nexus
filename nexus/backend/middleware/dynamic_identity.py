@@ -71,6 +71,18 @@ def _looks_like_identity_question(text: str) -> bool:
     return matches_identity_query(text)
 
 
+def _resolve_driver(info: dict[str, Any] | None) -> tuple[str, str]:
+    """从 ``info`` dict 提取 ``(driver_name, driver_vendor)``,空值兜底。
+
+    WHY 集中:本函数被 ``_build_fact_block`` / ``_build_final_reminder`` /
+    middleware 顶层 三处使用,以前每处都重复 ``if info and info.get("name")``
+    判断,新 vendor 兜底文案要同步改 3 处——典型 audit 反模式。
+    """
+    if info and info.get("name"):
+        return info["name"], info.get("vendor", "未知厂商")
+    return "未配置模型", "未知厂商"
+
+
 def _inject_identity_reminder_if_needed(messages: list[Any], driver_name: str) -> list[Any]:
     """如果 user message 是身份类问题,在它的 content **开头** prepend 一段
     [System Reminder],让 LLM 在生成第一 token 前看到 ground truth。
@@ -135,29 +147,15 @@ def _inject_identity_reminder_if_needed(messages: list[Any], driver_name: str) -
     return new_messages
 
 
-def _build_fact_block(info: dict[str, Any] | None) -> str:
-    """根据 ``get_active_model_info()`` 返回值拼 FACT 块字符串。
-
-    模板渲染走单源 ``nexus.backend.identity.directives``,
-    模板内容与渲染逻辑都在那里,这里只负责把 ``info`` dict 拆解成参数。
+def _build_fact_block(driver_name: str, driver_vendor: str) -> str:
+    """渲染 FACT 块。``(driver_name, driver_vendor)`` 由 middleware 顶层
+    ``_resolve_driver()`` 一次性解析,本函数只透传到模板渲染器。
     """
-    if info and info.get("name"):
-        driver_name = info["name"]
-        driver_vendor = info.get("vendor", "未知厂商")
-    else:
-        driver_name = "未配置模型"
-        driver_vendor = "未知厂商"
     return render_fact_block(driver_name, driver_vendor)
 
 
-def _build_final_reminder(info: dict[str, Any] | None) -> str:
-    """FINAL REMINDER 段,模板渲染走单源 ``nexus.backend.identity.directives``。"""
-    if info and info.get("name"):
-        driver_name = info["name"]
-        driver_vendor = info.get("vendor", "未知厂商")
-    else:
-        driver_name = "未配置模型"
-        driver_vendor = "未知厂商"
+def _build_final_reminder(driver_name: str, driver_vendor: str) -> str:
+    """渲染 FINAL REMINDER 段。``(driver_name, driver_vendor)`` 同上。"""
     return render_final_reminder(driver_name, driver_vendor)
 
 
@@ -191,8 +189,14 @@ async def dynamic_identity_middleware(
         写,LangChain 装饰器自动注册 ``awrap_model_call``。
     """
     info = get_active_model_info()
-    fact_block = _build_fact_block(info)
-    driver_name = info["name"] if info and info.get("name") else "未配置模型"
+    driver_name, driver_vendor = _resolve_driver(info)
+
+    # 2026-07-01 fix-up:fact_block / final_reminder / driver_name 全部在顶层一次性
+    # 解析,以前在两个分支各调 ``_build_fact_block(info)`` / ``_build_final_reminder(info)``
+    # 三次(顶层 + 空分支 + 非空分支),且 ``driver_name = info["name"] if info...``
+    # 内联于顶层与 ``_build_*`` 函数内重复。集中后字符串构造只跑一遍。
+    fact_block = _build_fact_block(driver_name, driver_vendor)
+    final_reminder = _build_final_reminder(driver_name, driver_vendor)
 
     # 2026-06-30 第三轮强化:LLM 训练记忆 bias 太深(agnx-2.0-flash 实测仍
     # 答 "我是 Agnes-Flash by Sapiens AI"),system prompt 压不住。必须在
@@ -215,7 +219,6 @@ async def dynamic_identity_middleware(
         # 那时 FINAL REMINDER 就在 AGENTS.md 上面,仍是 LLM 决策点最近的内容之一。
         # 三明治结构:FACT 块(顶部) + static prompt(中段) + FINAL REMINDER(末尾)
         static_prompt = get_system_prompt()
-        final_reminder = _build_final_reminder(info)
         rebuilt = SystemMessage(content=fact_block + static_prompt + final_reminder)
         new_request = request.override(system_message=rebuilt)
         logger.info(
@@ -230,6 +233,5 @@ async def dynamic_identity_middleware(
     # 非空分支(deepagents 未来版本可能修复此 bug,或单测场景):
     # 保留原始 static prompt,但仍 prepend FACT 块 + append FINAL REMINDER,
     # 确保 LLM 看到的三明治结构一致。
-    final_reminder = _build_final_reminder(info)
     sm.content = fact_block + sm_content + final_reminder
     return await handler(request)
