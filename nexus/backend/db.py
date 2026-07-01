@@ -58,8 +58,15 @@ def get_db() -> Iterator[sqlite3.Connection]:
     # 仍然不够)。30s 是 SQLite 默认上限,生产经验值能扛住 99% 场景。
     conn.execute("PRAGMA busy_timeout = 30000")
     if not _INITED:
-        _INITED = True
-        _create_tables(conn)
+        try:
+            _create_tables(conn)
+            _INITED = True
+        except Exception:
+            # _create_tables 失败时回滚 flag,允许同进程重试
+            # (lifespan 重启 / 测试 setup 重入 / 启动期 transient 故障)。
+            # rollback 清理已开事务里可能残留的 DDL,finally 仍会 close。
+            conn.rollback()
+            raise
     try:
         yield conn
         conn.commit()
