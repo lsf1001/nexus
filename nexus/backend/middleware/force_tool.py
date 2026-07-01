@@ -28,6 +28,8 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest
 from langchain_core.messages import AIMessage
 
+from nexus.backend.identity.directives import matches_identity_query
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,12 +51,6 @@ _TASK_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(如何|怎么|怎样|为什么|是什么|区别|推荐)"),
 )
 
-# identity 类关键词:用户问"你是谁 / 叫什么 / 什么模型"
-_IDENTITY_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"(你是谁|你叫什么|你用的.{0,4}模型|你用的是什么|你的名字|你是哪家)"),
-    re.compile(r"(what.*your.*name|who are you)"),
-)
-
 
 def classify_intent_lightweight(text: str) -> str:
     """轻量意图分类:正则优先,LLM 永不介入。
@@ -67,9 +63,12 @@ def classify_intent_lightweight(text: str) -> str:
     if not cleaned:
         return "chitchat"
 
-    for pattern in _IDENTITY_PATTERNS:
-        if pattern.search(cleaned):
-            return "identity"
+    # identity 判定统一走单源 ``matches_identity_query`` (substring),
+    # 新增关键词 (中/英) 只需改 ``nexus.backend.identity.directives``,不
+    # 再分散维护。``matches_identity_query`` 也更稳,正则可能漏匹配(例
+    # ``what model`` 旧 regex 不含,新 substring 含)。
+    if matches_identity_query(cleaned):
+        return "identity"
     for pattern in _KNOWLEDGE_PATTERNS:
         if pattern.search(cleaned):
             return "knowledge"

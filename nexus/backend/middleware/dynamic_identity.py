@@ -50,25 +50,21 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import SystemMessage
 
 from ..agent._system_prompt import get_system_prompt
+from ..identity.directives import matches_identity_query
 from ..models_config import get_active_model_info
 
 logger = logging.getLogger(__name__)
 
 
-# 身份问题关键词 — 用于触发 user message 注入 [System Reminder]。
-# 这些关键词在 user 提问里出现时,LLM 大概率会自报身份(fine-tune bias
-# 重灾区),必须在 user message 开头 inject 一条 reminder 把 ground truth
-# 拉到 LLM 注意力最强的最近 token 范围。
-_IDENTITY_KEYWORDS_ZH = ("你是谁", "你叫什么", "你用的什么模型", "你是哪个", "用的什么模型")
-_IDENTITY_KEYWORDS_EN = ("who are you", "what model", "current model", "what ai are you")
-
-
 def _looks_like_identity_question(text: str) -> bool:
-    """判断 user message 是否是身份类问题。简单 substring 匹配。"""
+    """判断 user message 是否是身份类问题。
+
+    关键词 / 触发判定统一走单源 ``nexus.backend.identity.directives``,
+    新增词只需改一处(force_tool / dynamic_identity 自动同步)。
+    """
     if not text:
         return False
-    low = text.lower()
-    return any(kw in low for kw in _IDENTITY_KEYWORDS_ZH) or any(kw in low for kw in _IDENTITY_KEYWORDS_EN)
+    return matches_identity_query(text)
 
 
 def _inject_identity_reminder_if_needed(messages: list[Any], driver_name: str) -> list[Any]:
