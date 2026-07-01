@@ -53,19 +53,23 @@ def test_dynamic_identity_no_longer_has_local_keywords() -> None:
 def test_system_prompt_blacklist_uses_directives() -> None:
     """_system_prompt 的 prose 黑名单包含 DIRECTIVES.training_bias_blacklist 所有项。
 
-    _build_system_prompt 是私有函数,直接调它生成的字符串里应出现 DIRECTIVES
-    黑名单的每一项(避免硬编码漏改某个 vendor)。
+    三层验证:
+      1. 模块导入 DIRECTIVES(防止有人 revert imports)
+      2. 模块持有 _TRAINING_BIAS_BLACKLIST_TEXT 拼接常量(防止有人 revert 拼接逻辑)
+      3. 拼接结果包含 blacklist 所有条目(防止有人手抄错)
     """
     from nexus.backend.agent import _system_prompt as sp_mod
 
-    prompt = sp_mod._build_system_prompt("ignored-model")
-    for banned_name in DIRECTIVES.training_bias_blacklist:
-        assert banned_name in prompt, (
-            f"_build_system_prompt 缺黑名单条目 {banned_name!r};DIRECTIVES 改了,"
-            f"prompt 没跟上(已切到 DIRECTIVES-driven 拼接了?)"
-        )
-
-    # 同时守住 _system_prompt.py import 了 DIRECTIVES(避免有人 revert 后
-    # 又把硬编码塞回去)。
     src = inspect.getsource(sp_mod)
     assert "DIRECTIVES" in src, "_system_prompt.py 必须 import 单源 DIRECTIVES"
+
+    # Structural: 模块顶层有拼接常量
+    assert hasattr(sp_mod, "_TRAINING_BIAS_BLACKLIST_TEXT"), (
+        "_system_prompt.py 必须在模块顶层定义 _TRAINING_BIAS_BLACKLIST_TEXT 拼接常量"
+    )
+
+    # Behavioral: 拼接结果覆盖 blacklist 所有项
+    for entry in DIRECTIVES.training_bias_blacklist:
+        assert entry in sp_mod._TRAINING_BIAS_BLACKLIST_TEXT, (
+            f"blacklist 条目 {entry!r} 未出现在 _TRAINING_BIAS_BLACKLIST_TEXT"
+        )

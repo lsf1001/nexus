@@ -1,7 +1,15 @@
 """单源化 identity / 反训练记忆 黑名单 / FACT 模板。
 
 替代 3 文件 (force_tool.py / dynamic_identity.py / _system_prompt.py) 独立维护的
-关键词表、黑名单、禁止句式。"""
+关键词表、黑名单、禁止句式。
+
+设计取舍 (2026-07-01 audit):关键词匹配从原 ``force_tool._IDENTITY_PATTERNS``
+的正则 (如 ``(what.*your.*name|who are you)``) 收窄为 substring 精确匹配
+(``who are you``)。被放弃的问句(如 "what is your name")由二道防线
+``dynamic_identity._inject_identity_reminder_if_needed`` 通过
+``matches_identity_query`` 在 user message 头部 inject ``[System Reminder]``
+压住训练记忆,二者职责互补 —— substring 走强制插工具调 search,
+reminder 走注入 ground truth。"""
 
 from __future__ import annotations
 
