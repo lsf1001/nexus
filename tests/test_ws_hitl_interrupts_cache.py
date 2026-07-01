@@ -51,7 +51,7 @@ async def test_same_session_caches_within_ttl(monkeypatch):
     r3 = await h._resolve_pending_interrupts("sess-A")
 
     assert fetch_count["n"] == 1, "同 session < 1s 重复调用应命中缓存"
-    assert r1 == r2 == r3
+    assert r1.interrupts == r2.interrupts == r3.interrupts
 
 
 @pytest.mark.asyncio
@@ -154,8 +154,8 @@ async def test_aget_state_failure_returns_empty_tuple_and_does_not_cache(monkeyp
     r1 = await h._resolve_pending_interrupts("sess-A")  # fail → ()
     r2 = await h._resolve_pending_interrupts("sess-A")  # 失败不应缓存 → 重试
 
-    assert r1 == ()
-    assert r2 == ()
+    assert r1.interrupts == ()
+    assert r2.interrupts == ()
     # 失败结果不缓存,所以两次都重试
     assert fetch_count["n"] == 2
 
@@ -171,3 +171,42 @@ async def test_invalidate_nonexistent_session_is_noop(monkeypatch):
     h._interrupts_cache["sess-A"] = (time.monotonic(), ())
     h._invalidate_interrupts_cache("sess-B")
     assert "sess-A" in h._interrupts_cache
+
+
+@pytest.mark.asyncio
+async def test_cache_status_reports_hit_miss_fail(monkeypatch):
+    """``cache_status`` 字段精确反映 hit/miss/fail,handler 日志可直接用。"""
+    from nexus.backend.api.ws import handlers as h
+
+    class _Snapshot:
+        def __init__(self, intr):
+            self.interrupts = intr
+
+    class _GoodAgent:
+        async def aget_state(self, cfg):
+            return _Snapshot([{"id": "1"}])
+
+    class _FailAgent:
+        async def aget_state(self, cfg):
+            raise RuntimeError("boom")
+
+    # miss → miss
+    monkeypatch.setattr(h, "get_agent", lambda: _GoodAgent())
+    r1 = await h._resolve_pending_interrupts("sess-X")
+    assert r1.cache_status == "miss"
+
+    # hit → hit
+    r2 = await h._resolve_pending_interrupts("sess-X")
+    assert r2.cache_status == "hit"
+
+    # fail → fail (不写入缓存)
+    monkeypatch.setattr(h, "get_agent", lambda: _FailAgent())
+    h._invalidate_interrupts_cache("sess-X")
+    r3 = await h._resolve_pending_interrupts("sess-X")
+    assert r3.cache_status == "fail"
+    assert r3.interrupts == ()
+
+    # 失败不缓存 → 下次仍是 miss(非 hit)
+    monkeypatch.setattr(h, "get_agent", lambda: _GoodAgent())
+    r4 = await h._resolve_pending_interrupts("sess-X")
+    assert r4.cache_status == "miss"  # 因为前一次是 fail,没缓存

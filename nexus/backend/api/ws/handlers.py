@@ -23,8 +23,8 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from time import monotonic as _monotonic
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -68,11 +68,30 @@ def get_agent() -> Any:
 # confirmation_response 路径 aget_state 进程内缓存:
 # 同 session 在用户决策窗口(< 1s)内连续读复用缓存,避免每次都走 SQLite hit。
 # 失败结果不缓存(transient 故障需要下次重试);HITL 完成时显式 invalidate。
+#
+# Cache 内存上界:每个 session_id 一个 entry,TTL 1s,read-miss 时自动覆盖;
+# 无显式 LRU eviction 但实际只受"曾出现过的 session_id 数"约束,
+# DMG 端正常使用下远低于 1 万,内存占用可忽略(每 entry ~100 字节)。
 _INTERRUPTS_CACHE_TTL_SECONDS: float = 1.0
 _interrupts_cache: dict[str, tuple[float, tuple[Any, ...]]] = {}
 
 
-async def _resolve_pending_interrupts(session_id: str) -> tuple[Any, ...]:
+@dataclass(frozen=True, slots=True)
+class _InterruptsLookup:
+    """``_resolve_pending_interrupts`` 的返回值,带缓存命中状态。
+
+    WHY 集中:把 interrupts tuple + cache_status + agent 三者打包,避免
+    handler 端重复 ``_interrupts_cache.get`` + ``now - cached[0]`` 判定
+    (cache_status 在 helper 内部已计算一次,handler 不应再算);同时省掉
+    handler 端第二次 ``get_agent()`` 调用(复用 helper 已解析的 agent)。
+    """
+
+    interrupts: tuple[Any, ...]
+    cache_status: str  # "hit" / "miss" / "fail"
+    agent: Any
+
+
+async def _resolve_pending_interrupts(session_id: str) -> _InterruptsLookup:
     """读 session 待处理 interrupts,带 1s TTL 进程内缓存。
 
     WHY 缓存:同一 session 在短时间内的连续 confirmation_response / 续流
@@ -90,21 +109,27 @@ async def _resolve_pending_interrupts(session_id: str) -> tuple[Any, ...]:
         session_id: 会话 id,作为缓存 key 和 aget_state 的 thread_id。
 
     Returns:
-        ``(Interrupt, ...)`` tuple;无挂起中断或 aget_state 失败时为空 tuple。
+        ``_InterruptsLookup`` 含:
+          - ``interrupts``: ``(Interrupt, ...)`` tuple,空挂起或 aget_state 失败时为 ``()``
+          - ``cache_status``: ``"hit"`` (TTL 内复用) / ``"miss"`` (新读) /
+            ``"fail"`` (aget_state 抛异常,**不**写入缓存)
+          - ``agent``: 已解析的 Agent 实例,handler 可直接用,无需再 ``get_agent()``
     """
-    now = _monotonic()
+    now = time.monotonic()
     cached = _interrupts_cache.get(session_id)
     if cached is not None and (now - cached[0]) < _INTERRUPTS_CACHE_TTL_SECONDS:
-        return cached[1]
+        # 命中:agent 此时不需要(handler 多半已经有),但仍取一次保合约
+        return _InterruptsLookup(interrupts=cached[1], cache_status="hit", agent=get_agent())
     agent = get_agent()
     try:
         snapshot = await agent.aget_state({"configurable": {"thread_id": session_id}})
         interrupts: tuple[Any, ...] = tuple(snapshot.interrupts) if snapshot.interrupts else ()
         _interrupts_cache[session_id] = (now, interrupts)
-    except Exception as gs_exc:  # noqa: BLE001 — 边界统一收口,失败不缓存
-        logger.warning("WS confirmation_response get_state 失败: %s", gs_exc)
-        interrupts = ()
-    return interrupts
+        return _InterruptsLookup(interrupts=interrupts, cache_status="miss", agent=agent)
+    except Exception as gs_exc:  # noqa: BLE001 — 边界统一收口
+        logger.warning("WS confirmation_response get_state 失败: %s", gs_exc, exc_info=True)
+        # 失败不写入缓存 — transient 故障让下次重试
+        return _InterruptsLookup(interrupts=(), cache_status="fail", agent=agent)
 
 
 def _invalidate_interrupts_cache(session_id: str) -> None:
@@ -219,18 +244,13 @@ async def handle_websocket(
                 # ``__interrupt__`` channel,aget_state().interrupts 拿回。
                 # 多 worker 部署天然兼容(共享 nexus.db)。
                 # 走 1s TTL 进程内缓存避免重复 SQLite hit(详见 _resolve_pending_interrupts)。
-                pending_interrupts_for_resume = await _resolve_pending_interrupts(session_id)
-                cached_entry = _interrupts_cache.get(session_id)
-                cache_status = (
-                    "hit"
-                    if cached_entry is not None and (_monotonic() - cached_entry[0]) < _INTERRUPTS_CACHE_TTL_SECONDS
-                    else "miss"
-                )
+                result = await _resolve_pending_interrupts(session_id)
+                pending_interrupts_for_resume = result.interrupts
                 logger.info(
                     "WS confirmation_response aget_state: session=%s pending=%d (cache=%s)",
                     session_id,
                     len(pending_interrupts_for_resume),
-                    cache_status,
+                    result.cache_status,
                 )
                 if not pending_interrupts_for_resume:
                     await websocket.send_json(
@@ -249,7 +269,7 @@ async def handle_websocket(
                 # 等流程,但 _run_agent_streaming 仍要 prompt 入参。command_resume
                 # 非空时,prompt["messages"] 会被忽略(改走 Command(resume=...))。
                 resume_prompt: dict[str, Any] = {"messages": []}
-                agent = get_agent()
+                agent = result.agent
                 (
                     last_event_id,
                     response_text,
