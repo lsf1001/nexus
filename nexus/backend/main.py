@@ -187,7 +187,7 @@ def _ensure_agent_ready(app) -> None:
             try:
                 _mcp_tools = asyncio.run_coroutine_threadsafe(load_all_mcp_tools(), _main_loop).result(timeout=10)
             except Exception as e:  # noqa: BLE001
-                logger.warning("MCP 加载失败，继续启动: %s", e)
+                logger.warning("MCP 加载失败，继续启动: %s", e, exc_info=True)
                 _mcp_tools = []
         new_agent = _create_agent_with_model(mcp_tools=_mcp_tools)
         if new_agent is not None:
