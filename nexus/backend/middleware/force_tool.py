@@ -139,7 +139,7 @@ class ForceToolMiddleware(AgentMiddleware):
             user_query[:50],
         )
         patched = AIMessage(
-            content="",
+            content=getattr(response, "content", "") or "",
             tool_calls=[
                 {
                     "name": self.tool_name,
@@ -170,7 +170,7 @@ class ForceToolMiddleware(AgentMiddleware):
             user_query[:50],
         )
         patched = AIMessage(
-            content="",
+            content=getattr(response, "content", "") or "",
             tool_calls=[
                 {
                     "name": self.tool_name,
