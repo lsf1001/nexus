@@ -28,7 +28,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from ...db import create_session, get_session
+from ...db import create_session, get_session, update_session
 from ...intent.router import DEFAULT_INTENT
 from ...observability import ChatStart, IntentClassified
 from ...resilience.resume import InvalidResumeToken, verify_token
@@ -267,6 +267,16 @@ async def handle_websocket(
                         # 客户端用的 id 是新的(此前 DB 无),发 session_created
                         # 让客户端拿回服务端认可的 title 字段
                         new_session_created = True
+                    else:
+                        # 会话已存在:若客户端带了非空 title 则应用,避免用户改名
+                        # 被静默丢弃。WHY:旧实现只走 ``if get_session is None``
+                        # 分支,复用已有 session 时 ``data["title"]`` 直接被忽略,
+                        # 前端改名 → 服务端不变 → 用户困惑。空 title 跳过以避免
+                        # 每次普通聊天都触发无谓 UPDATE + 改 updated_at。
+                        client_title = (data.get("title") or "").strip()
+                        if client_title:
+                            update_session(session_id, title=client_title)
+                            title = client_title
 
             if new_session_created:
                 await websocket.send_json(
