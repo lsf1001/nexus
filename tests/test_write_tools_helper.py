@@ -7,6 +7,15 @@ _WRITE_TOOL_PATTERNS / _READ_ONLY_TOOLS / _is_write_tool —— 典型 copy-past
 from __future__ import annotations
 
 
+class _StubFilter:
+    """最小可用 Filter,只为满足 QualityGateMiddleware 构造约束。"""
+
+    async def check(self, value, user_context=None):  # noqa: ARG002
+        from nexus.backend.quality.memory_filter import FilterDecision
+
+        return FilterDecision(allow=True, score=1.0, reason="ok")
+
+
 def test_file_tools_is_frozenset() -> None:
     """FILE_TOOLS 必须是 frozenset(不可变),防止运行时被改坏。"""
     from nexus.backend.permissions.write_tools import FILE_TOOLS
@@ -95,25 +104,62 @@ def test_is_write_tool_unknown_unrelated_returns_false() -> None:
     assert is_write_tool("ask_user") is False
 
 
-def test_quality_middleware_imports_helper() -> None:
-    """QualityGate 中间件必须用 helper(去掉本地 _is_write_tool 定义)。"""
-    import inspect
+def test_quality_middleware_invokes_helper_for_write_tool(tmp_path) -> None:
+    """QualityGate._is_protected 调用 is_write_tool(edit_file → 命中)。
 
-    from nexus.backend.quality import middleware as qm
+    WHY: Task 7.3 同款 fragility 反模式 — 用 ``inspect.getsource`` + ``hasattr``
+    锁定"模块 import 了 helper",被 rename / 注释 / 死 import 误骗过。
+    改用 ``mock.patch`` 真证"helper 被以正确参数调用",行为级合约。
+    """
+    from unittest.mock import patch
 
-    # 不能再有本地 _is_write_tool 定义
-    assert not hasattr(qm, "_is_write_tool"), "QualityGate 仍持有本地 _is_write_tool,未抽到 permissions.write_tools"
-    # 应该有 helper import
-    src = inspect.getsource(qm)
-    assert "from ..permissions.write_tools import" in src, "QualityGate 未引用 permissions.write_tools"
+    from nexus.backend.permissions.write_tools import is_write_tool
+    from nexus.backend.quality.middleware import QualityGateMiddleware
+
+    ag_path = tmp_path / "AGENTS.md"
+    ag_path.write_text("seed")
+    mw = QualityGateMiddleware(filter=_StubFilter(), protected_paths=(str(ag_path),))
+
+    tool_call = {"name": "edit_file", "args": {"file_path": str(ag_path)}}
+    with patch("nexus.backend.quality.middleware.is_write_tool", wraps=is_write_tool) as m:
+        mw._is_protected(tool_call)
+        m.assert_called_once_with("edit_file")
 
 
-def test_hitl_middleware_imports_helper() -> None:
-    """PathAwareHITL 中间件必须用 helper。"""
-    import inspect
+def test_quality_middleware_invokes_helper_for_read_tool(tmp_path) -> None:
+    """read_file 也会调 is_write_tool(被判定 False 后短路)。
 
-    from nexus.backend.middleware import hitl
+    验证 helper 是无条件调用入口,不是只在写工具路径才进 — 防止有人
+    在 QualityGate 里手写 ``if tool_name == "edit_file"`` 绕开 helper。
+    """
+    from unittest.mock import patch
 
-    assert not hasattr(hitl, "_is_write_tool"), "PathAwareHITL 仍持有本地 _is_write_tool,未抽到 permissions.write_tools"
-    src = inspect.getsource(hitl)
-    assert "from ..permissions.write_tools import" in src, "PathAwareHITL 未引用 permissions.write_tools"
+    from nexus.backend.permissions.write_tools import is_write_tool
+    from nexus.backend.quality.middleware import QualityGateMiddleware
+
+    ag_path = tmp_path / "AGENTS.md"
+    ag_path.write_text("seed")
+    mw = QualityGateMiddleware(filter=_StubFilter(), protected_paths=(str(ag_path),))
+
+    tool_call = {"name": "read_file", "args": {"file_path": str(ag_path)}}
+    with patch("nexus.backend.quality.middleware.is_write_tool", wraps=is_write_tool) as m:
+        mw._is_protected(tool_call)
+        m.assert_called_once_with("read_file")
+
+
+def test_hitl_middleware_invokes_helper_for_interrupt(tmp_path) -> None:
+    """PathAwareHITL._should_interrupt 走 is_write_tool 判定写工具。"""
+    from unittest.mock import patch
+
+    from nexus.backend.middleware.hitl import PathAwareHITLMiddleware
+    from nexus.backend.permissions.write_tools import is_write_tool
+
+    mw = PathAwareHITLMiddleware(project_root=tmp_path)
+
+    tool_call = {
+        "name": "write_file",
+        "args": {"file_path": str(tmp_path / "src" / "foo.py")},
+    }
+    with patch("nexus.backend.middleware.hitl.is_write_tool", wraps=is_write_tool) as m:
+        mw._should_interrupt(tool_call)
+        m.assert_called_once_with("write_file")

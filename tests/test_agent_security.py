@@ -39,14 +39,14 @@ def test_interrupt_on_covers_write_tools() -> None:
     改为在 :class:`PathAwareHITLMiddleware.wrap_tool_call` 里对 write 工具
     做路径白名单判定。本测试守住"写工具拦截"这一不变量。
     """
-    from nexus.backend.permissions.write_tools import is_write_tool as _is_write_tool
+    from nexus.backend.permissions.write_tools import is_write_tool
 
     # write_file / edit_file 必须命中
     for tool_name in ("write_file", "edit_file", "create_file", "apply_patch"):
-        assert _is_write_tool(tool_name), f"{tool_name} 应被识别为写工具"
+        assert is_write_tool(tool_name), f"{tool_name} 应被识别为写工具"
     # 只读工具不应被误判为写
     for tool_name in ("read_file", "ls", "glob", "grep", "internet_search"):
-        assert not _is_write_tool(tool_name), f"{tool_name} 不应被误判为写工具"
+        assert not is_write_tool(tool_name), f"{tool_name} 不应被误判为写工具"
 
 
 def test_resolve_protected_paths_covers_all_agents_md() -> None:

@@ -65,10 +65,14 @@ def is_write_tool(tool_name: str) -> bool:
 
     判定优先级(顺序敏感):
       1. 空名 → False(避免空字符串误命中 patterns)
-      2. 精确匹配 ``FILE_TOOLS`` → True
+      2. 精确匹配 ``FILE_TOOLS``(**大小写敏感**)→ True
       3. 小写化后命中 ``READ_ONLY_TOOLS`` → False(读工具优先于写模式)
-      4. 任一 ``WRITE_TOOL_PATTERNS`` 子串命中 → True
+      4. 任一 ``WRITE_TOOL_PATTERNS`` 子串命中(小写化后)→ True
       5. 都不命中 → False
+
+    Note:
+        ``FILE_TOOLS`` 是大小写敏感的(白名单只列了小写形式);大写工具名
+        会落空走子串匹配 → 仍可能被判为写(例如 ``"EDIT_FILE"`` → True)。
 
     Args:
         tool_name: deepagents 工具名(LLM 调用 ToolMessage.name 字段)。

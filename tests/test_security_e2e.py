@@ -19,7 +19,7 @@ from nexus.backend.permissions import (
     is_write_to_protected_path,
     resolve_protected_paths,
 )
-from nexus.backend.permissions.write_tools import is_write_tool as _is_write_tool
+from nexus.backend.permissions.write_tools import is_write_tool
 
 
 def test_agents_md_triggers_quality_gate_not_hitl() -> None:
@@ -195,13 +195,13 @@ def test_path_aware_hitl_blocks_project_source() -> None:
 
 def test_path_aware_hitl_covers_write_file_and_edit_file() -> None:
     """PathAwareHITLMiddleware 拦截必须覆盖 write_file / edit_file 等写工具。"""
-    # _is_write_tool 已覆盖 write_file / edit_file / create_file 等
+    # is_write_tool 已覆盖 write_file / edit_file / create_file 等
     for tool_name in ("write_file", "edit_file", "create_file", "apply_patch", "patch_file"):
-        assert _is_write_tool(tool_name), f"{tool_name} 应被识别为写工具"
+        assert is_write_tool(tool_name), f"{tool_name} 应被识别为写工具"
 
     # 只读工具不应被误判
     for tool_name in ("read_file", "ls", "glob", "grep"):
-        assert not _is_write_tool(tool_name), f"{tool_name} 不应被误判为写工具"
+        assert not is_write_tool(tool_name), f"{tool_name} 不应被误判为写工具"
 
     # PathAwareHITLMiddleware 实例:edit_file 命中 HITL 拦截
     with tempfile.TemporaryDirectory() as td:
