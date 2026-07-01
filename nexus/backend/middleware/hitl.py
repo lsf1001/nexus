@@ -46,6 +46,8 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command, interrupt
 
+from ..permissions.write_tools import is_write_tool
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
@@ -58,53 +60,6 @@ else:
     from typing import Any as ToolCallRequest  # type: ignore[assignment,misc]  # noqa: F811
 
 logger = logging.getLogger(__name__)
-
-
-# deepagents 暴露给 LLM 的写文件工具名集合(与 QualityGateMiddleware 同步)。
-_FILE_TOOLS: frozenset[str] = frozenset(
-    {
-        "edit_file",
-        "write_file",
-        "create_file",
-        "apply_patch",
-        "patch_file",
-        "str_replace_editor",
-        "write_document",
-    }
-)
-
-# 黑名单兜底模式:工具名包含这些子串即视为写文件工具。
-_WRITE_TOOL_PATTERNS: tuple[str, ...] = (
-    "write_",
-    "edit_",
-    "patch_",
-    "apply_",
-    "_file",
-    "_document",
-)
-
-# 明确只读工具白名单 — 即使名称含 file/document 也不视为写。
-_READ_ONLY_TOOLS: frozenset[str] = frozenset(
-    {
-        "read_file",
-        "ls",
-        "glob",
-        "grep",
-        "internet_search",
-    }
-)
-
-
-def _is_write_tool(tool_name: str) -> bool:
-    """判断工具名是否对应文件写操作(可能触发 HITL)。"""
-    if not tool_name:
-        return False
-    if tool_name in _FILE_TOOLS:
-        return True
-    name = tool_name.lower()
-    if name in _READ_ONLY_TOOLS:
-        return False
-    return any(pattern in name for pattern in _WRITE_TOOL_PATTERNS)
 
 
 def _extract_target_path(args: dict[str, Any]) -> str | None:
@@ -287,14 +242,14 @@ class PathAwareHITLMiddleware(AgentMiddleware[Any, ContextT, ResponseT]):
         """判定这次工具调用是否需要触发 HITL 弹窗。
 
         命中条件(全部满足):
-          1. 是写工具(``_is_write_tool``)
+          1. 是写工具(``is_write_tool``)
           2. 能抽出目标路径
           3. 目标路径不在白名单(``{project_root}/.nexus/**`` + 用户级子目录)
           4. 目标路径不在 QualityGate 负责的 AGENTS.md 受保护集合
           5. 目标路径不在系统危险路径(危险路径走 deny,不弹 HITL)
         """
         tool_name = tool_call.get("name", "")
-        if not _is_write_tool(tool_name):
+        if not is_write_tool(tool_name):
             return False
         args = tool_call.get("args", {}) or {}
         target = _extract_target_path(args)
@@ -351,7 +306,7 @@ class PathAwareHITLMiddleware(AgentMiddleware[Any, ContextT, ResponseT]):
           4. **不在**白名单(白名单覆盖 /private 之类 symlink 解析后位置)
         """
         tool_name = tool_call.get("name", "")
-        if not _is_write_tool(tool_name):
+        if not is_write_tool(tool_name):
             return False
         args = tool_call.get("args", {}) or {}
         target = _extract_target_path(args)

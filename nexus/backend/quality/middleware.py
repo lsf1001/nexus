@@ -18,6 +18,7 @@ from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
 
+from ..permissions.write_tools import is_write_tool
 from .memory_filter import MemoryFilter
 
 if TYPE_CHECKING:
@@ -33,57 +34,6 @@ else:
 
 
 logger = logging.getLogger(__name__)
-
-# deepagents 0.6.x 暴露给 LLM 的写文件工具名集合。
-# 主路径: edit_file / write_file (核心写工具, 必须评估)。
-# 别名: create_file / apply_patch / patch_file / str_replace_editor / write_document。
-_FILE_TOOLS: frozenset[str] = frozenset(
-    {
-        "edit_file",
-        "write_file",
-        "create_file",
-        "apply_patch",
-        "patch_file",
-        "str_replace_editor",
-        "write_document",
-    }
-)
-
-# 黑名单兜底模式: 工具名包含这些子串即视为写文件工具。
-_WRITE_TOOL_PATTERNS: tuple[str, ...] = (
-    "write_",
-    "edit_",
-    "patch_",
-    "apply_",
-    "_file",
-    "_document",
-)
-
-# 明确只读工具白名单 — 即使名称含 file/document 也不视为写。
-_READ_ONLY_TOOLS: frozenset[str] = frozenset(
-    {
-        "read_file",
-        "ls",
-        "glob",
-        "grep",
-        "internet_search",
-    }
-)
-
-
-def _is_write_tool(tool_name: str) -> bool:
-    """判断工具名是否对应文件写操作(可能影响 AGENTS.md)。
-
-    优先级: 精确白名单命中 → 黑名单模式命中 → 否则按只读处理。
-    """
-    if not tool_name:
-        return False
-    if tool_name in _FILE_TOOLS:
-        return True
-    name = tool_name.lower()
-    if name in _READ_ONLY_TOOLS:
-        return False
-    return any(pattern in name for pattern in _WRITE_TOOL_PATTERNS)
 
 
 # 抽 user context 的窗口大小:最近 3 条 HumanMessage 拼成摘要,单条截断到
@@ -143,7 +93,7 @@ class QualityGateMiddleware(AgentMiddleware[AgentState, ContextT, ResponseT]):
 
     def _is_protected(self, tool_call: dict[str, Any]) -> bool:
         tool_name = tool_call.get("name", "")
-        if not _is_write_tool(tool_name):
+        if not is_write_tool(tool_name):
             return False
         target = self._extract_target_path(tool_call)
         if not target:

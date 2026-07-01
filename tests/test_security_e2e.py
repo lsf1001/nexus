@@ -13,15 +13,13 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from nexus.backend.middleware.hitl import (
-    PathAwareHITLMiddleware,
-    _is_write_tool,
-)
+from nexus.backend.middleware.hitl import PathAwareHITLMiddleware
 from nexus.backend.permissions import (
     build_default_permissions,
     is_write_to_protected_path,
     resolve_protected_paths,
 )
+from nexus.backend.permissions.write_tools import is_write_tool as _is_write_tool
 
 
 def test_agents_md_triggers_quality_gate_not_hitl() -> None:
