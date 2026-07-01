@@ -271,12 +271,26 @@ def get_session(session_id: str) -> dict | None:
         return None
 
 
+def _escape_like(value: str) -> str:
+    """转义 SQL LIKE 通配符 (\\ % _)。
+
+    用于将任意字符串安全嵌入 LIKE 模式:``f"%{_escape_like(user_id)}%"``。
+    使用反斜杠作为转义字符,通过 SQLite ``ESCAPE '\\\\'`` 子句激活。
+    顺序很重要:必须先转义反斜杠自身,再转义 % 和 _。
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def find_latest_session_by_user(user_id: str, channel: str = "wechat") -> str | None:
     """查找该 user_id 在指定 channel 上最近活跃的 session_id。
 
     用于：后端重启后，从 DB 重建"微信 user_id → session_id"映射，
     避免每次重启都给同一微信用户建一个新 session 导致历史断流。
+
+    WHY LIKE 转义:user_id 由微信侧生成,可能包含 ``%`` / ``_`` / ``\\`` 等
+    LIKE 通配符,直接拼入模式会匹配到非预期 session(信息泄露)。
     """
+    pattern = f"%{_escape_like(user_id)}%"
     with get_db() as conn:
         # 通过 messages 表按 created_at 倒序找该 user_id 最近一条消息所属 session
         row = conn.execute(
@@ -286,11 +300,11 @@ def find_latest_session_by_user(user_id: str, channel: str = "wechat") -> str | 
               JOIN sessions s ON m.session_id = s.id
              WHERE s.channel = ?
                AND s.deleted_at IS NULL
-               AND m.content LIKE ?
+               AND m.content LIKE ? ESCAPE '\\'
              ORDER BY m.created_at DESC
              LIMIT 1
             """,
-            (channel, f"%{user_id}%"),
+            (channel, pattern),
         ).fetchone()
         return row["id"] if row else None
 
