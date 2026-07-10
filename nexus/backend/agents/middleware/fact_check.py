@@ -36,11 +36,14 @@ deepagents 的 ``_resolve_pending_interrupts`` / monkeypatch 测试模式
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
+from dataclasses import asdict
 from typing import Any, Literal
 
 from langchain.agents.middleware.types import AgentMiddleware, AgentState
 
+from nexus.backend import db as _db
 from nexus.backend.fact_check.pipeline import FactCheckPipeline
 
 logger = logging.getLogger(__name__)
@@ -100,13 +103,43 @@ class FactCheckMiddleware(AgentMiddleware[AgentState, Any, Any]):
         if not content:
             return response
 
+        t0 = time.perf_counter()
         report = self.pipeline.check(content)
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+
+        session_id, message_id = self._extract_session_context(request)
+
         if not report.has_conflict:
+            # 通过但有声明 → 落 audit trail
+            if report.claims_total > 0:
+                self._persist(
+                    session_id=session_id,
+                    message_id=message_id,
+                    status="pass",
+                    score=1.0,
+                    verdict="accept",
+                    reasoning=f"fact-check ok ({report.claims_total} claim(s), {report.passed} passed)",
+                    claims=self._serialize_claims(report.all_results),
+                    results=self._serialize_claims(report.all_results),
+                    latency_ms=latency_ms,
+                )
             return response
 
         report_dict = report.to_dict()
 
         if self.fail_strategy == "closed":
+            # 落库 → 再抛(DB 失败仅 log,不掩盖原 FactCheckError)
+            self._persist(
+                session_id=session_id,
+                message_id=message_id,
+                status="fail",
+                score=0.0,
+                verdict="reject",
+                reasoning=f"fact-check found {len(report.conflicts)} conflict(s)",
+                claims=self._serialize_claims(report.all_results),
+                results=report_dict["conflicts"],
+                latency_ms=latency_ms,
+            )
             logger.warning(
                 "FactCheckMiddleware 拦截输出：%d 个冲突",
                 len(report.conflicts),
@@ -116,11 +149,135 @@ class FactCheckMiddleware(AgentMiddleware[AgentState, Any, Any]):
         # fail-open：附加 warning 到 dict 响应,字符串 / 对象形态仅记日志放行
         if isinstance(response, dict):
             response["_fact_check_warnings"] = report_dict
+        # fail-open 也持久化(audit trail)
+        self._persist(
+            session_id=session_id,
+            message_id=message_id,
+            status="fail",
+            score=0.0,
+            verdict="reject",
+            reasoning=f"fact-check open-mode: {len(report.conflicts)} conflict(s)",
+            claims=self._serialize_claims(report.all_results),
+            results=report_dict["conflicts"],
+            latency_ms=latency_ms,
+        )
         logger.warning(
             "FactCheckMiddleware open 放行：%d 个冲突",
             len(report.conflicts),
         )
         return response
+
+    @staticmethod
+    def _persist(
+        *,
+        session_id: str | None,
+        message_id: str | None,
+        status: str,
+        score: float,
+        verdict: str,
+        reasoning: str,
+        claims: list[dict[str, Any]],
+        results: list[dict[str, Any]],
+        latency_ms: int,
+    ) -> None:
+        """写一行 quality_scores 记录(DB 异常仅 log,不影响主流程)。
+
+        WHY try/except: ``save_quality_score`` 走 sqlite3 连接,可能因为磁盘满
+        / 锁等待 / 权限错误抛异常。FactCheckMiddleware 处于 agent 主循环关键
+        路径,DB 落库失败不能阻断 LLM 后续回复;若阻断会让 WS 流卡住,影响
+        所有客户端。因此吞异常只 log。
+
+        WHY ``import as _alias`` 而非 ``from db import save_quality_score``:
+        见模块顶部 docstring 的 monkeypatch 兼容性说明 —— 测试用
+        ``monkeypatch.setattr(_db, "save_quality_score", ...)`` 才能替换。
+        """
+        try:
+            _db.save_quality_score(
+                session_id=session_id or "unknown",
+                message_id=message_id,
+                rubric="fact_check",
+                score=score,
+                verdict=verdict,
+                reasoning=reasoning,
+                fact_check_claims=claims,
+                fact_check_results=results,
+                fact_check_status=status,
+                fact_check_latency_ms=latency_ms,
+            )
+        except Exception as exc:  # noqa: BLE001 — DB 异常不能阻断主流程
+            logger.warning(
+                "fact-check persistence failed (status=%s, session=%s): %s",
+                status,
+                session_id,
+                exc,
+            )
+
+    @staticmethod
+    def _serialize_claims(results: list[Any]) -> list[dict[str, Any]]:
+        """把 ``VerificationResult`` 列表转成 JSON-friendly dict 列表。
+
+        ``VerificationResult`` 是 ``frozen=True`` 的 dataclass,``dataclasses.asdict``
+        能递归展开 ``FactClaim`` 子 dataclass。
+        """
+        out: list[dict[str, Any]] = []
+        for r in results:
+            if hasattr(r, "__dataclass_fields__"):
+                d = asdict(r)
+                # 把 claim 字段压平一层,方便读
+                claim = d.pop("claim", {})
+                d["claim_text"] = claim.get("raw_text", "")
+                d["claim_kind"] = claim.get("kind", "")
+                out.append(d)
+            elif isinstance(r, dict):
+                out.append(dict(r))
+            else:
+                out.append({"repr": str(r)})
+        return out
+
+    @staticmethod
+    def _extract_session_context(request: Any) -> tuple[str | None, str | None]:
+        """从 deepagents AgentState 抽 ``session_id`` / ``message_id``。
+
+        Args:
+            request: ``wrap_model_call`` 的 request 参数,期望是
+                ``AgentState``(dict-like,含 ``messages``)。
+
+        Returns:
+            ``(session_id, message_id)``,取不到时返回 ``(None, None)``。
+            主流程会在持久化时把 ``None`` 兜底成 ``"unknown"``。
+        """
+        session_id: str | None = None
+        message_id: str | None = None
+
+        # request 可能是 dict(TypedDict)或 BaseModel;两者都支持 []/get
+        def _safe_get(obj: Any, key: str) -> Any:
+            if obj is None:
+                return None
+            if isinstance(obj, dict):
+                return obj.get(key)
+            return getattr(obj, key, None)
+
+        msgs = _safe_get(request, "messages")
+        if not msgs:
+            return session_id, message_id
+
+        # 倒序找最近一条带 session_id / message_id 的消息
+        for msg in reversed(msgs):
+            extra = getattr(msg, "additional_kwargs", None)
+            if isinstance(extra, dict):
+                if session_id is None and extra.get("session_id"):
+                    session_id = str(extra["session_id"])
+                if message_id is None and extra.get("message_id"):
+                    message_id = str(extra["message_id"])
+            metadata = getattr(msg, "metadata", None)
+            if isinstance(metadata, dict):
+                if session_id is None and metadata.get("session_id"):
+                    session_id = str(metadata["session_id"])
+                if message_id is None and metadata.get("message_id"):
+                    message_id = str(metadata["message_id"])
+            if session_id and message_id:
+                break
+        return session_id, message_id
 
     @staticmethod
     def _extract_content(response: Any) -> str:
