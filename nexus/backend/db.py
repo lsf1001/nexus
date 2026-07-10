@@ -5,12 +5,14 @@
 旧 ``memory`` 表迁移后改名为 ``memory_legacy``(只读,供回查)。
 """
 
+import json
 import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from .config import CONFIG
 
@@ -142,6 +144,14 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_quality_session ON quality_scores(session_id)")
 
+    # Task 11:fact-check pipeline 在 quality_scores 上加 4 列。
+    # claims/results 是 JSON 数组(经 json.dumps 序列化为 TEXT 存储);status 是 pass/repair/reject
+    # 文本标签;latency_ms 是整型毫秒数。均为可空,保证旧调用模式不受影响。
+    _ensure_column(conn, "quality_scores", "fact_check_claims", "TEXT")
+    _ensure_column(conn, "quality_scores", "fact_check_results", "TEXT")
+    _ensure_column(conn, "quality_scores", "fact_check_status", "TEXT")
+    _ensure_column(conn, "quality_scores", "fact_check_latency_ms", "INTEGER")
+
     # Phase 1 容错:断线续传 token 表(对应 resume.py 的 HMAC token)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS resume_tokens (
@@ -171,6 +181,10 @@ def save_quality_score(
     verdict: str,
     reasoning: str = "",
     message_id: str | None = None,
+    fact_check_claims: list[dict[str, Any]] | None = None,
+    fact_check_results: list[dict[str, Any]] | None = None,
+    fact_check_status: str | None = None,
+    fact_check_latency_ms: int | None = None,
 ) -> int:
     """写入一条质量评分记录到 ``quality_scores`` 表（Phase 2 Task 2.5）。
 
@@ -181,18 +195,42 @@ def save_quality_score(
         verdict: 综合判定（``"accept"`` / ``"repair"`` / ``"reject"``）。
         reasoning: 评分员解释（中文），可空。
         message_id: 关联的 assistant 消息 ID，可空。
+        fact_check_claims: Task 11 新增。fact-check pipeline 抽取的事实声明列表
+            （每项 dict），None 表示未跑 fact-check；非 None 时会被 ``json.dumps``
+            序列化为 TEXT 存储。
+        fact_check_results: Task 11 新增。逐条声明的验证结果（每项 dict，含
+            ``status`` / ``confidence`` 等字段），同样 ``json.dumps`` 序列化。
+        fact_check_status: Task 11 新增。fact-check 综合判定（``"pass"`` /
+            ``"partial"`` / ``"fail"`` 等），TEXT 类型，可空。
+        fact_check_latency_ms: Task 11 新增。fact-check 阶段耗时（毫秒），可空。
 
     Returns:
         新插入行的 ``id``。
     """
+    # JSON 列用 json.dumps 序列化为 TEXT；None 保留 NULL,保持向后兼容
+    claims_json = json.dumps(fact_check_claims, ensure_ascii=False) if fact_check_claims is not None else None
+    results_json = json.dumps(fact_check_results, ensure_ascii=False) if fact_check_results is not None else None
+
     with get_db() as conn:
         cur = conn.execute(
             """
             INSERT INTO quality_scores
-                (session_id, message_id, rubric, score, verdict, reasoning)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (session_id, message_id, rubric, score, verdict, reasoning,
+                 fact_check_claims, fact_check_results, fact_check_status, fact_check_latency_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (session_id, message_id, rubric, score, verdict, reasoning),
+            (
+                session_id,
+                message_id,
+                rubric,
+                score,
+                verdict,
+                reasoning,
+                claims_json,
+                results_json,
+                fact_check_status,
+                fact_check_latency_ms,
+            ),
         )
         return int(cur.lastrowid or 0)
 
