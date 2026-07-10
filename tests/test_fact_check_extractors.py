@@ -4,6 +4,7 @@ import pytest
 
 from nexus.backend.fact_check.extractors import (
     DateWeekdayExtractor,
+    ExchangeRateExtractor,
     MathExtractor,
     UnitsExtractor,
 )
@@ -83,3 +84,23 @@ class TestUnitsExtractor:
         claims = UnitsExtractor().extract(text)
         assert len(claims) == 1
         assert float(claims[0].claimed_result) == pytest.approx(3.107, abs=0.01)
+
+
+class TestExchangeRateExtractor:
+    def test_extracts_usd_to_cny(self):
+        text = "100 USD ≈ 720 CNY"
+        claims = ExchangeRateExtractor().extract(text)
+        assert len(claims) == 1
+        assert claims[0].claimed_value == 100.0
+        assert claims[0].from_ccy == "USD"
+        assert claims[0].to_ccy == "CNY"
+        assert float(claims[0].claimed_result) == 720.0
+
+    def test_extracts_with_chinese_label(self):
+        text = "汇率:100美元 = 720人民币"
+        claims = ExchangeRateExtractor().extract(text)
+        assert len(claims) == 1
+        assert claims[0].from_ccy == "USD"
+        assert claims[0].to_ccy == "CNY"
+        assert claims[0].claimed_value == 100.0
+        assert float(claims[0].claimed_result) == 720.0

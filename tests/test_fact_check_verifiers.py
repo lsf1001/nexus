@@ -3,7 +3,12 @@
 import pytest
 
 from nexus.backend.fact_check.extractors import FactClaim
-from nexus.backend.fact_check.verifiers import DateWeekdayVerifier, MathVerifier, UnitsVerifier
+from nexus.backend.fact_check.verifiers import (
+    DateWeekdayVerifier,
+    ExchangeRateVerifier,
+    MathVerifier,
+    UnitsVerifier,
+)
 
 
 class TestDateWeekdayVerifier:
@@ -169,3 +174,52 @@ class TestUnitsVerifier:
         )
         result = UnitsVerifier().verify(claim)
         assert result.verdict == "error"
+
+
+class TestExchangeRateVerifier:
+    def test_correct_rate_passes(self, monkeypatch):
+        from nexus.backend.fact_check import exchange_rate as er
+
+        monkeypatch.setattr(er, "fetch_rate", lambda f, t, api_key=None: 7.20)
+        claim = FactClaim(
+            kind="exchange_rate",
+            raw_text="100 USD = 720 CNY",
+            claimed_value=100.0,
+            claimed_result="720",
+            from_ccy="USD",
+            to_ccy="CNY",
+        )
+        result = ExchangeRateVerifier().verify(claim, api_key=None)
+        assert result.verdict == "ok"
+        assert result.expected_value == 720.0
+        assert result.actual_value == 720.0
+
+    def test_wrong_rate_conflicts(self, monkeypatch):
+        from nexus.backend.fact_check import exchange_rate as er
+
+        monkeypatch.setattr(er, "fetch_rate", lambda f, t, api_key=None: 7.20)
+        claim = FactClaim(
+            kind="exchange_rate",
+            raw_text="100 USD = 800 CNY",
+            claimed_value=100.0,
+            claimed_result="800",
+            from_ccy="USD",
+            to_ccy="CNY",
+        )
+        result = ExchangeRateVerifier().verify(claim, api_key=None)
+        assert result.verdict == "conflict"
+
+    def test_api_failure_skipped(self, monkeypatch):
+        from nexus.backend.fact_check import exchange_rate as er
+
+        monkeypatch.setattr(er, "fetch_rate", lambda f, t, api_key=None: None)
+        claim = FactClaim(
+            kind="exchange_rate",
+            raw_text="100 USD = 720 CNY",
+            claimed_value=100.0,
+            claimed_result="720",
+            from_ccy="USD",
+            to_ccy="CNY",
+        )
+        result = ExchangeRateVerifier().verify(claim, api_key=None)
+        assert result.verdict == "skipped"

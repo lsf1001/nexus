@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal
 
+from nexus.backend.fact_check import exchange_rate as _exchange_rate
 from nexus.backend.fact_check.extractors import FactClaim
 from nexus.backend.fact_check.units import convert
 
@@ -223,4 +224,48 @@ class UnitsVerifier:
             verdict=verdict,
             expected_value=actual,
             actual_value=expected,
+        )
+
+
+class ExchangeRateVerifier:
+    """核对汇率换算声明。汇率波动较大,容许 5% 误差;API 失败时 fail-open 跳过。
+
+    校验逻辑:用 ``exchange_rate.fetch_rate`` 拿到 from→to 的汇率,乘以
+    claimed_value,与 claimed_result 比较。API 不可用时直接 verdict="skipped",
+    不阻断下游流程。
+    """
+
+    _TOLERANCE: float = 0.05  # 5% 容差,吸收汇率日常波动
+
+    def verify(self, claim: FactClaim, api_key: str | None = None) -> VerificationResult:
+        """校验一条 exchange_rate 声明;非该类型或币种缺失则跳过。"""
+        if claim.kind != "exchange_rate":
+            return VerificationResult(claim=claim, verdict="skipped")
+
+        assert claim.from_ccy and claim.to_ccy and claim.claimed_value is not None
+        rate = _exchange_rate.fetch_rate(claim.from_ccy, claim.to_ccy, api_key=api_key)
+        if rate is None:
+            return VerificationResult(
+                claim=claim,
+                verdict="skipped",
+                error_message="汇率 API 不可用，跳过校验",
+            )
+
+        expected = claim.claimed_value * rate
+        try:
+            actual = float(str(claim.claimed_result))
+        except (TypeError, ValueError) as e:
+            return VerificationResult(
+                claim=claim,
+                verdict="error",
+                error_message=str(e),
+            )
+
+        tolerance = abs(expected) * self._TOLERANCE
+        verdict: Literal["ok", "conflict"] = "ok" if abs(expected - actual) <= tolerance else "conflict"
+        return VerificationResult(
+            claim=claim,
+            verdict=verdict,
+            expected_value=expected,
+            actual_value=actual,
         )

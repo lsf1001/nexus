@@ -19,6 +19,8 @@ class FactClaim:
     claimed_value: float | None = None
     from_unit: str | None = None
     to_unit: str | None = None
+    from_ccy: str | None = None
+    to_ccy: str | None = None
 
 
 WEEKDAY_MAP = {
@@ -185,5 +187,65 @@ class UnitsExtractor:
                     )
                 )
             except ValueError:
+                continue
+        return claims
+
+
+class ExchangeRateExtractor:
+    """从文本中抽取汇率换算声明,形式为 '<数值><币种> = <结果><币种>'。
+
+    支持英文三字母币种代码 (USD/CNY 等) 和常见中文币种名
+    (美元/欧元/英镑/日元/港币/人民币)。运算符兼容 =、≈、约、约等于、大概是。
+    """
+
+    _RE_EN = re.compile(
+        r"(?P<value>[\d.]+)\s*(?P<from>[A-Z]{3})"
+        r"\s*(?:=|≈|约等于|约|大概是)\s*"
+        r"(?P<result>[\d.]+)\s*(?P<to>[A-Z]{3})"
+    )
+    _RE_ZH = re.compile(
+        r"(?P<value>[\d.]+)\s*(?P<from>美元|欧元|英镑|日元|港币|人民币)"
+        r"\s*(?:=|≈|约|大概是|大约)\s*"
+        r"(?P<result>[\d.]+)\s*(?P<to>美元|欧元|英镑|日元|港币|人民币)"
+    )
+    _ZH_CCY: dict[str, str] = {
+        "美元": "USD",
+        "欧元": "EUR",
+        "英镑": "GBP",
+        "日元": "JPY",
+        "港币": "HKD",
+        "人民币": "CNY",
+    }
+
+    def extract(self, text: str) -> list[FactClaim]:
+        """返回文本中匹配到的所有汇率换算声明。"""
+        claims: list[FactClaim] = []
+        for m in self._RE_EN.finditer(text):
+            try:
+                claims.append(
+                    FactClaim(
+                        kind="exchange_rate",
+                        raw_text=m.group(0),
+                        claimed_value=float(m.group("value")),
+                        claimed_result=str(m.group("result")),
+                        from_ccy=m.group("from"),
+                        to_ccy=m.group("to"),
+                    )
+                )
+            except ValueError:
+                continue
+        for m in self._RE_ZH.finditer(text):
+            try:
+                claims.append(
+                    FactClaim(
+                        kind="exchange_rate",
+                        raw_text=m.group(0),
+                        claimed_value=float(m.group("value")),
+                        claimed_result=str(m.group("result")),
+                        from_ccy=self._ZH_CCY[m.group("from")],
+                        to_ccy=self._ZH_CCY[m.group("to")],
+                    )
+                )
+            except (ValueError, KeyError):
                 continue
         return claims
