@@ -6,10 +6,13 @@
 
 验证策略:
 - DateWeekdayVerifier: 用 Python datetime 核对日期与星期是否一致
+- MathVerifier: 通过 AST 安全求值核对算术表达式
 """
 
 from __future__ import annotations
 
+import ast
+import operator
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -87,4 +90,99 @@ class DateWeekdayVerifier:
             verdict=verdict,
             claimed_weekday_zh=claim.claimed_weekday_zh,
             actual_weekday_zh=actual_zh,
+        )
+
+
+class MathVerifier:
+    """通过 AST 安全求值核对算术表达式。
+
+    仅允许数字常量与 +、-、*、/、**、一元负号;函数调用、属性访问、
+    Name 节点等都会被拒绝,杜绝 eval 注入。
+    """
+
+    _ALLOWED_OPS: dict[type, object] = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+    }
+
+    _ZH_OP_MAP: dict[str, str] = {
+        "乘以": "*",
+        "乘": "*",
+        "除以": "/",
+        "除": "/",
+        "加上": "+",
+        "加": "+",
+        "减去": "-",
+        "减": "-",
+    }
+
+    @staticmethod
+    def _normalize(expr: str) -> str:
+        """替换中文运算符为符号,并剥离表达式里的单位后缀。"""
+        out = expr
+        for zh, sym in MathVerifier._ZH_OP_MAP.items():
+            out = out.replace(zh, sym)
+        # 去掉数字尾巴上的字母/百分号单位（如 "1.5L" → "1.5"）
+        out = re.sub(r"([\d.]+)[a-zA-Z%]+", r"\1", out)
+        out = out.replace("×", "*").replace("÷", "/")
+        return out
+
+    def _safe_eval(self, expr: str) -> float:
+        """用 AST 求值算术表达式;非允许节点抛 ValueError。"""
+        tree = ast.parse(expr, mode="eval")
+        return self._eval_node(tree.body)
+
+    def _eval_node(self, node: ast.AST) -> float:
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node, ast.BinOp):
+            op_type = type(node.op)
+            if op_type not in self._ALLOWED_OPS:
+                raise ValueError(f"Operator {op_type.__name__} not allowed")
+            left = self._eval_node(node.left)
+            right = self._eval_node(node.right)
+            return self._ALLOWED_OPS[op_type](left, right)  # type: ignore[operator]
+        if isinstance(node, ast.UnaryOp):
+            if type(node.op) not in self._ALLOWED_OPS:
+                raise ValueError(f"Unary {type(node.op).__name__} not allowed")
+            return self._ALLOWED_OPS[type(node.op)](  # type: ignore[operator]
+                self._eval_node(node.operand),
+            )
+        raise ValueError(f"AST node {type(node).__name__} not allowed")
+
+    @staticmethod
+    def _strip_units(s: str) -> float:
+        """从 claimed_result 里剥离单位后缀,只保留数值。"""
+        m = re.match(r"([\d.]+)", s.strip())
+        if not m:
+            raise ValueError(f"No numeric value in {s!r}")
+        return float(m.group(1))
+
+    def verify(self, claim: FactClaim) -> VerificationResult:
+        """校验一条 math 声明;非该类型则跳过。"""
+        if claim.kind != "math":
+            return VerificationResult(claim=claim, verdict="skipped")
+
+        assert claim.expression and claim.claimed_result
+        try:
+            normalized = self._normalize(claim.expression)
+            expected = self._safe_eval(normalized)
+            actual = self._strip_units(claim.claimed_result)
+        except (ValueError, SyntaxError) as e:
+            return VerificationResult(
+                claim=claim,
+                verdict="error",
+                error_message=str(e),
+            )
+
+        verdict: Literal["ok", "conflict"] = "ok" if abs(expected - actual) < 1e-6 else "conflict"
+        return VerificationResult(
+            claim=claim,
+            verdict=verdict,
+            expected_value=expected,
+            actual_value=actual,
         )

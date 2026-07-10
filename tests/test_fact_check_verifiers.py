@@ -1,7 +1,7 @@
 """Tests for fact_check.verifiers."""
 
 from nexus.backend.fact_check.extractors import FactClaim
-from nexus.backend.fact_check.verifiers import DateWeekdayVerifier
+from nexus.backend.fact_check.verifiers import DateWeekdayVerifier, MathVerifier
 
 
 class TestDateWeekdayVerifier:
@@ -46,4 +46,72 @@ class TestDateWeekdayVerifier:
             claimed_weekday_zh="星期一",
         )
         result = DateWeekdayVerifier().verify(claim)
+        assert result.verdict == "error"
+
+
+class TestMathVerifier:
+    def test_simple_addition_correct(self):
+        claim = FactClaim(
+            kind="math",
+            raw_text="23 + 32 = 55",
+            expression="23 + 32",
+            claimed_result="55",
+        )
+        result = MathVerifier().verify(claim)
+        assert result.verdict == "ok"
+        assert result.expected_value == 55.0
+        assert result.actual_value == 55.0
+
+    def test_addition_wrong(self):
+        claim = FactClaim(
+            kind="math",
+            raw_text="23 + 32 = 56",
+            expression="23 + 32",
+            claimed_result="56",
+        )
+        result = MathVerifier().verify(claim)
+        assert result.verdict == "conflict"
+        assert result.expected_value == 55.0
+        assert result.actual_value == 56.0
+
+    def test_multiplication_with_units(self):
+        claim = FactClaim(
+            kind="math",
+            raw_text="1.5L × 2 = 3L",
+            expression="1.5L × 2",
+            claimed_result="3L",
+        )
+        result = MathVerifier().verify(claim)
+        assert result.verdict == "ok"
+        assert result.expected_value == 3.0
+        assert result.actual_value == 3.0
+
+    def test_division(self):
+        claim = FactClaim(
+            kind="math",
+            raw_text="100 / 4 = 25",
+            expression="100 / 4",
+            claimed_result="25",
+        )
+        result = MathVerifier().verify(claim)
+        assert result.verdict == "ok"
+
+    def test_chinese_operators(self):
+        claim = FactClaim(
+            kind="math",
+            raw_text="100 乘以 2 等于 200",
+            expression="100 乘以 2",
+            claimed_result="200",
+        )
+        result = MathVerifier().verify(claim)
+        assert result.verdict == "ok"
+
+    def test_unsafe_expression_rejected(self):
+        claim = FactClaim(
+            kind="math",
+            raw_text="__import__('os').system('rm -rf /') = 0",
+            expression="__import__('os').system('rm -rf /')",
+            claimed_result="0",
+        )
+        result = MathVerifier().verify(claim)
         assert result.verdict == "error"
