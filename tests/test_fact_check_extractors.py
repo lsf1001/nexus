@@ -1,8 +1,11 @@
 """Tests for fact_check.extractors."""
 
+import pytest
+
 from nexus.backend.fact_check.extractors import (
     DateWeekdayExtractor,
     MathExtractor,
+    UnitsExtractor,
 )
 
 
@@ -63,3 +66,20 @@ class TestMathExtractor:
         claims = MathExtractor().extract(text)
         assert len(claims) == 1
         assert claims[0].claimed_result == "200"
+
+
+class TestUnitsExtractor:
+    def test_extracts_simple_conversion(self):
+        text = "100°C = 212°F"
+        claims = UnitsExtractor().extract(text)
+        assert len(claims) == 1
+        assert claims[0].claimed_value == 100.0
+        assert claims[0].from_unit == "C"
+        assert claims[0].to_unit == "F"
+        assert float(claims[0].claimed_result) == 212.0
+
+    def test_extracts_km_to_mile(self):
+        text = "5 km = 3.107 mile"
+        claims = UnitsExtractor().extract(text)
+        assert len(claims) == 1
+        assert float(claims[0].claimed_result) == pytest.approx(3.107, abs=0.01)

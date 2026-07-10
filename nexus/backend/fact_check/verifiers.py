@@ -7,6 +7,7 @@
 验证策略:
 - DateWeekdayVerifier: 用 Python datetime 核对日期与星期是否一致
 - MathVerifier: 通过 AST 安全求值核对算术表达式
+- UnitsVerifier: 用 units.convert 核对单位换算
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from datetime import date
 from typing import Literal
 
 from nexus.backend.fact_check.extractors import FactClaim
+from nexus.backend.fact_check.units import convert
 
 
 @dataclass(frozen=True)
@@ -185,4 +187,40 @@ class MathVerifier:
             verdict=verdict,
             expected_value=expected,
             actual_value=actual,
+        )
+
+
+class UnitsVerifier:
+    """用 ``units.convert`` 核对单位换算声明的真伪。
+
+    误差容限固定为 0.01,足以吸收常见四舍五入(如 km↔mile 的 3.107)而不
+    放过明显错误(如 100°C = 200°F)。当来源/目标单位不属于同一可换算分类
+    时返回 verdict="error"。
+    """
+
+    _TOLERANCE: float = 0.01
+
+    def verify(self, claim: FactClaim) -> VerificationResult:
+        """校验一条 unit 声明;非该类型则跳过。"""
+        if claim.kind != "unit":
+            return VerificationResult(claim=claim, verdict="skipped")
+
+        assert claim.claimed_value is not None
+        assert claim.from_unit and claim.to_unit
+        try:
+            actual = convert(claim.claimed_value, claim.from_unit, claim.to_unit)
+            expected = float(str(claim.claimed_result))
+        except (ValueError, TypeError) as e:
+            return VerificationResult(
+                claim=claim,
+                verdict="error",
+                error_message=str(e),
+            )
+
+        verdict: Literal["ok", "conflict"] = "ok" if abs(actual - expected) < self._TOLERANCE else "conflict"
+        return VerificationResult(
+            claim=claim,
+            verdict=verdict,
+            expected_value=actual,
+            actual_value=expected,
         )

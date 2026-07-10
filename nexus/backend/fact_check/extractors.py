@@ -17,6 +17,8 @@ class FactClaim:
     expression: str | None = None
     claimed_result: str | None = None
     claimed_value: float | None = None
+    from_unit: str | None = None
+    to_unit: str | None = None
 
 
 WEEKDAY_MAP = {
@@ -124,4 +126,64 @@ class MathExtractor:
                     claimed_result=m.group("result").strip(),
                 )
             )
+        return claims
+
+
+class UnitsExtractor:
+    """从文本中抽取单位换算声明,形式为 '<数值><单位> = <结果><单位>'。
+
+    支持中英文运算符（=、等于、是、->、→、转换到、转成）和常见
+    单位别名（摄氏度/°C/℃ → C、华氏度/°F/℉ → F 等）。
+    """
+
+    _RE = re.compile(
+        r"(?P<value>[\d.]+)\s*(?P<from_u>[a-zA-Z°℃℉]+)"
+        r"\s*(?:=|等于|是|->|→|转换到|转成)\s*"
+        r"(?P<result>[\d.]+)\s*(?P<to_u>[a-zA-Z°℃℉]+)"
+    )
+
+    _ALIASES: dict[str, str] = {
+        "°C": "C",
+        "℃": "C",
+        "摄氏度": "C",
+        "度C": "C",
+        "°F": "F",
+        "℉": "F",
+        "华氏度": "F",
+        "度F": "F",
+        "°K": "K",
+        "开尔文": "K",
+        "公里": "km",
+        "千米": "km",
+        "米": "m",
+        "英尺": "ft",
+        "千克": "kg",
+        "克": "g",
+        "磅": "lb",
+        "升": "L",
+        "毫升": "mL",
+    }
+
+    @staticmethod
+    def _normalize(u: str) -> str:
+        """用别名表把单位写法归一到 ``units.py`` 支持的规范名。"""
+        return UnitsExtractor._ALIASES.get(u.strip(), u.strip())
+
+    def extract(self, text: str) -> list[FactClaim]:
+        """返回文本中匹配到的所有单位换算声明。"""
+        claims: list[FactClaim] = []
+        for m in self._RE.finditer(text):
+            try:
+                claims.append(
+                    FactClaim(
+                        kind="unit",
+                        raw_text=m.group(0),
+                        claimed_value=float(m.group("value")),
+                        claimed_result=str(m.group("result")),
+                        from_unit=self._normalize(m.group("from_u")),
+                        to_unit=self._normalize(m.group("to_u")),
+                    )
+                )
+            except ValueError:
+                continue
         return claims

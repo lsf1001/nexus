@@ -1,7 +1,9 @@
 """Tests for fact_check.verifiers."""
 
+import pytest
+
 from nexus.backend.fact_check.extractors import FactClaim
-from nexus.backend.fact_check.verifiers import DateWeekdayVerifier, MathVerifier
+from nexus.backend.fact_check.verifiers import DateWeekdayVerifier, MathVerifier, UnitsVerifier
 
 
 class TestDateWeekdayVerifier:
@@ -114,4 +116,56 @@ class TestMathVerifier:
             claimed_result="0",
         )
         result = MathVerifier().verify(claim)
+        assert result.verdict == "error"
+
+
+class TestUnitsVerifier:
+    def test_correct_conversion_passes(self):
+        claim = FactClaim(
+            kind="unit",
+            raw_text="100°C = 212°F",
+            claimed_value=100.0,
+            claimed_result="212",
+            from_unit="C",
+            to_unit="F",
+        )
+        result = UnitsVerifier().verify(claim)
+        assert result.verdict == "ok"
+        assert result.expected_value == pytest.approx(212.0, abs=0.01)
+        assert result.actual_value == 212.0
+
+    def test_wrong_conversion_conflicts(self):
+        claim = FactClaim(
+            kind="unit",
+            raw_text="100°C = 200°F",
+            claimed_value=100.0,
+            claimed_result="200",
+            from_unit="C",
+            to_unit="F",
+        )
+        result = UnitsVerifier().verify(claim)
+        assert result.verdict == "conflict"
+
+    def test_km_to_mile_correct(self):
+        claim = FactClaim(
+            kind="unit",
+            raw_text="1 km = 0.621371 mile",
+            claimed_value=1.0,
+            claimed_result="0.621371",
+            from_unit="km",
+            to_unit="mile",
+        )
+        result = UnitsVerifier().verify(claim)
+        assert result.verdict == "ok"
+
+    def test_incompatible_units_returns_error(self):
+        claim = FactClaim(
+            kind="unit",
+            raw_text="5 kg = 5 m",
+            claimed_value=5.0,
+            claimed_result="5",
+            from_unit="kg",
+            to_unit="m",
+        )
+        result = UnitsVerifier().verify(claim)
         assert result.verdict == "error"
