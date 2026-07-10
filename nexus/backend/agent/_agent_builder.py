@@ -120,10 +120,18 @@ def create_agent(
     memory_files: list[str] = [str(USER_MEMORY_PATH)]
 
     # 质量门:拦截对受保护 AGENTS.md 的 edit_file / write_file 写入
+    # 事实校验中间件（2026-07 plan）:拦截 LLM 输出,扫描日期/星期/数学/单位/
+    # 汇率类确定性事实冲突。与 quality_gate 互补:quality_gate 守
+    # ``wrap_tool_call``(写 AGENTS.md 前评估),fact_check 守 ``wrap_model_call``
+    # (LLM 输出后扫描)。fail_strategy="closed":任何冲突抛 FactCheckError,
+    # 让 LLM 看到 ToolMessage error 触发自纠。
+    from ..agents.middleware import FactCheckMiddleware
     from ..quality.memory_filter import MemoryFilter
     from ..quality.middleware import QualityGateMiddleware
     from ..rubrics.judge import RubricJudge
     from ..rubrics.schemas import FAITHFULNESS_RUBRIC
+
+    fact_check = FactCheckMiddleware(fail_strategy="closed")
 
     quality_gate = QualityGateMiddleware(
         filter=MemoryFilter(judge=RubricJudge(llm=llm), rubric=FAITHFULNESS_RUBRIC),
@@ -202,11 +210,21 @@ def create_agent(
         #   quality_gate      : 拦截 AGENTS.md 写入忠实度评估(配合 MemoryMiddleware)
         #   path_aware_hitl   : 对"非白名单"写工具触发 GraphInterrupt → confirmation_request
         #   dynamic_identity  : prepend FACT 块(注入当前激活模型)
+        #   fact_check        : 拦截 LLM 输出,扫描日期/数学/汇率冲突(fail-closed)
         #   force_tool        : knowledge/task 类问题强制 LLM 调 yandex_search
         # path_aware_hitl 与 quality_gate 顺序: quality_gate 先(它只关心
         # AGENTS.md,直接透传其它路径);path_aware_hitl 后,对透传过来的
         # "非白名单 + 非 protected" 路径触发 HITL。
-        middleware=[quality_gate, path_aware_hitl, dynamic_identity_middleware, force_tool_mw],
+        # fact_check 位置: 在 dynamic_identity 后(已注入 FACT 块)、force_tool 前
+        # — 让 force_tool 仍可对"无 tool_call 的弱模型"打补丁,但 fact_check
+        # 已经看到的输出是含 FACT 块的最终文本。
+        middleware=[
+            quality_gate,
+            path_aware_hitl,
+            dynamic_identity_middleware,
+            fact_check,
+            force_tool_mw,
+        ],
         checkpointer=checkpointer,
         skills=[
             ".nexus/skills",

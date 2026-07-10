@@ -39,6 +39,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
+from langchain.agents.middleware.types import AgentMiddleware, AgentState
+
 from nexus.backend.fact_check.pipeline import FactCheckPipeline
 
 logger = logging.getLogger(__name__)
@@ -58,7 +60,7 @@ class FactCheckError(Exception):
         super().__init__(f"Fact-check conflict: {summary}")
 
 
-class FactCheckMiddleware:
+class FactCheckMiddleware(AgentMiddleware[AgentState, Any, Any]):
     """DeepAgents 中间件：扫描模型输出中的事实声明并验证。
 
     Args:

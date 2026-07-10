@@ -8,6 +8,53 @@ from nexus.backend.agents.middleware.fact_check import (
 )
 
 
+def test_fact_check_middleware_exported():
+    """FactCheckMiddleware must be importable from the package surface."""
+    from nexus.backend.agents.middleware import FactCheckMiddleware as Exported
+    from nexus.backend.agents.middleware.fact_check import (
+        FactCheckMiddleware as Source,
+    )
+
+    assert Exported is Source
+
+
+def test_fact_check_error_exported():
+    """FactCheckError must be importable from the package surface."""
+    from nexus.backend.agents.middleware import FactCheckError as Exported
+    from nexus.backend.agents.middleware.fact_check import FactCheckError as Source
+
+    assert Exported is Source
+
+
+def test_fact_check_middleware_inherits_agent_middleware():
+    """FactCheckMiddleware must subclass AgentMiddleware for deepagents interop."""
+    from langchain.agents.middleware.types import AgentMiddleware
+
+    from nexus.backend.agents.middleware import FactCheckMiddleware
+
+    assert issubclass(FactCheckMiddleware, AgentMiddleware)
+
+
+def test_agent_builder_includes_fact_check_middleware():
+    """The middleware chain must include FactCheckMiddleware (T10 wire-it check)."""
+    import inspect
+    from pathlib import Path
+
+    from nexus.backend.agent import _agent_builder
+
+    src = inspect.getsource(_agent_builder.create_agent)
+    assert "FactCheckMiddleware" in src, (
+        "FactCheckMiddleware must be referenced in create_agent() — this is T10's wire-it guarantee"
+    )
+
+    # 同时验证 import path 正确（防止 import 写错路径编译通过但运行时 ImportError）
+    builder_path = Path(_agent_builder.__file__)
+    src_text = builder_path.read_text(encoding="utf-8")
+    assert "from ..agents.middleware import FactCheckMiddleware" in src_text, (
+        "agent_builder must import FactCheckMiddleware from agents.middleware"
+    )
+
+
 class TestFactCheckMiddleware:
     @pytest.mark.asyncio
     async def test_passes_clean_output(self):

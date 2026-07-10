@@ -1,1 +1,8 @@
-"""Agents 子包内的中间件实现,挂接 deepagents ``wrap_model_call`` / ``wrap_tool_call``。"""
+"""Agents 中间件集合。"""
+
+from nexus.backend.agents.middleware.fact_check import (
+    FactCheckError,
+    FactCheckMiddleware,
+)
+
+__all__ = ["FactCheckError", "FactCheckMiddleware"]
