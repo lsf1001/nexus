@@ -47,6 +47,7 @@ def create_agent(
     from deepagents import create_deep_agent
 
     from ..config import CONFIG
+    from ..fact_check.langchain_tools import FACT_CHECK_TOOLS
     from ..tools import TOOLS
     from ._backend import _create_backend
     from ._checkpoint import _create_checkpointer, _create_store
@@ -65,8 +66,10 @@ def create_agent(
 
     _ensure_registered()
 
-    # 合并 MCP 工具和内置工具
-    all_tools = list(TOOLS)
+    # 合并内置工具 + fact-check 工具 + MCP 工具。fact-check 工具 prepend,LLM
+    # 在工具列表头部更容易注意到 verify_claims 自检 — 与 FactCheckMiddleware
+    # 互补(middleware 在 wrap_model_call 阶段兜底扫描输出)。
+    all_tools = list(FACT_CHECK_TOOLS) + list(TOOLS)
     if mcp_tools:
         all_tools.extend(mcp_tools)
 
