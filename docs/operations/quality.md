@@ -338,3 +338,47 @@ LIMIT 10;
 - 人工样本：`data/rubric_eval_samples.jsonl`
 - 当前 meta-eval 结果：`data/eval_report.json`
 - 相关测试：`tests/test_rubric_judge.py`、`tests/test_rubric_meta_eval.py`、`tests/test_quality_pipeline.py`
+
+---
+
+## 10. 与 fact-check 管线的协作
+
+`quality.md` 关心 LLM-judge 评分（`faithfulness` / `relevance` / `safety` / `tool_correctness`）。
+[`fact-check.md`](./fact-check.md) 关心**确定性**事实校验（`date_weekday` / `math` / `unit` / `exchange_rate`）。
+
+两者落同一张 `quality_scores` 表，但 `rubric` 字段不同：
+
+- LLM-judge 入库：`rubric='faithfulness'` 等，`fact_check_status='skipped'`
+- 确定性 fact-check 入库：`rubric='fact_check'`，`fact_check_status='pass'/'fail'`
+
+### 协同决策
+
+```
+输出到达 → FactCheckMiddleware（确定性，毫秒级，hard veto）
+        → 阻断 OR 放行
+        → 阻断时仍记录为 rubric='fact_check' score=0
+        → LLM-judge 评分是对**通过 fact-check 的回复**做软打分
+```
+
+判定规则：
+
+- `fact_check_status='fail'` → verdict=reject，**不进入** LLM-judge 评分（节省成本）
+- `fact_check_status='pass'` → 进入 RubricJudge 评分，继续沿用 §2 的阈值
+- `fact_check_status='skipped'` → 没有事实声明，跳过 fact-check，直接进 RubricJudge
+
+### 监控
+
+```sql
+-- 综合质量（fact-check + LLM-judge）
+SELECT
+    rubric,
+    fact_check_status,
+    AVG(score) AS avg_score,
+    COUNT(*) AS n
+FROM quality_scores
+WHERE created_at > datetime('now', '-24 hours')
+GROUP BY rubric, fact_check_status
+ORDER BY rubric, fact_check_status;
+```
+
+报警：当 `rubric='fact_check'` 的 fail 数突然上升，意味着模型开始系统性说错日期/星期/数学/单位 — 通常是 LLM provider 升级或路由变化导致，不要当「judge 太严」调，要去查上游。
