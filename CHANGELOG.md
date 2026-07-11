@@ -5,6 +5,64 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+## [Unreleased] — fact-check 管线(21 commit):确定性拦截日期/星期/数学/单位/汇率错误
+
+### Problem
+
+2026-07-10 21:45 Asia/Shanghai 用户让 Nexus 生成"明天穿衣提醒" HTML,LLM 输出的自然语言句"明天是 2026 年 7 月 11 日 星期五"是错的(实际为星期六)。HTML 头部时间戳恰好由确定性渲染给出正确日期,但模型侧声明是事实性幻觉 — 用户面对自相矛盾内容。根因:LLM 不擅长 mod 7 心算、无可用工具、也没拦截层。
+
+### Root Cause
+
+- **抽取+校验两步零基础**:无任何机制把"x 是 y"声明抽取出来对照真实日历/汇率/数学
+- **system prompt 缺工具说明**:LLM 看不到能查星期/汇率的工具
+- **wrap_model_call 无硬拦截**:即使模型无视工具,产物也没人挡
+
+### Changed (2026-07-11)
+
+- **`nexus/backend/fact_check/`** (新增 8 文件,271+230+...) — 确定性事实校验核心
+  - `extractors.py`:DateWeekdayExtractor(`明天是 X 星期Y` / `2026-07-11 星期五` 中文/ISO 双 regex)、MathExtractor、UnitsExtractor、ExchangeRateExtractor
+  - `verifiers.py`:DateWeekdayVerifier(Python `datetime.strptime` + `date.weekday()` 映射,纯函数零网络)、MathVerifier(`ast.literal_eval` 安全求值,禁裸表达式)、UnitsVerifier、ExchangeRateVerifier(**fail-open**,API 故障不阻断)
+  - `units.py` / `exchange_rate.py`:手码转换表(温/长/质/容)+ 1h TTL 缓存
+  - `pipeline.py`:`FactCheckPipeline.check(text) → FactCheckReport` 编排四类
+- **`nexus/backend/agents/middleware/fact_check.py`** — `FactCheckMiddleware(AgentMiddleware)` 持 `wrap_model_call`,`fail_strategy="closed"` 默认抛 `FactCheckError`(LLM 输出被拒)
+- **`nexus/backend/agent/_agent_builder.py`** — 接入中间件链:`[quality_gate, path_aware_hitl, dynamic_identity_middleware, FactCheckMiddleware, force_tool_mw]`
+- **`nexus/backend/db.py`** — `quality_scores` 加 4 列(`fact_check_claims/results/status/latency_ms`),`save_quality_score()` 4 个新 kwarg(`json.dumps(ensure_ascii=False)`)
+- **`nexus/backend/mcp/`** — `date_utils.py`(`today/weekday_of/next_n_days`) + `fact_verify.py`(`verify_claims`),硬编码 Asia/Shanghai,纯函数
+- **`nexus/backend/fact_check/langchain_tools.py`** — 4 个 `@tool` 装饰器包装,接入 deepagents tool 注册
+- **`nexus/backend/fact_check/prompt_constraint.py`** + `dynamic_identity.py` — `FACT_CHECK_CONSTRAINT` 中文提示注入,4 层 sandwich(`FACT → FACT_CHECK → static → FINAL`)
+- **操作文档**:`docs/operations/fact-check.md`(215 行,8 节)+ `docs/operations/quality.md` §10
+
+### Strategy:三层防御
+
+1. **工具暴露**:4 个 `@tool` 让 LLM 自助校验(`today / weekday_of / next_n_days / verify_claims`)
+2. **行为约束**:`FACT_CHECK_CONSTRAINT` 注入 system prompt 强制先查后答
+3. **强制兜底**:`FactCheckMiddleware fail_strategy="closed"` 硬拦截,确定性 verifier 不依赖 LLM
+
+### Test Coverage
+
+- **128 个 fact-check 测试全过**(T1-T15)
+- `test_fact_check_regression_2026_07_10.py`(T17):钉死 7-10 21:45 原 bug,5/5
+- `test_fact_check_e2e_tomorrow.py`(T18):"明天是星期几" 用户场景双路径,22 测试
+- 全量:785 passed / 1 skipped / 0 failed(4m32s)
+
+### Meta-eval
+
+- 5 样本(`data/fact_check_eval_samples.jsonl`)事实声明质量核验
+- Cohen's kappa **0.643**(阈值 0.4,合格)
+- Pearson **+0.950**
+- 4/5 verdict 与人工一致,样本 2(`明天星期六`)被判 0.75 repair 而非 1.0 accept — 校准注记
+
+### Modified Strategy
+
+- **原计划**:T10 改造 `QualityPipeline.run_with_quality`(2026-06-29 已删);T11/12 等同。**重写**:中间件路径(fail-closed on output)
+- **原计划**:T15 在 `nexus/backend/tools/`(已存在 `tools.py`,会 shadow);**移至** `nexus/backend/fact_check/langchain_tools.py`
+
+### Why This Matters
+
+下次用户问"明天/下周一/汇率/算术",Nexus 不再依赖 LLM 心算 — 工具是首选(快速自检),提示是次选(行为约束),中间件是兜底(强制拦截)。哪怕模型严重退化 / 升级出 bug / 网络挂掉,确定性事实不会编出去。
+
+---
+
 ## [Unreleased] — 4 commit 收尾:HITL 三态路由 / ws 包 re-export / force_tool 收紧 / 前端 TS strict
 
 ### Problem
