@@ -50,6 +50,7 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import SystemMessage
 
 from ..agent._system_prompt import get_system_prompt
+from ..fact_check.prompt_constraint import render_fact_check_constraint
 from ..identity.directives import (
     matches_identity_query,
     render_fact_block,
@@ -197,6 +198,11 @@ async def dynamic_identity_middleware(
     # 内联于顶层与 ``_build_*`` 函数内重复。集中后字符串构造只跑一遍。
     fact_block = _build_fact_block(driver_name, driver_vendor)
     final_reminder = _build_final_reminder(driver_name, driver_vendor)
+    # 2026-07-11 (Task 16):LLM 已有 4 个事实校验工具(T15),fact_check 中间件
+    # 已 fail-closed 兜底(T9/T10),此处再叠一层主动 prompt 约束,让 LLM 在
+    # 生成 token 前主动调工具验证。render 函数与 render_fact_block /
+    # render_final_reminder 同形式,三明治里多夹一层 FACT_CHECK_CONSTRAINT。
+    fact_check_constraint = render_fact_check_constraint()
 
     # 2026-06-30 第三轮强化:LLM 训练记忆 bias 太深(agnx-2.0-flash 实测仍
     # 答 "我是 Agnes-Flash by Sapiens AI"),system prompt 压不住。必须在
@@ -214,24 +220,28 @@ async def dynamic_identity_middleware(
 
     if not sm_content:
         # Bug A 防御:deepagents 实际运行时 sm_content 是空字符串,这里重建
-        # 完整 system_message = FACT + 静态 product rules + FINAL REMINDER。
+        # 完整 system_message = FACT + FACT_CHECK_CONSTRAINT + 静态 product rules + FINAL REMINDER。
         # 后续 ``MemoryMiddleware`` 会在本 middleware 之后再追加 AGENTS.md,
         # 那时 FINAL REMINDER 就在 AGENTS.md 上面,仍是 LLM 决策点最近的内容之一。
-        # 三明治结构:FACT 块(顶部) + static prompt(中段) + FINAL REMINDER(末尾)
+        # 四层三明治结构:FACT(顶, 模型身份)+ FACT_CHECK(顶 2, 事实工具主动约束)
+        #                 + static prompt(中段, Nexus 静态产品规则)
+        #                 + FINAL REMINDER(末尾, 身份自报硬约束)。
         static_prompt = get_system_prompt()
-        rebuilt = SystemMessage(content=fact_block + static_prompt + final_reminder)
+        rebuilt = SystemMessage(content=fact_block + fact_check_constraint + static_prompt + final_reminder)
         new_request = request.override(system_message=rebuilt)
         logger.info(
-            "dynamic_identity_middleware: sm_content 为空,已重建 FACT + 静态 product rules "
-            "+ FINAL REMINDER (fact=%d chars, static=%d chars, final=%d chars)",
+            "dynamic_identity_middleware: sm_content 为空,已重建 FACT + FACT_CHECK_CONSTRAINT "
+            "+ 静态 product rules + FINAL REMINDER "
+            "(fact=%d chars, fact_check=%d chars, static=%d chars, final=%d chars)",
             len(fact_block),
+            len(fact_check_constraint),
             len(static_prompt),
             len(final_reminder),
         )
         return await handler(new_request)
 
     # 非空分支(deepagents 未来版本可能修复此 bug,或单测场景):
-    # 保留原始 static prompt,但仍 prepend FACT 块 + append FINAL REMINDER,
-    # 确保 LLM 看到的三明治结构一致。
-    sm.content = fact_block + sm_content + final_reminder
+    # 保留原始 static prompt,但仍 prepend FACT + FACT_CHECK_CONSTRAINT + append FINAL REMINDER,
+    # 确保 LLM 看到的四层结构一致。
+    sm.content = fact_block + fact_check_constraint + sm_content + final_reminder
     return await handler(request)

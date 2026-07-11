@@ -41,6 +41,11 @@ dependencies = [
     "ddgs>=5.0.0",
     "beautifulsoup4>=4.12.0",
     "aiosqlite>=0.19.0",
+    # WHY 显式声明 ``aiohttp``:fact_check.exchange_rate.fetch_rate
+    #   需要异步 HTTP 客户端拉取 exchangerate-api 汇率;
+    #   不在 fastapi 传递依赖里(uvicorn[standard] 用 httptools),
+    #   ``pip install -e .`` 后 import 会失败,verifier 退化为 fail-open。
+    "aiohttp>=3.9",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
     "typer[all]>=0.9.0",
