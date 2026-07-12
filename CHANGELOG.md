@@ -63,6 +63,28 @@ ChatArea mount 时抛 `SyntaxError`,被 ErrorBoundary 接管,前端
 
 ---
 
+## [Unreleased] — 4 条 user-journey E2E spec + debug 工具挪出(2026-07-12)
+
+新增 `frontend/e2e/journey/` 目录,落地 4 条模拟人工视角的端到端
+E2E spec,全走真 LLM,CI 必跑:
+
+- `journey-cold-start`: 新用户从打开到首次回复
+- `journey-multi-turn`: 同会话 3 条连发 + 上下文回显
+- `journey-hitl-workflow`: AGENTS.md 写入触发 HITL + 批准 → 流续接
+- `journey-resilience`: 后端崩溃 → 重启 → 浏览器自动重连
+
+新增 `frontend/e2e/journey/helpers.ts`,封装 journey 专用高层动作
+(`sendSequence` / `expectContextRecall` / `killBackend` 等),
+与现有 `frontend/e2e/helpers.ts` 底层选择器封装分层。
+
+把 `debug-agnes-message.spec.ts` / `diag-ws-page.spec.ts`
+从 `frontend/e2e/` 挪到 `frontend/scripts/debug/`,这俩是开发者排错
+工具不是产品验收,移出 Playwright testDir 不再被自动扫描。
+
+详见 `docs/superpowers/specs/2026-07-12-e2e-suite-design.md`。
+
+---
+
 ## [Unreleased] — WS 鉴权收紧 + 密钥脱敏 + ChatArea 拆解(2026-07-12)
 
 WS 鉴权 token 与 API key 存在三处泄密:

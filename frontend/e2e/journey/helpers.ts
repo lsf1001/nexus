@@ -80,3 +80,35 @@ export async function isBackendAlive(page: Page): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * 杀后端:用 pkill -f uvicorn.nexus.backend.main:app
+ *
+ * Playwright 启动的 webServer 在 CI(reuseExistingServer=false)杀完后会
+ * 自动重启;本地 dev(reuseExistingServer=true)杀完后端会污染后续 spec,
+ * 跑前需设 NEXUS_E2E_RESILIENCE=1 或单独跑。
+ */
+export async function killBackend(): Promise<void> {
+  const { spawn } = await import('node:child_process');
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn('pkill', ['-f', 'uvicorn.nexus.backend.main:app'], {
+      stdio: 'pipe',
+    });
+    proc.on('exit', (code) => {
+      // pkill 退码: 0 = killed >=1, 1 = no proc matched
+      if (code === 0 || code === 1) resolve();
+      else reject(new Error(`pkill exit ${code}`));
+    });
+    proc.on('error', reject);
+  });
+}
+
+/** 等后端 /health 200,timeout 30s */
+export async function waitBackendAlive(page: Page, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isBackendAlive(page)) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Backend /health 未在 ${timeoutMs}ms 内恢复`);
+}
