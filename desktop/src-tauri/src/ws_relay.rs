@@ -42,10 +42,20 @@ pub struct WsSession {
 
 /// Sec-WebSocket-Protocol 子协议前缀,见 `nexus.backend.api.ws.auth._WS_SUBPROTOCOL_PREFIX`。
 ///
-/// WHY 固定前缀:`nexus-v1.token=<value>` 让 Rust relay 与浏览器原生
-/// `new WebSocket(url, ['nexus-v1.token=...'])` 走同一协议解析路径,
-/// 服务端优先读该 header(后端已实现),token 不再进 URL。
-const WS_SUBPROTOCOL_PREFIX: &str = "nexus-v1.token=";
+/// WHY 短前缀 + base64url(2026-07-12):旧 `nexus-v1.token=<value>` 含 `.` 与
+/// `=`,都违反 RFC 7230 §3.2.6 token ABNF,Chromium ≥149 严格校验,旧格式在
+/// ChatArea mount 时抛 SyntaxError。修复:短前缀 `nxv1-`(`-` 在 tchar 内) +
+/// base64url 编码 token(字符集 `[A-Za-z0-9-_]` 全在 tchar 内)。Rust 的
+/// `HeaderValue` 也只接受 tchar 字符,这样选是 browser + tungstenite + http::HeaderValue
+/// 三方交集,免得改了一边另两边误判。
+const WS_SUBPROTOCOL_PREFIX: &str = "nxv1-";
+
+/// 把 token base64url 编码(无 padding)以符合 RFC 7230 token ABNF。
+fn encode_subprotocol_token(token: &str) -> String {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+    URL_SAFE_NO_PAD.encode(token.as_bytes())
+}
 
 /// 把 tungstenite 错误映射成前端友好的分类。
 ///
@@ -86,10 +96,15 @@ pub async fn ws_open(
 
     // 构造握手 Request,设 Sec-WebSocket-Protocol 子协议头。
     // token 不进 URL → 不进代理 access log / 错误堆栈 / 命令行 ps 输出。
+    // 2026-07-12 改造:token 先 base64url 编码,前缀改 `nxv1-`,全字符在
+    // RFC 7230 §3.2.6 token ABNF 的 tchar 内,Chromium ≥149 严格校验通过。
     let mut request = (&url)
         .into_client_request()
         .map_err(|e| format!("ws build request failed: {e}"))?;
-    let subproto_value = format!("{WS_SUBPROTOCOL_PREFIX}{token}");
+    let subproto_value = format!(
+        "{WS_SUBPROTOCOL_PREFIX}{}",
+        encode_subprotocol_token(&token)
+    );
     request.headers_mut().insert(
         "Sec-WebSocket-Protocol",
         HeaderValue::from_str(&subproto_value)
@@ -198,10 +213,14 @@ mod tests {
     fn test_ws_subprotocol_prefix_format() {
         // token 不应包含逗号 / 换行等 HTTP header-value 非法字符;
         // 真正的 token 来源是配置 / 环境变量,不在这里校验。约束:
-        // 拼接后的 header value 必须是 ASCII 可见字符。
+        // 拼接后的 header value 必须是 ASCII 可见字符,且符合 RFC 7230
+        // §3.2.6 token ABNF(= / . 不允许)。2026-07-12 改用 `nxv1-<b64u>`。
         let token = "abc123";
-        let value = format!("{WS_SUBPROTOCOL_PREFIX}{token}");
-        assert_eq!(value, "nexus-v1.token=abc123");
+        let value = format!(
+            "{WS_SUBPROTOCOL_PREFIX}{}",
+            encode_subprotocol_token(token)
+        );
+        assert_eq!(value, "nxv1-YWJjMTIz");
         assert!(HeaderValue::from_str(&value).is_ok());
     }
 
