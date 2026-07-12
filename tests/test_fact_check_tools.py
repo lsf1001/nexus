@@ -75,9 +75,7 @@ class TestToolInvocations:
             {"text": "明天是2026年7月11日 星期五"},
         )
         # Result is JSON-serialized dict; checks substring for failure markers
-        assert (
-            "false" in result.lower() or "conflict" in result.lower() or '"ok": false' in result.lower()
-        )
+        assert "false" in result.lower() or "conflict" in result.lower() or '"ok": false' in result.lower()
 
     @pytest.mark.asyncio
     async def test_verify_claims_correct(self) -> None:

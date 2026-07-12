@@ -305,13 +305,10 @@ def test_user_identity_question_rule_blocks_preference_field() -> None:
         "回答'我是谁'时只能用 AGENTS.md 里的身份字段,不能用偏好/职业/兴趣填空"
     )
     # 必须明确禁止"水果偏好"作为"我是谁"的答案(具体例子, 防退化)
-    assert "水果" in content and "不是身份" in content, (
-        "用户身份问答规则必须明确禁止 LLM 用'水果'等偏好字段答'我是谁'"
-    )
+    assert "水果" in content and "不是身份" in content, "用户身份问答规则必须明确禁止 LLM 用'水果'等偏好字段答'我是谁'"
     # 必须明确"没有就老实说不知道"的兜底
     assert "没记下你的名字" in content or "不知道" in content, (
-        "用户身份问答规则必须有兜底:AGENTS.md 没有身份字段时,"
-        "LLM 必须直接说不知道,不许拿任何非身份字段凑答案"
+        "用户身份问答规则必须有兜底:AGENTS.md 没有身份字段时,LLM 必须直接说不知道,不许拿任何非身份字段凑答案"
     )
 
 
@@ -338,17 +335,13 @@ def test_fact_block_contains_few_shot_and_first_word_constraint() -> None:
         content = _capture_sm_content(req)
 
     # few-shot 示例段必须存在
-    assert "few-shot" in content or "示例" in content, (
-        "FACT 块必须含 few-shot 身份问答示例,引导 LLM 模仿正确格式"
-    )
+    assert "few-shot" in content or "示例" in content, "FACT 块必须含 few-shot 身份问答示例,引导 LLM 模仿正确格式"
     # 第一 token 强约束段必须存在
     assert "第一句的第一个 token" in content or "第一句" in content, (
         "FACT 块必须含 first-token 约束,强制 LLM 以「我是 Nexus」开头"
     )
     # 强建议必须含 get_model_info 工具
-    assert "get_model_info" in content, (
-        "FACT 块必须告诉 LLM: 答身份类问题时先调 get_model_info 工具拿实时数据"
-    )
+    assert "get_model_info" in content, "FACT 块必须告诉 LLM: 答身份类问题时先调 get_model_info 工具拿实时数据"
     # 强化措辞: 明确禁止 MiniMax-M3 / Claude / Agnes 这些训练记忆默认值
     assert "MiniMax-M3" in content and "Claude" in content and "Agnes" in content, (
         "FACT 块必须在禁止列表里点名 MiniMax-M3 / Claude / Agnes 等训练记忆默认值"
@@ -381,9 +374,7 @@ def test_user_message_injects_reminder_on_identity_question() -> None:
 
     async def capture_identity_handler(r: ModelRequest) -> AIMessage:
         last = r.messages[-1]
-        captured_user_content["text"] = (
-            last.content if isinstance(last.content, str) else str(last.content)
-        )
+        captured_user_content["text"] = last.content if isinstance(last.content, str) else str(last.content)
         return AIMessage(content="(stub)")
 
     with patch(
@@ -395,8 +386,7 @@ def test_user_message_injects_reminder_on_identity_question() -> None:
 
     text = captured_user_content.get("text") or ""
     assert "System Reminder" in text, (
-        "身份问题应在 user message 开头 inject [System Reminder], "
-        f"实际 user content 前 200 字符: {text[:200]}"
+        f"身份问题应在 user message 开头 inject [System Reminder], 实际 user content 前 200 字符: {text[:200]}"
     )
     assert "MiniMax-M3" in text, "[System Reminder] 必须含当前驱动模型 name"
     assert "我是 Nexus" in text, "[System Reminder] 必须明确「第一句以我是 Nexus 开头」"
@@ -411,9 +401,7 @@ def test_user_message_injects_reminder_on_identity_question() -> None:
 
     async def capture_normal_handler(r: ModelRequest) -> AIMessage:
         last = r.messages[-1]
-        captured_user_content["text"] = (
-            last.content if isinstance(last.content, str) else str(last.content)
-        )
+        captured_user_content["text"] = last.content if isinstance(last.content, str) else str(last.content)
         return AIMessage(content="(stub)")
 
     with patch(
@@ -424,7 +412,5 @@ def test_user_message_injects_reminder_on_identity_question() -> None:
 
     text2 = captured_user_content.get("text") or ""
     assert "System Reminder" not in text2, (
-        "非身份问题不应 inject reminder,避免污染普通 query. "
-        f"实际 user content: {text2[:200]}"
+        f"非身份问题不应 inject reminder,避免污染普通 query. 实际 user content: {text2[:200]}"
     )
-
