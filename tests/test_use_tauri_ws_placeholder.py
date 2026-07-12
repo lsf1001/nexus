@@ -18,6 +18,9 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK_SRC = REPO_ROOT / "frontend" / "src" / "hooks" / "useTauriWs.ts"
 CHATAREA_SRC = REPO_ROOT / "frontend" / "src" / "components" / "ChatArea.tsx"
+# 2026-07-12 Plan 2 Phase 1:ChatArea 拆解,原 switch 改为 wsHandlers.ts 里
+# `handleThinking` / `handleChunk` 两个纯函数。spinner-early 测试跟到这个新位置。
+WS_HANDLERS_SRC = REPO_ROOT / "frontend" / "src" / "components" / "ChatArea" / "hooks" / "wsHandlers.ts"
 DIST_ASSETS = REPO_ROOT / "frontend" / "dist" / "assets"
 
 # DMG 安装位置有两个,任何一处跑旧 build 都会让用户继续转圈。E2E 2026-06-28
@@ -135,20 +138,30 @@ def test_chunk_thinking_stop_spinner_early() -> None:
     QualityPipeline + chain overhead(20-30s)才发。这期间用户看到 spinner
     一直转,以为"卡死"。修复:thinking / 第一个 chunk 就 setIsLoading(false),
     spinner 立即停,内容继续 streaming 累积。done 仍会再 disarm 一次(幂等)。
-    """
-    src = CHATAREA_SRC.read_text(encoding="utf-8")
 
-    def _case_body(event: str) -> str:
-        # 从 ``case 'xxx': {`` 开始,抓直到下一个 ``break;``(case 体内的最后一个)。
-        # 非贪婪 [\s\S]+? 在 \s*break; 锚点前停下,不会被 case 内的嵌套 {} 干扰。
-        m = re.search(rf"case\s+['\"]{event}['\"]\s*:\s*\{{([\s\S]+?)\s*break\s*;", src)
-        assert m, f"未找到 case '{event}'"
+    2026-07-12 Plan 2 Phase 1 拆解后:断言位置从 ChatArea.tsx 的 switch case
+    改为 wsHandlers.ts 里的 handleThinking / handleChunk 两个函数体;断言形式
+    也从 ``case 'thinking': { ... break; }`` 切到 ``export const handleThinking
+    = ... ... = 下一个 ``export const handle...`` 或文件尾。
+    """
+    src = WS_HANDLERS_SRC.read_text(encoding="utf-8")
+
+    def _func_body(event: str) -> str:
+        # 抓 ``export const handle<event>: WsHandler = `` 开始,直到下一个
+        # ``export const `` 或文件尾(非贪婪)。
+        m = re.search(
+            rf"export\s+const\s+handle{event}\s*:\s*WsHandler\s*=\s*\(([\s\S]+?)(?=\n\nexport\s+const\s+|\Z)",
+            src,
+        )
+        assert m, f"未找到 handle{event} 函数体(src 结构变了?)"
         return m.group(1)
 
-    for event in ("thinking", "chunk"):
-        body = _case_body(event)
-        assert "setIsLoading(false)" in body, f"{event} case 必须 setIsLoading(false),否则 streaming 期间用户以为没回复"
-        assert "disarm" in body, f"{event} case 必须 disarm watchdog"
+    for event in ("Thinking", "Chunk"):
+        body = _func_body(event)
+        assert "setIsLoading(false)" in body, (
+            f"handle{event} 必须 setIsLoading(false),否则 streaming 期间用户以为没回复"
+        )
+        assert "disarm" in body, f"handle{event} 必须 disarm watchdog"
 
 
 def test_model_switch_updates_store_modelname() -> None:

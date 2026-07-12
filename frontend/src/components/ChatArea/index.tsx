@@ -1,0 +1,239 @@
+/**
+ * ChatArea 顶层编排:协调 hooks + 调用子组件,业务实现全部委托给 ./*.tsx
+ * 与 ./hooks/*.ts;只承载 wiring 与 React DOM 顶层布局。
+ *
+ * 不变行为与原 818 行单文件等价(resetTrigger / WS 鉴权 / watchdog / 滚动对齐
+ * 都保留)。
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useStore } from '../../store/useStore';
+import { useWsConnection } from '../../hooks/useWsConnection';
+import { useLoadingWatchdog } from '../../hooks/useLoadingWatchdog';
+import { getApiBase, getWsToken } from '../../lib/api';
+
+import { ClarificationForm } from './ClarificationForm';
+import { ConfirmationCard } from './ConfirmationCard';
+import { Composer } from './Composer';
+import { EmptyState } from './EmptyState';
+import { ErrorBanner } from './ErrorBanner';
+import { MessageList } from './MessageList';
+import { useAutoScroll } from './hooks/useAutoScroll';
+import { useChatAreaActions } from './hooks/useChatAreaActions';
+import { useChatSend } from './hooks/useChatSend';
+import { type ChatStreamActions, useChatStream } from './hooks/useChatStream';
+import { useWsMessageRouter, type WsRouterCtx } from './hooks/useWsMessageRouter';
+import type { LastError, PendingClarification } from './types';
+
+export interface ChatAreaProps {
+  resetTrigger?: number;
+  onConnectedChange?: (connected: boolean) => void;
+  onSessionCreated?: (sessionId: string, title: string) => void;
+  conversationId?: string | null;
+  connectionState?: 'connecting' | 'online' | 'offline';
+  activeConversationTitle?: string | null;
+  conversationCount?: number;
+}
+
+export function ChatArea({
+  resetTrigger,
+  onConnectedChange,
+  onSessionCreated,
+  conversationId: conversationIdProp,
+  connectionState = 'connecting',
+  activeConversationTitle = null,
+  conversationCount = 0,
+}: ChatAreaProps) {
+  const [input, setInput] = useState('');
+  const [lastError, setLastError] = useState<LastError | null>(null);
+  const [pendingClarification, setPendingClarification] =
+    useState<PendingClarification | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const resetTriggerRef = useRef(resetTrigger ?? 0);
+  const sessionIdRef = useRef<string | null>(conversationIdProp);
+
+  // store 选择器 — useWsMessageRouter 的 ctx 不能拿这些 selector(其引用每次
+  // render 都会变),所以 router 内部读 useStore.getState()。
+  const isLoading = useStore((s) => s.isLoading);
+  const wsConnected = useStore((s) => s.wsConnected);
+  const showThinking = useStore((s) => s.showThinking);
+  const setIsLoading = useStore((s) => s.setIsLoading);
+  const setWsConnected = useStore((s) => s.setWsConnected);
+  const displayMessages = useStore((s) => s.conversationMessages);
+  const clearConversationMessages = useStore((s) => s.clearConversationMessages);
+  const modelName = useStore((s) => s.modelName);
+  const pendingConfirmation = useStore((s) => s.pendingConfirmation);
+  const setPendingConfirmation = useStore((s) => s.setPendingConfirmation);
+
+  useEffect(() => {
+    sessionIdRef.current = conversationIdProp;
+  }, [conversationIdProp]);
+
+  // === resetTrigger 同步状态 ===
+  useEffect(() => {
+    if (resetTrigger && resetTrigger > resetTriggerRef.current) {
+      clearConversationMessages();
+      setInput('');
+      setPendingClarification(null);
+      setPendingConfirmation(null);
+      setLastError(null);
+    }
+    resetTriggerRef.current = resetTrigger ?? 0;
+  }, [resetTrigger, clearConversationMessages, setPendingConfirmation]);
+
+  // === 消息流操作(替代原 messagesRef mutate) ===
+  const stream: ChatStreamActions = useChatStream();
+
+  // === watchdog:30s 无终止帧强制清 loading ===
+  const { arm: armWatchdog, disarm: disarmWatchdog } = useLoadingWatchdog({
+    setIsLoading,
+    setLastError,
+  });
+
+  // === WS 连接 — 鉴权走 subprotocol ===
+  // 关键:WsRouterCtx 对象每次 render 都重算,会让 dispatcher(用 useCallback([ctx])
+  // 记忆)每次都变 → useWsConnection 的 effect 会把它当 onMessage 变化,触发
+  // 重连。修复:用 useMemo 包 ctx,稳定上游引用;useChatStream 的 callback
+  // 内部都用 useCallback([...只读 store/state]),stream 引用稳定可入 deps。
+  const wsCtx = useMemo<WsRouterCtx>(
+    () => ({
+      stream,
+      setLastError,
+      setIsLoading,
+      setPendingClarification,
+      setPendingConfirmation,
+      disarmWatchdog,
+      onSessionCreated,
+    }),
+    [stream, setLastError, setIsLoading, setPendingClarification, setPendingConfirmation, disarmWatchdog, onSessionCreated],
+  );
+  const handleWsMessage = useWsMessageRouter(wsCtx);
+
+  const wsBase = getApiBase().replace(/^http/, 'ws');
+  const wsUrl = `${wsBase}/api/ws`;
+  const wsToken = getWsToken();
+  const {
+    connected: wsHookConnected,
+    send: wsSend,
+    getReadyState,
+  } = useWsConnection({
+    url: wsUrl,
+    token: wsToken,
+    onMessage: handleWsMessage,
+  });
+
+  const getReadyStateRef = useRef(getReadyState);
+  getReadyStateRef.current = getReadyState;
+
+  useEffect(() => {
+    setWsConnected(wsHookConnected);
+    onConnectedChange?.(wsHookConnected);
+  }, [wsHookConnected, setWsConnected, onConnectedChange]);
+  // 把下游 send 暴露给上游 input/textarea — 用 ref 桥避免每次 render 重建 sendRef
+  const sendFn = useCallback(
+    (msg: Parameters<typeof wsSend>[0]) => wsSend(msg),
+    [wsSend],
+  );
+
+  // === 自动滚动(rAF) ===
+  useAutoScroll({
+    trigger: [displayMessages.length, isLoading],
+    containerRef: messagesEndRef,
+  });
+
+  // === 单一发送入口 ===
+  const send = useChatSend({
+    wsConnected,
+    getReadyState: getReadyStateRef.current,
+    getSessionId: () => sessionIdRef.current,
+    send: sendFn,
+    setIsLoading,
+    setLastError,
+    clearInput: () => setInput(''),
+    armWatchdog,
+    pushUserAndPlaceholder: stream.pushUserAndPlaceholder,
+  });
+
+  // 顶层动作集成(键盘 / 速记 / 复制 / 重试)。
+  const { handleKeyDown, insertPrompt, handleCopyMessage, handleRetry } =
+    useChatAreaActions({
+      inputRef,
+      setInput,
+      setIsLoading,
+      setLastError: () => setLastError(null),
+      send,
+      stream,
+      armWatchdog,
+    });
+
+  const isIdle = displayMessages.length === 0 && !isLoading;
+  const composerPlaceholder = wsConnected
+    ? '告诉 Nexus 你想完成什么'
+    : connectionState === 'offline'
+      ? '本地助手离线，请先在设置中检查模型'
+      : '正在连接本地助手...';
+
+  return (
+    <div className="chat-area">
+      <div className="chat-scroll">
+        {isIdle ? (
+          <EmptyState
+            modelName={modelName}
+            connectionState={connectionState}
+            activeConversationTitle={activeConversationTitle}
+            conversationCount={conversationCount}
+            onInsertPrompt={insertPrompt}
+          />
+        ) : (
+          <MessageList
+            messages={displayMessages}
+            showThinking={showThinking}
+            isLoading={isLoading}
+            onCopy={handleCopyMessage}
+          />
+        )}
+        {pendingClarification && (
+          <ClarificationForm
+            question={pendingClarification.question}
+            options={pendingClarification.options}
+            onSubmit={send}
+            onCancel={() => setPendingClarification(null)}
+          />
+        )}
+        {pendingConfirmation && (
+          <ConfirmationCard
+            interruptId={pendingConfirmation.interruptId}
+            eventId={pendingConfirmation.eventId}
+            actions={pendingConfirmation.actions}
+            canSend={wsConnected && getReadyState() === 1}
+            wsSend={sendFn}
+            onResolved={() => setPendingConfirmation(null)}
+          />
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {lastError && (
+        <ErrorBanner
+          lastError={lastError}
+          onRetry={handleRetry}
+          onClose={() => setLastError(null)}
+        />
+      )}
+
+      <Composer
+        value={input}
+        onChange={setInput}
+        onSubmit={() => send(input)}
+        onKeyDown={handleKeyDown}
+        placeholder={composerPlaceholder}
+        disabled={!wsConnected}
+        isLoading={isLoading}
+        inputRef={inputRef}
+      />
+    </div>
+  );
+}
+
+export default ChatArea;

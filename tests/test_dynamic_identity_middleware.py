@@ -428,4 +428,3 @@ def test_user_message_injects_reminder_on_identity_question() -> None:
         f"实际 user content: {text2[:200]}"
     )
 
-    
