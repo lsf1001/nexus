@@ -382,3 +382,50 @@ ORDER BY rubric, fact_check_status;
 ```
 
 报警：当 `rubric='fact_check'` 的 fail 数突然上升，意味着模型开始系统性说错日期/星期/数学/单位 — 通常是 LLM provider 升级或路由变化导致，不要当「judge 太严」调，要去查上游。
+
+## 11. WS 鉴权协议 (2026-07 收紧)
+
+### 11.1 token 不再进 URL
+
+旧:`ws://host:30000/api/ws?token=<secret>` — 代理 access log / 浏览器历史 / 错误堆栈都会记下 token。
+
+新:`Sec-WebSocket-Protocol: nexus-v1.token=<secret>` 子协议头。RFC 6455 协商机制,服务端从 upgrade 头解析,token 不在任何 URL 字段。
+
+### 11.2 双路径兼容
+
+| 路径 | 优先级 | 开关 | 适用 |
+|---|---|---|---|
+| `Sec-WebSocket-Protocol: nexus-v1.token=...` | 高 | 始终启用 | 生产 |
+| `?token=...` query string | 低 | `NEXUS_WS_AUTH_QUERY_FALLBACK` (默认 true) | 旧客户端 / 调试 |
+
+下个 major 版本(`2.0.0`)删除 query fallback。
+
+### 11.3 客户端写法
+
+**浏览器原生:**
+```typescript
+new WebSocket('ws://host:30000/api/ws', ['nexus-v1.token=xxx']);
+```
+
+**Tauri (Rust relay):**
+```rust
+// ws_relay.rs
+let mut request = (&url).into_client_request()?;
+request.headers_mut().insert(
+    "Sec-WebSocket-Protocol",
+    HeaderValue::from_str(&format!("nexus-v1.token={token}"))?,
+);
+tokio_tungstenite::connect_async(request).await?;
+```
+
+### 11.4 配置要求
+
+- 后端 `NEXUS_WS_TOKEN` 必填(空字符串 = 拒绝所有客户端)
+- 前端 Vite `VITE_NEXUS_WS_TOKEN` 必填,缺失时 `getWsToken()` 抛 Error
+- 打包脚本须把后端 `NEXUS_WS_TOKEN` 注入前端构建期 env
+
+### 11.5 排错
+
+- **握手 close 4001 "未授权"**:token 不匹配 / 服务端 `ws_token` 为空
+- **subprotocol 返回空 `''`**:客户端发的 subprotocol 格式错(必须 `nexus-v1.token=...` 前缀)
+- **Tauri 模式 `ws token is empty`**:Rust relay 检测到空 token,前端 `getWsToken()` 应已先抛

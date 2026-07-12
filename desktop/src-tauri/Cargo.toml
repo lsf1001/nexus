@@ -25,6 +25,9 @@ env_logger = "0.11"
 thiserror = "1"
 libc = "0.2"
 once_cell = "1"
+# tungstenite 0.24 内部用 http::HeaderValue;构造 Request headers 时复用同一类型,
+# 避免 token 拼接后 HeaderValue::from_str 失败路径上类型不对。
+http = "1"
 
 [features]
 default = ["custom-protocol"]

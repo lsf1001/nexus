@@ -5,7 +5,59 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
-## [Unreleased] — fact-check 管线(21 commit):确定性拦截日期/星期/数学/单位/汇率错误
+## [Unreleased] — WS 鉴权收紧 + 密钥脱敏 + ChatArea 拆解(2026-07-12)
+
+WS 鉴权 token 与 API key 存在三处泄密:
+
+1. `frontend/src/lib/api.ts:1` 硬编码 `DEFAULT_TOKEN = 'nexus-default-token'`,被 Vite 打进 bundle,任何反编译/查看源代码都能拿到。
+2. `frontend/src/components/ChatArea.tsx`(原 818 行单文件,Plan 2 已拆解 — 见下文 §ChatArea 拆解) 把 token 拼到 WS URL `?token=...`,走代理 access log / 浏览器历史 / 错误堆栈。
+3. `desktop/SetupView.tsx:92` 把用户输入的 API key 尾部 4 位拼成 `••••••XXXX` 写到右键菜单 — 屏幕共享 / 录屏时等同明文,且右键菜单由 `openContextMenuAt` 持久化到组件状态。
+
+### Root Cause
+
+- **WS 鉴权协议选型**:RFC 6455 Sec-WebSocket-Protocol 子协议协商已存在,后端用 `Authorization: Bearer` 风格需要单独 HTTP 通道,无法套 WS。
+- **降级心理**:沿用 `?token=...` query string 是低门槛选择,后端实现也最简单,但忽略了路径上每个中间件的可观测性。
+- **"显示尾 4 位是 UI 友好"**:在密码管理器/一次性输入场景可以接受,但对存续会话的 API key 不适用。
+
+### Changed (2026-07-12)
+
+- **`nexus/backend/api/ws/auth.py`** — 新增 `_extract_ws_token(websocket)` 从 `Sec-WebSocket-Protocol` header 解析 `nexus-v1.token=<value>`;query string 走 fallback(由 `NEXUS_WS_AUTH_QUERY_FALLBACK` 控制开关,默认 `true`)。`require_token` 全程走 `_hmac_compare` (constant-time,防时序攻击)
+- **`nexus/backend/main.py:397-422`** — `websocket_endpoint` 改用 subprotocol 鉴权;客户端发 `nexus-v1.token=...` 时回 `accept(subprotocol="nexus-v1")`,否则裸 accept。`import hmac` 已删
+- **`desktop/src-tauri/src/ws_relay.rs`** — `ws_open` 新增 `token: String` 参数,用 `tungstenite::client::IntoClientRequest` 构造 Request,在 `Sec-WebSocket-Protocol` header 注入 `nexus-v1.token=<token>`。空 token 提前 fail。新增 `classify_ws_error()` 把 tungstenite error 映射成 UI 友好分类(不 echo raw error),杜绝 stack/URL 泄漏
+- **`desktop/src-tauri/Cargo.toml`** — 新增 `http = "1"` 依赖(用于 `HeaderValue` 类型,与 tungstenite 共用)
+- **`frontend/src/lib/api.ts`** — 删除 `DEFAULT_TOKEN` 常量;新增 `getWsToken()` 强制 `VITE_NEXUS_WS_TOKEN` 非空(空时抛 Error 引导配置);`apiFetch` 仅在 env 注入时设 Authorization Bearer header
+- **`frontend/src/lib/secret.ts`** (新增) — `maskSecret()` 默认完全隐藏;`secretLength()` 返回字符数;`isSecretField()` 字段白名单(`api_key/token/password/...`)
+- **`frontend/src/hooks/useTauriWs.ts`** — `token` 作为独立 invoke 参数传给 Rust relay;`String(e)` 替换为统一文案 `WS 启动失败,请检查后端状态和 token 配置`
+- **`frontend/src/hooks/useWebSocket.ts`** — 新增 `subprotocols?: string[]` 选项,原生 `new WebSocket(url, subprotocols)`;非 JSON 文本帧丢弃(避免触发下游误分支)
+- **`frontend/src/hooks/useWsConnection.ts`** — 适配层接受 `token`,按环境分派(Tauri: invoke 参数;浏览器: subprotocols)
+- **`frontend/src/components/ChatArea.tsx:299`** — wsUrl 不再含 `?token=`;改传 `token` 给适配层
+- **`frontend/src/components/desktop/SetupView.tsx`** — 右键菜单文本改为 `已设置(N 字符)` / `(空)`,不显示尾部字符;`saveModel` 加 `response.ok` 分支,区分 401/422/5xx 给可执行提示
+
+### Strategy:三层防御
+
+1. **协议层**:Sec-WebSocket-Protocol subprotocol 优先,token 不在 HTTP 任何字段(URL / header / body)出现,RFC 6455 标准
+2. **传输层**:token 不进 Vite bundle(env 注入)、不进 URL、不进代理 access log
+3. **UI 层**:任何敏感字段显示走 `maskSecret()` / `secretLength()`,无 `slice(-4)` 反模式
+
+### Backward Compatibility
+
+- `NEXUS_WS_AUTH_QUERY_FALLBACK` 默认 `true`,旧客户端 `?token=...` URL 仍可用
+- 下个 major 版本 (`2.0.0`) 删除 query fallback
+- SetupView 改动向后兼容,旧版本已设的 API key 不需重新配置
+
+### Test Coverage
+
+- `tests/test_ws_auth_subprotocol.py`(新增 9 测试):subprotocol 接受/拒绝、priority over query、fallback env 控制、空 expected、多值 subprotocol 解析、malformed value
+- `desktop/src-tauri/src/ws_relay.rs` `tests` 模块(新增 3 测试):subprotocol prefix 格式、CRLF 注入防御、错误分类不泄漏
+- 后端:**22/22 WS+auth 测试全过**(`test_ws_auth_subprotocol` + `test_ws_resilience` + `test_rest_auth`)
+- Rust:**4/4 ws_relay 测试全过**
+- 前端:`tsc --noEmit` 干净,`eslint .` 干净,`vite build` 通过(372KB → 115KB gzip)
+
+### Why This Matters
+
+WS token 是 gateway 唯一的访问控制 — 泄漏 = 任何人能以 Nexus 身份发任何消息、读所有会话。SetupView API key 直连第三方 LLM 服务,泄漏 = 用户账单被盗刷。三处都是低门槛修高收益。
+
+---
 
 ### Problem
 
@@ -60,6 +112,31 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 ### Why This Matters
 
 下次用户问"明天/下周一/汇率/算术",Nexus 不再依赖 LLM 心算 — 工具是首选(快速自检),提示是次选(行为约束),中间件是兜底(强制拦截)。哪怕模型严重退化 / 升级出 bug / 网络挂掉,确定性事实不会编出去。
+
+---
+
+### §ChatArea 拆解 + 流式滚动性能(818 行 → 14 个子文件)
+
+`frontend/src/components/ChatArea.tsx` 原 818 行单文件,9 类业务糅合:172 行 switch case、`scrollIntoView` 每个 chunk 无差别触发、`messagesRef.current.push(...)` mutate 反模式、子组件挤同一文件。变更文件 > 200 行后 Review diff 难度指数上升。
+
+**Changed (2026-07-12,Phase 1)**:
+
+- **`frontend/src/components/ChatArea.tsx` 删除**(原 813 行)。拆为 `frontend/src/components/ChatArea/` 目录下 14 个子文件,`ChatArea/index.tsx` 顶层编排(239 行)。Vite 文件夹导入自动解析 `'../ChatArea'` → `ChatArea/index.tsx`,`desktop/ChatView.tsx` 的 import 路径无需改动。
+- **`ChatArea/hooks/useChatStream.ts`** (149 行)— 替代 `messagesRef` mutate 反模式。`ensureAssistantPlaceholder / appendToAssistant / pushUserAndPlaceholder / replaceAssistantWithPlaceholder / reset / snapshot` 六类操作,内部读 `useStore.getState().conversationMessages` 后用 `setConversationMessages(next)` 触发订阅。
+- **`ChatArea/hooks/wsHandlers.ts`** (159 行)— 9 个 handler 纯函数 + `noop` 兜底。`(ev: StreamEvent, ctx: WsRouterCtx) => void`,便于后续 vitest 单测。
+- **`ChatArea/hooks/useWsMessageRouter.ts`** (76 行)— `HANDLERS: Readonly<Record<StreamEvent['type'], WsHandler>>` 派发表 + dispatcher hook。type 不在表内时 noop。
+- **`ChatArea/hooks/useChatSend.ts`** (90 行)— 单 send 入口 + `getReadyState() === 1` 闸门 + watchdog arm + user+placeholder push。
+- **`ChatArea/hooks/useAutoScroll.ts`** (67 行)— `requestAnimationFrame` 节流的 scrollIntoView,`bottomThreshold=80` 避免用户拉历史时硬拽回底。
+- **`ChatArea/hooks/useChatAreaActions.ts`** (84 行)— `handleKeyDown / insertPrompt / handleCopyMessage / handleRetry` 集中。
+- **子组件 6 个**(`EmptyState` 99 / `MessageList` 49 / `ClarificationForm` 101 / `ConfirmationCard` 74 / `ErrorBanner` 52 / `Composer` 79)— 每个 ≤ 101 行,只接 props,无 store 引用(便于 React.memo)。
+- **`ChatArea/index.tsx`** (239 行)— 顶层编排:`useChatStream → useMemo(WsRouterCtx) → useWsMessageRouter → useWsConnection → useChatSend → useChatAreaActions → useAutoScroll`。`wsCtx` 用 `useMemo` 注入保证 dispatcher 引用稳定 — 否则 useWsConnection 每次 render 会重连。
+- **`tests/test_use_tauri_ws_placeholder.py::test_chunk_thinking_stop_spinner_early`** — 断言路径从 `ChatArea.tsx` 改到 `wsHandlers.ts`,断言形式从 `case 'thinking': { ... break; }` 改为 `export const handleThinking: WsHandler = (...)`。UX 不变量保留(`setIsLoading(false)` + `disarm` 都在 thinking/chunk 入口触发)。
+
+**Why This Matters**:14 文件后单 PR 平均 diff ≤ 50 行;handler 是纯函数便于 vitest;RAF 节流 + bottomThreshold 让用户拉历史不被持续拽回。
+
+**Phase 2-5 (后续轮次,留作 task #20 / #21)**: `React.memo(ChatBubble)` + chunk-rate 隔离、`messagesRef` 完全迁出、vitest 单测 `useWsMessageRouter / useChatSend`。
+
+**Skip**: `react-virtuoso (50KB)` — 无 perf profile 数据,过早引入会增加 bundle。
 
 ---
 

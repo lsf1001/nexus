@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { apiFetch } from '../../lib/api';
 import { openContextMenuAt } from '../../lib/useContextMenuTrigger';
+import { secretLength } from '../../lib/secret';
 
 interface SetupViewProps {
   onDone: () => void;
@@ -14,12 +15,22 @@ export function SetupView({ onDone }: SetupViewProps) {
   const [status, setStatus] = useState('填写 API 密钥后测试连接');
   const [isSaving, setIsSaving] = useState(false);
 
+  /**
+   * API 密钥已配置时的右键菜单文本 — **完全隐藏**,不显示尾部 4 位。
+   * WHY:右键菜单由 openContextMenuAt 持久化到状态(可能进 store / 日志),
+   *     屏幕共享 / 录屏时也容易泄漏明文。空态直接 "(空)";有值时
+   *     显示"已设置 (N 字符)"作为状态提示,不给任何字符。
+   */
+  const apiKeyContextLabel = apiKey
+    ? `已设置(${secretLength(apiKey)} 字符)`
+    : '(空)';
+
   const saveModel = async () => {
     setIsSaving(true);
     setStatus('正在保存模型配置...');
 
     try {
-      await apiFetch('/api/models/default', {
+      const response = await apiFetch('/api/models/default', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -29,10 +40,28 @@ export function SetupView({ onDone }: SetupViewProps) {
           temperature: Number.parseFloat(temperature) || 0.7,
         }),
       });
-      setStatus('配置已保存，可以开始使用');
+      if (!response.ok) {
+        // 区分后端拒收(4xx)与后端故障(5xx),给用户更可执行的提示。
+        // WHY 不直接打 response.text():401/422 的 body 含后端错误码,
+        //   简单展示首行即可;空 body 也兜底。
+        const errText = (await response.text().catch(() => '')).trim();
+        const reason = errText ? `: ${(errText.split('\n')[0] ?? '').slice(0, 120)}` : '';
+        if (response.status === 401 || response.status === 403) {
+          setStatus(`鉴权失败,请检查后端 NEXUS_WS_TOKEN 配置${reason}`);
+        } else if (response.status === 422) {
+          setStatus(`参数被后端拒绝${reason}`);
+        } else if (response.status >= 500) {
+          setStatus(`后端服务异常(${response.status}),请稍后重试${reason}`);
+        } else {
+          setStatus(`保存失败(${response.status})${reason}`);
+        }
+        return;
+      }
+      setStatus('配置已保存,可以开始使用');
       onDone();
-    } catch {
-      setStatus('保存失败，请检查后端状态和 API 密钥');
+    } catch (_e) {
+      // 网络层错误(后端没起 / CORS / fetch 抛异常);不暴露 e 详情防止泄漏内部路径。
+      setStatus('保存失败,请检查后端状态和 API 密钥');
     } finally {
       setIsSaving(false);
     }
@@ -89,7 +118,7 @@ export function SetupView({ onDone }: SetupViewProps) {
             type="password"
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
-            onContextMenu={(e) => openContextMenuAt(e, apiKey ? '••••••' + apiKey.slice(-4) : '(空)', 'API 密钥')}
+            onContextMenu={(e) => openContextMenuAt(e, apiKeyContextLabel, 'API 密钥')}
           />
         </label>
         <label>

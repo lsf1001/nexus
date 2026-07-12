@@ -26,7 +26,7 @@ from __future__ import annotations
 
 # 重新导出所有公共符号,保持与旧 api/ws.py 一致的导入路径
 from ...db import add_message
-from .auth import require_token
+from .auth import _extract_ws_token, _hmac_compare, require_token
 from .finalize import (
     _finalize_after_stream,
     _handle_resume_frame,
@@ -66,6 +66,8 @@ __all__ = [
     "add_message",
     # 鉴权
     "require_token",
+    "_extract_ws_token",
+    "_hmac_compare",
     # 注册表
     "_ws_clients",
     "_clients_lock",

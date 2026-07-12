@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 
 interface UseWebSocketOptions<T> {
   url: string;
+  /** Sec-WebSocket-Protocol 子协议列表(2026-07 WS 鉴权改造)。
+   *  浏览器原生 `new WebSocket(url, subprotocols)` 第二参数,RFC 6455 协商。 */
+  subprotocols?: string[];
   onMessage: (data: T) => void;
   /** 当前运行环境是否启用浏览器 WebSocket。 */
   enabled?: boolean;
@@ -17,6 +20,7 @@ interface UseWebSocketOptions<T> {
 
 export function useWebSocket<T = unknown>({
   url,
+  subprotocols,
   onMessage,
   baseDelay = 1000,
   maxDelay = 30000,
@@ -58,7 +62,11 @@ export function useWebSocket<T = unknown>({
 
     const connect = () => {
       if (cancelledRef.current) return;
-      const ws = new WebSocket(url);
+      // subprotocols 传 `['nexus-v1.token=...']`,token 不进 URL;
+      // 服务端走 nexus.backend.api.ws.auth._extract_ws_token 解析。
+      const ws = subprotocols?.length
+        ? new WebSocket(url, subprotocols)
+        : new WebSocket(url);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -76,11 +84,19 @@ export function useWebSocket<T = unknown>({
       ws.onmessage = (event) => {
         const data = event.data;
         if (typeof data === 'string' && data === 'ping') return; // 忽略后端心跳
+        if (typeof data !== 'string') {
+          // Blob / ArrayBuffer — 后端 stream 协议约定只发 JSON 文本帧,
+          // 非文本帧一律丢弃,避免触发下游误分支。
+          return;
+        }
         try {
           onMessageRef.current(JSON.parse(data) as T);
         } catch {
-          // 非 JSON 消息（如纯文本），原样透传
-          onMessageRef.current(data as unknown as T);
+          // 非 JSON 文本帧(例如错误代理 HTML):丢弃,不透传。
+          // 历史 fallback 会把 raw data 当 T 传给 onMessage,
+          // ChatArea handleWsMessage switch on 'type' 找不到匹配 → 静默吞掉,
+          // 用户看不到任何反馈。直接丢弃更安全,后端 ping/pong 也走 JSON。
+          console.warn('ws dropped non-JSON frame');
         }
       };
 
@@ -105,7 +121,10 @@ export function useWebSocket<T = unknown>({
       clearTimers();
       wsRef.current?.close();
     };
-  }, [url, baseDelay, maxDelay, heartbeatInterval, reconnect, enabled]);
+    // subprotocols 依赖:useMemo 在 useWsConnection 层保证数组引用稳定,
+    // 但我们这里仍要"内容变了就连一次" → 用 join 后字符串作为依赖。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, subprotocols?.join('|'), baseDelay, maxDelay, heartbeatInterval, reconnect, enabled]);
 
   const send = (data: unknown) => {
     const ws = wsRef.current;

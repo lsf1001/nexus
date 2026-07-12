@@ -3,6 +3,8 @@ import { invoke, Channel } from '@tauri-apps/api/core';
 
 interface UseTauriWsOptions<T> {
   url: string;
+  /** WS 鉴权 token;走 Rust relay 时作为 invoke 参数独立传(2026-07 改造,token 不再进 URL)。 */
+  token: string;
   onMessage: (data: T) => void;
   enabled?: boolean;
 }
@@ -26,9 +28,14 @@ const WS_CLOSED = 3;
  *
  * 重连由 Rust supervisor 负责(进程级),不在前端重试,
  * 因为 sidecar 崩溃会自动重启,WS session 由 ws_close 显式关。
+ *
+ * 鉴权(2026-07 改造):token 不再拼到 URL ?token=,改作为 invoke 参数独立传;
+ * Rust relay 走 `Sec-WebSocket-Protocol: nexus-v1.token=<token>` 子协议头
+ * 完成 WS 升级握手(与浏览器原生 `new WebSocket(url, subprotocols)` 等价)。
  */
 export function useTauriWs<T = unknown>({
   url,
+  token,
   onMessage,
   enabled = true,
 }: UseTauriWsOptions<T>): UseTauriWsResult {
@@ -62,6 +69,7 @@ export function useTauriWs<T = unknown>({
 
         const sessionId = await invoke<string>('ws_open', {
           url: fullUrl,
+          token,
           onChunk: openChunk,
         });
         if (cancelled) {
@@ -76,10 +84,19 @@ export function useTauriWs<T = unknown>({
         // 带 error_code=ws_open_failed + content + retryable,
         // 前端 setLastError 能区分 'ws 启动失败'(retryable=true →
         // '暂时不可用')与 'LLM 错误'(retryable=false → '请求失败')。
+        //
+        // WHY 不直接 String(e):invoke 抛的 Error message 含 invoke 参数,
+        // 例如 `ws token is empty;请在启动时注入 NEXUS_WS_TOKEN` 或 stack。
+        // 这是用户输入/配置问题,用统一文案既不漏诊断,也避免泄露路径。
+        // WHY 用 console.warn 而非新建 logger:前端 console 已被 Vite / 浏览器
+        // devtools 收集,生产走 Tauri webview 时进 ~/.nexus/logs/webview-error.log
+        // (见 desktop/src-tauri/src/main.rs log_webview_error),足够定位。
+        // 不引入 logger 库,与现有"不造轮子"约定一致。
+        console.warn('ws_open failed', e);
         onMessageRef.current({
           type: 'error',
           error_code: 'ws_open_failed',
-          content: String(e),
+          content: 'WS 启动失败,请检查后端状态和 token 配置',
           retryable: true,
         } as unknown as T);
       }
@@ -93,7 +110,7 @@ export function useTauriWs<T = unknown>({
         invoke('ws_close', { sessionId }).catch(() => {});
       }
     };
-  }, [url, enabled]);
+  }, [url, token, enabled]);
 
   const send = async (data: unknown): Promise<void> => {
     const sessionId = sessionRef.current;

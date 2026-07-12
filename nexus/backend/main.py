@@ -1,5 +1,4 @@
 import asyncio
-import hmac
 import logging
 import os
 import threading
@@ -14,6 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from .agent import _reset_checkpointer_cache, create_agent
 from .api.ws import (
     _clients_lock,
+    _extract_ws_token,
+    _hmac_compare,
     _ws_clients,
     handle_websocket,
     require_token,
@@ -395,16 +396,30 @@ def _build_broadcast_to_ws(websocket: WebSocket):
 
 @app.websocket(f"{API_PREFIX}/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket 主端点：业务逻辑委托给 ``api.ws.handle_websocket``。"""
-    token = websocket.query_params.get("token")
+    """WebSocket 主端点：业务逻辑委托给 ``api.ws.handle_websocket``。
+
+    鉴权(2026-07 改造,见 :func:`nexus.backend.api.ws.auth._extract_ws_token`):
+
+    - 优先读 ``Sec-WebSocket-Protocol`` 头里 ``nexus-v1.token=<value>``,
+      token 不进 URL,不进代理 access log / 浏览器历史 / 错误堆栈。
+    - Fallback 读 ``?token=`` query string,由 ``NEXUS_WS_AUTH_QUERY_FALLBACK``
+      控制开关(默认 ``true``,下个 major 版本移除)。
+    - 任何路径都走 ``hmac.compare_digest`` 做常量时间比较,防时序攻击。
+    """
     expected = CONFIG.get("ws_token", "")
-    # 用 hmac.compare_digest 做常量时间比较,防时序攻击
-    # (Python 字符串 == 在长度不等时立即短路,理论上可推算 token 字符)
-    if not expected or not hmac.compare_digest(token or "", expected):
+    token = _extract_ws_token(websocket)
+    if not _hmac_compare(token, expected):
         await websocket.close(code=4001, reason="未授权")
         return
 
-    await websocket.accept()
+    # 选 subprotocol 时 echo 回客户端;若客户端用 fallback query,无 subprotocol 可选。
+    selected_subprotocol = "nexus-v1"
+    header_value = websocket.headers.get("sec-websocket-protocol", "")
+    has_nexus_subprotocol = any(p.strip().startswith("nexus-v1.token=") for p in header_value.split(","))
+    if has_nexus_subprotocol:
+        await websocket.accept(subprotocol=selected_subprotocol)
+    else:
+        await websocket.accept()
 
     # 懒构造 Agent：在子线程里跑，构造期间 /health 已经能 200。
     # 用一次性触发：一旦构造过就 noop。
