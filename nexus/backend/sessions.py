@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -46,9 +47,24 @@ class SessionManager:
 
     # ----- 透传到 db 的薄包装:供 Gateway(Gateway 是按 duck-typing 调这些方法的)使用 -----
 
-    def create_session(self, session_id: str, title: str | None = None, channel: str = "main") -> dict:
-        """创建会话。"""
-        return create_session(session_id, title=title, channel=channel)
+    def create_session(
+        self,
+        session_id: str,
+        title: str | None = None,
+        channel: str = "main",
+        account_id: str | None = None,
+        wechat_user_id: str | None = None,
+        channel_meta: dict[str, Any] | None = None,
+    ) -> dict:
+        """创建会话(Plan 5:透传 account_id / wechat_user_id / channel_meta)。"""
+        return create_session(
+            session_id,
+            title=title,
+            channel=channel,
+            account_id=account_id,
+            wechat_user_id=wechat_user_id,
+            channel_meta=channel_meta,
+        )
 
     def get_session(self, session_id: str) -> dict | None:
         """获取会话详情。"""
@@ -58,13 +74,18 @@ class SessionManager:
         """更新会话（Gateway 用它做"心跳"：仅触达 session,保持 in-memory 映射活跃）。"""
         return update_session(session_id, title=title)
 
-    def find_latest_session_by_user(self, user_id: str, channel: str = "wechat") -> str | None:
-        """查找 user_id 在指定 channel 上最近活跃的 session_id。
+    def find_latest_session_by_user(
+        self,
+        user_id: str,
+        channel: str = "wechat",
+        account_id: str | None = None,
+    ) -> str | None:
+        """查找 user_id 在指定 channel 上最近活跃的 session_id (Plan 5:account_id 可选透传)。
 
         Gateway 用它在后端重启后从 DB 重建 user_id -> session_id 映射,
         避免同一 IM 用户每次重启都建新 session 导致历史断流。
         """
-        return find_latest_session_by_user(user_id, channel=channel)
+        return find_latest_session_by_user(user_id, channel=channel, account_id=account_id)
 
     def build_prompt(self, session_id: str, user_message: str) -> dict:
         """构建带对话历史的 prompt。

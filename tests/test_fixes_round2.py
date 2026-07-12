@@ -18,7 +18,6 @@ os.environ.setdefault("NEXUS_HOME", tempfile.mkdtemp(prefix="nexus-test-"))
 from fastapi.testclient import TestClient
 
 from nexus.backend.db import (
-    add_message,
     create_session,
     find_latest_session_by_user,
     get_session,
@@ -89,15 +88,30 @@ def test_delete_active_with_valid_fallback_succeeds():
 
 
 def test_find_latest_session_by_user():
-    """修复 #5: find_latest_session_by_user 按 user_id 子串 + channel 匹配。"""
+    """修复 #5 (Plan 5 适配):find_latest_session_by_user 按 wechat_user_id 列等值匹配。
+
+    旧实现扫 ``messages.content LIKE`` 假设 user_id 嵌在消息正文里 — 实际生产
+    数据里 user_id 只在会话级别元信息,LIKE 子串匹配走错路。Plan 5 把查找迁到
+    ``sessions.wechat_user_id`` 列等值查询,本测试验证正确会话被命中、未知
+    user 返回 None。
+    """
     init_db()
     sid1 = str(uuid.uuid4())
     sid2 = str(uuid.uuid4())
-    create_session(sid1, title="微信 bob", channel="wechat")
-    create_session(sid2, title="微信 alice", channel="wechat")
-    add_message("m1", sid1, "user", "user_bob@x: 第一条")
-    add_message("m2", sid1, "user", "user_bob@x: 第二条")
-    add_message("m3", sid2, "user", "user_alice@x: 第一条")
+    create_session(
+        sid1,
+        title="微信 bob",
+        channel="wechat",
+        account_id="acc1",
+        wechat_user_id="bob",
+    )
+    create_session(
+        sid2,
+        title="微信 alice",
+        channel="wechat",
+        account_id="acc1",
+        wechat_user_id="alice",
+    )
 
     assert find_latest_session_by_user("bob", "wechat") == sid1
     assert find_latest_session_by_user("alice", "wechat") == sid2

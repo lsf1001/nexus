@@ -166,8 +166,14 @@ class Gateway:
                     exc,
                 )
 
+        # Plan 5 (2026-07-12):从 channel_id 解析 account_id,多账号场景下
+        # 区分同一 user_id 在不同账号的会话;格式 "wechat:wxid_xxx" → "wxid_xxx"。
+        # 找不到 ":" 时回退 None(单账号 / 老 fixture / WS 接口不依赖此字段)。
+        account_id = msg.channel_id.split(":", 1)[1] if ":" in msg.channel_id else None
         existing_sid = self._sessions.find_latest_session_by_user(  # type: ignore[attr-defined]
-            user_id=msg.user_id, channel=msg.channel_type.value
+            user_id=msg.user_id,
+            channel=msg.channel_type.value,
+            account_id=account_id,
         )
         if existing_sid:
             try:
@@ -187,8 +193,14 @@ class Gateway:
         new_sid = msg.session_id or str(uuid.uuid4())
         try:
             title = msg.content[:50] if msg.content else f"{msg.channel_type.value} 会话"
+            channel_meta = {"account_id": account_id} if account_id else None
             self._sessions.create_session(  # type: ignore[attr-defined]
-                new_sid, title=title, channel=msg.channel_type.value
+                new_sid,
+                title=title,
+                channel=msg.channel_type.value,
+                account_id=account_id,
+                wechat_user_id=msg.user_id if msg.channel_type.value == "wechat" else None,
+                channel_meta=channel_meta,
             )
         except Exception as e:
             logger.error(f"create_session failed for {new_sid}: {e}")

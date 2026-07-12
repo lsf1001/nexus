@@ -37,61 +37,52 @@ def test_escape_like_handles_all_combined() -> None:
 
 
 def test_find_latest_session_does_not_match_wildcard_user_id(tmp_path, monkeypatch) -> None:
-    """回归测试:user_id 含 % 时不应匹配到不含该字面 user_id 的 session。
+    """回归测试 (Plan 5 适配):user_id 含 % 字面应只命中 wechat_user_id 列内容相同的会话。
 
-    场景:两条 wechat 会话,A 的 user_id 字面是 ``abc%xyz``,B 的 user_id 是
-    ``abczxy``。调用 ``find_latest_session_by_user("abczxy")`` 只能返回 B 的
-    session,不返回 A 的(m.content 字面含 ``abc%xyz``,原始 LIKE 会误中)。
+    Plan 5 改造前用 ``messages.content LIKE ?``(LIKE 通配符注入场景)。改造后
+    ``find_latest_session_by_user`` 走 ``sessions.wechat_user_id = ?`` 列等值
+    查询,SQLite 不再解析 ``%`` 为通配符 — 因此本测试改为断言等值匹配语义,
+    保留 P0 安全保障不变量(user_id 字面区分)。
     """
-    # 用临时 DB 隔离
     test_db = tmp_path / "test.db"
     monkeypatch.setitem(db.CONFIG, "db_path", str(test_db))
     monkeypatch.setattr(db, "_INITED", False)
 
-    # 准备两条 wechat session + message
-    with db.get_db() as conn:
-        conn.execute(
-            "INSERT INTO sessions (id, channel, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            ("sess-A", "wechat", "wechat acc1 abc%xyz", "2026-01-01", "2026-01-01"),
-        )
-        conn.execute(
-            "INSERT INTO sessions (id, channel, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            ("sess-B", "wechat", "wechat acc1 abczxy", "2026-01-02", "2026-01-02"),
-        )
-        conn.execute(
-            "INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
-            ("msg-A", "sess-A", "user", "literal abc%xyz content", "2026-01-01"),
-        )
-        conn.execute(
-            "INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
-            ("msg-B", "sess-B", "user", "literal abczxy content", "2026-01-02"),
-        )
+    db.create_session(
+        "sess-A",
+        channel="wechat",
+        title="wechat acc1 abc%xyz",
+        account_id="acc1",
+        wechat_user_id="abc%xyz",
+    )
+    db.create_session(
+        "sess-B",
+        channel="wechat",
+        title="wechat acc1 abczxy",
+        account_id="acc1",
+        wechat_user_id="abczxy",
+    )
 
-    # 查询 B 的 user_id 字面(abczxy),不应匹配 A 的 session
-    result = find_latest_session_by_user("abczxy", channel="wechat")
-    assert result == "sess-B", f"LIKE 通配符注入导致返回错会话: 实际 {result!r}, 期望 'sess-B'"
+    # 查 wechat_user_id="abczxy" 应只命中 B;A 的字面 user_id 含 % 但不相等
+    assert find_latest_session_by_user("abczxy", channel="wechat") == "sess-B"
+    # 反向验证:查带 % 的 user_id 也只命中 A
+    assert find_latest_session_by_user("abc%xyz", channel="wechat") == "sess-A"
 
 
 def test_find_latest_session_escapes_backslash_user_id(tmp_path, monkeypatch) -> None:
-    """回归测试:user_id 含反斜杠时不应被误解释为 ESCAPE 字符。
+    """回归测试 (Plan 5 适配):反斜杠字面 user_id 应原样匹配。
 
-    场景:user_id = ``a\\b``,另一 user_id = ``a%b``。查询 ``a\\b`` 不应匹配
-    含 ``a%b`` 的 session 内容(原始 LIKE 把 ``\\`` 当 ESCAPE,会把 ``%``
-    当字面 %)。
+    旧 LIKE 路径下 ``\\`` 是 ESCAPE 字符会导致转义歧义。新路径走 ``=`` 列
+    等值,无 ESCAPE 概念 — 因此本测试改为验证反斜杠字面存进 / 查出来不丢。
     """
     test_db = tmp_path / "test.db"
     monkeypatch.setitem(db.CONFIG, "db_path", str(test_db))
     monkeypatch.setattr(db, "_INITED", False)
 
-    with db.get_db() as conn:
-        conn.execute(
-            "INSERT INTO sessions (id, channel, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            ("sess-back", "wechat", "wechat acc1 a\\b", "2026-01-01", "2026-01-01"),
-        )
-        conn.execute(
-            "INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
-            ("msg-back", "sess-back", "user", "literal a\\b content", "2026-01-01"),
-        )
-
-    result = find_latest_session_by_user("a\\b", channel="wechat")
-    assert result == "sess-back"
+    db.create_session(
+        "sess-back",
+        channel="wechat",
+        account_id="acc1",
+        wechat_user_id="a\\b",
+    )
+    assert find_latest_session_by_user("a\\b", channel="wechat") == "sess-back"
