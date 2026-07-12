@@ -1,12 +1,10 @@
+import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import type { Message } from '../types';
 import { useContextMenuTrigger } from '../lib/useContextMenuTrigger';
-
-interface ChatBubbleProps {
-  message: Message;
-  showThinking?: boolean;
-  onCopy?: (content: string) => void;
-}
+import {
+  chatBubblePropsAreEqual,
+  type ChatBubbleProps,
+} from './chatBubbleProps';
 
 /** 友好时间格式:今天 HH:MM / 昨天 HH:MM / YYYY-MM-DD HH:MM */
 function formatTimestamp(d: Date): string {
@@ -22,7 +20,8 @@ function formatTimestamp(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
 }
 
-function ChatBubble({ message, showThinking = true, onCopy }: ChatBubbleProps) {
+/** 内部函数组件 — 默认 export 用 React.memo 包装后导出。 */
+function ChatBubbleInner({ message, showThinking = true, onCopy }: ChatBubbleProps) {
   const isUser = message.role === 'user';
   const roleClass = isUser ? 'is-user' : 'is-assistant';
 
@@ -90,5 +89,16 @@ function ChatBubble({ message, showThinking = true, onCopy }: ChatBubbleProps) {
     </div>
   );
 }
+
+/**
+ * React.memo 包装 + 自定义相等比较器:
+ * - 长对话(100+ 条)+ 流式响应(60 chunks/s)下,绝大多数已完成的 ChatBubble
+ *   content / thinking 已稳定,memo 直接跳过,ReactMarkdown 不重解析。
+ * - 当前活跃 chunk 的 bubble props 变化(content / thinking 增量)→ 走重渲染。
+ *
+ * 注:`onCopy` 引用变化被刻意忽略 — MessageList 每次 re-render 会传新 closure,
+ * 但复制回调的"是否执行"逻辑跟父级 re-render 无关,这个开销换 memo 命中很值。
+ */
+const ChatBubble = memo(ChatBubbleInner, chatBubblePropsAreEqual);
 
 export default ChatBubble;
