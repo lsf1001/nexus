@@ -16,9 +16,6 @@ import { type Page, expect, type Locator } from '@playwright/test';
 import {
   openHome,
   sendMessageAndWaitForReply,
-  messageInput,
-  sendButton,
-  messageCount,
   lastAssistantBubbleText,
 } from '../helpers';
 
