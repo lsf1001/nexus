@@ -119,12 +119,21 @@ export async function sendMessageAndWaitForReply(
 
 /** 拿到页面上最后一个 assistant 气泡的纯文本。
  *  新 UI（2026-06 desktop shell）：assistant 气泡外层有 ``message-row.is-assistant`` 类。
+ *
+ *  **不再 fallback 到 ``main p``.last()**:2026-07-12 实测当 assistant 行
+ *  不存在时,``main p`` 会命中 user 气泡的 ``<p>``,导致 ``sendMessageAndWaitForReply``
+ *  的"assistant 非空"断言通过 user 文本假阳(真 LLM 失败时 870ms 就 PASS)。
+ *  现在直接抛错,让 spec fail loud — 没有 assistant 气泡 = 旅程没完成。
  */
 export async function lastAssistantBubbleText(page: Page): Promise<string> {
   const assistantRows = page.locator('.message-row.is-assistant p');
   const count = await assistantRows.count();
   if (count === 0) {
-    return (await page.locator('main p').last().innerText().catch(() => '')).trim();
+    throw new Error(
+      'lastAssistantBubbleText: 未找到任何 .message-row.is-assistant 气泡。'
+      + '这通常意味着助手未回复(LLM 调用失败 / WS 断线 / 流未启动)。'
+      + '原 fallback 会撞到 user bubble <p>,导致假阳 PASS — 现在直接抛错。',
+    );
   }
   return (await assistantRows.nth(count - 1).innerText()).trim();
 }
@@ -132,13 +141,19 @@ export async function lastAssistantBubbleText(page: Page): Promise<string> {
 /** 拿到页面上最后一个 user 气泡的纯文本。
  *  新 UI（2026-06 desktop shell）：user 气泡外层有 ``message-row.is-user`` 类。
  *  取该类容器内的 ``<p>`` 文本。
+ *
+ *  **不再 fallback 到 ``main p``.first()**:2026-07-12 同 false-pass 教训
+ *  — 助手的"思考过程"在 ``main p`` 里先出现,fallback 会撞到 assistant 流
+ *  中的 ``<p>``,导致 user 内容断言失真。没有 user 行就抛错。
  */
 export async function lastUserBubbleText(page: Page): Promise<string> {
   const userRows = page.locator('.message-row.is-user p');
   const count = await userRows.count();
   if (count === 0) {
-    // 回退：旧 UI（div.justify-end .prose）或新 UI 切错场景
-    return (await page.locator('main p').first().innerText().catch(() => '')).trim();
+    throw new Error(
+      'lastUserBubbleText: 未找到任何 .message-row.is-user 气泡。'
+      + '原 fallback 会撞到 assistant 流内的 <p>,导致断言失真 — 现在直接抛错。',
+    );
   }
   return (await userRows.nth(count - 1).innerText()).trim();
 }
