@@ -121,7 +121,7 @@ class TestCorrectAnswerPasses:
         async def handler(_req):
             return _StubResponse(correct_response)
 
-        response = asyncio.run(mw.wrap_model_call(request, handler))
+        response = asyncio.run(mw.awrap_model_call(request, handler))
         assert response.content == correct_response
 
     def test_middleware_dict_response_passes_through(self, correct_response: str) -> None:
@@ -132,7 +132,7 @@ class TestCorrectAnswerPasses:
         async def handler(_req):
             return {"content": correct_response}
 
-        response = asyncio.run(mw.wrap_model_call(request, handler))
+        response = asyncio.run(mw.awrap_model_call(request, handler))
         assert response["content"] == correct_response
 
     def test_verify_claims_tool_returns_ok(self, correct_response: str) -> None:
@@ -169,7 +169,7 @@ class TestWrongAnswerBlocked:
             return _StubResponse(wrong_response)
 
         with pytest.raises(FactCheckError):
-            asyncio.run(mw.wrap_model_call(request, handler))
+            asyncio.run(mw.awrap_model_call(request, handler))
 
     def test_middleware_dict_response_raises_on_wrong(self, wrong_response: str) -> None:
         mw = FactCheckMiddleware(fail_strategy="closed")
@@ -179,7 +179,7 @@ class TestWrongAnswerBlocked:
             return {"content": wrong_response}
 
         with pytest.raises(FactCheckError):
-            asyncio.run(mw.wrap_model_call(request, handler))
+            asyncio.run(mw.awrap_model_call(request, handler))
 
     def test_fail_open_logs_but_passes(self, wrong_response: str, caplog) -> None:
         """fail_strategy='open': wrong answer passes but is logged + persisted."""
@@ -190,7 +190,7 @@ class TestWrongAnswerBlocked:
             return _StubResponse(wrong_response)
 
         with caplog.at_level(logging.WARNING):
-            response = asyncio.run(mw.wrap_model_call(request, handler))
+            response = asyncio.run(mw.awrap_model_call(request, handler))
         # Response still flows through (fail-open).
         assert response.content == wrong_response
         # The conflict was logged — the middleware emits
@@ -216,7 +216,7 @@ class TestRealUserQuestion:
         async def handler(_req):
             return _StubResponse(correct_answer)
 
-        result = asyncio.run(mw.wrap_model_call(request, handler))
+        result = asyncio.run(mw.awrap_model_call(request, handler))
         assert result.content == correct_answer
 
     def test_realistic_query_hallucination_blocked(self) -> None:
@@ -231,7 +231,7 @@ class TestRealUserQuestion:
             return _StubResponse(hallucinated_answer)
 
         with pytest.raises(FactCheckError) as exc_info:
-            asyncio.run(mw.wrap_model_call(request, handler))
+            asyncio.run(mw.awrap_model_call(request, handler))
         # The error message should reference the date/weekday conflict.
         assert exc_info.value.conflicts, "FactCheckError must carry conflict list"
         conflict = exc_info.value.conflicts[0]

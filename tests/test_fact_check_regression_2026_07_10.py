@@ -116,7 +116,7 @@ class TestBugRegression:
             return _FakeResponse(content=BUG_SENTENCE)
 
         with pytest.raises(FactCheckError) as exc_info:
-            asyncio.run(mw.wrap_model_call(request, fake_handler))
+            asyncio.run(mw.awrap_model_call(request, fake_handler))
 
         msg = str(exc_info.value)
         # 错误信息必须含 fact-check 关键字 + 冲突事实(便于排障)
@@ -137,7 +137,7 @@ class TestBugRegression:
             return _FakeResponse(content=CORRECT_SENTENCE)
 
         # 不应该抛任何异常
-        result = asyncio.run(mw.wrap_model_call(request, fake_handler))
+        result = asyncio.run(mw.awrap_model_call(request, fake_handler))
         assert isinstance(result, _FakeResponse)
         assert result.content == CORRECT_SENTENCE
 
@@ -164,7 +164,7 @@ class TestBugRegression:
             return _FakeResponse(content=BUG_SENTENCE)
 
         with pytest.raises(FactCheckError):
-            asyncio.run(mw.wrap_model_call(request, fake_handler))
+            asyncio.run(mw.awrap_model_call(request, fake_handler))
 
         assert captured, "save_quality_score 必须至少被调用一次(失败路径也要落 audit)"
         kw = captured[-1]

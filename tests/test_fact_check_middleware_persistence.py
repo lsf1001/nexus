@@ -1,7 +1,7 @@
 """Test that FactCheckMiddleware persists its results to quality_scores (T12).
 
 Task 12 of the fact-check pipeline:
-  - After wrap_model_call runs the fact-check pipeline, the results
+  - After awrap_model_call runs the fact-check pipeline, the results
     (status / latency / claims / conflicts) must be written to the
     quality_scores table via ``save_quality_score``.
   - This is the *first* caller of save_quality_score in production
@@ -75,7 +75,7 @@ class TestFactCheckMiddlewarePersistence:
             return {"content": "明天是2026年7月11日 星期五"}
 
         with pytest.raises(FactCheckError):
-            await mw.wrap_model_call({}, fake_handler)
+            await mw.awrap_model_call({}, fake_handler)
 
         assert patched_save.called, "save_quality_score must be called on conflict"
         kwargs = patched_save.call_args.kwargs
@@ -98,7 +98,7 @@ class TestFactCheckMiddlewarePersistence:
         async def fake_handler(req):
             return {"content": "明天是2026年7月11日 星期六"}  # 正确
 
-        result = await mw.wrap_model_call({}, fake_handler)
+        result = await mw.awrap_model_call({}, fake_handler)
         assert result["content"] == "明天是2026年7月11日 星期六"
 
         assert patched_save.called, "save_quality_score must be called for audit trail"
@@ -115,7 +115,7 @@ class TestFactCheckMiddlewarePersistence:
         async def fake_handler(req):
             return {"content": "好的,我帮你查一下"}  # 无日期/数学/汇率声明
 
-        result = await mw.wrap_model_call({}, fake_handler)
+        result = await mw.awrap_model_call({}, fake_handler)
         assert result["content"] == "好的,我帮你查一下"
 
         assert not patched_save.called, "save_quality_score must NOT be called when there are zero fact claims"
@@ -128,7 +128,7 @@ class TestFactCheckMiddlewarePersistence:
         async def fake_handler(req):
             return {"content": "明天是2026年7月11日 星期五"}
 
-        result = await mw.wrap_model_call({}, fake_handler)
+        result = await mw.awrap_model_call({}, fake_handler)
         assert result.get("_fact_check_warnings"), "fail-open must attach warnings"
 
         assert patched_save.called
@@ -155,7 +155,7 @@ class TestFactCheckMiddlewarePersistence:
 
         # 仍然抛 FactCheckError(DB 失败只 log,不掩盖原错)
         with pytest.raises(FactCheckError):
-            await mw.wrap_model_call({}, fake_handler)
+            await mw.awrap_model_call({}, fake_handler)
 
     @pytest.mark.asyncio
     async def test_session_id_extracted_from_request(
@@ -186,7 +186,7 @@ class TestFactCheckMiddlewarePersistence:
         async def fake_handler(req):
             return {"content": "明天是2026年7月11日 星期六"}  # 正确
 
-        await mw.wrap_model_call(request, fake_handler)
+        await mw.awrap_model_call(request, fake_handler)
 
         assert captured.get("session_id") == "sess-abc-123"
         assert captured.get("fact_check_status") == "pass"
@@ -210,7 +210,7 @@ class TestFactCheckMiddlewarePersistence:
         async def fake_handler(req):
             return {"content": "明天是2026年7月11日 星期六"}
 
-        await mw.wrap_model_call({}, fake_handler)  # 空 request,无 session_id
+        await mw.awrap_model_call({}, fake_handler)  # 空 request,无 session_id
 
         assert captured.get("session_id") == "unknown"
         assert captured.get("fact_check_status") == "pass"
@@ -252,7 +252,7 @@ class TestFactCheckMiddlewarePersistenceWithRealDB:
             return {"content": "明天是2026年7月11日 星期五"}
 
         with pytest.raises(FactCheckError):
-            await mw.wrap_model_call({}, fake_handler)
+            await mw.awrap_model_call({}, fake_handler)
 
         # 直接查 tmp SQLite,验证行真存在
         conn = sqlite3.connect(str(temp_db))

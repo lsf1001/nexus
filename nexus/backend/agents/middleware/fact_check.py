@@ -10,14 +10,17 @@ to the response payload (fail-open).
 - 本中间件**只**校验 LLM 输出,不拦工具调用;工具层面的写权限管控由
   :mod:`nexus.backend.middleware.hitl` /
   :mod:`nexus.backend.middleware.dynamic_identity` 负责,职责分离。
-- ``wrap_model_call`` 接口与 deepagents 0.6.x 的
-  ``AgentMiddleware.wrap_model_call`` 对齐(handler 返回 ``ModelResponse``
+- ``awrap_model_call`` 接口与 deepagents 0.6.x 的
+  ``AgentMiddleware.awrap_model_call`` 对齐(handler 返回 ``ModelResponse``
   或 ``dict`` 都能消费);此处用 ``_extract_content`` 兼容两种形态,避免
   与 langchain 内部 message 对象耦合。
 - 校验器都是**同步**纯函数(:class:`nexus.backend.fact_check.pipeline.FactCheckPipeline`),
-  本中间件不需要 ``await`` 任何 IO;故整个 ``wrap_model_call`` 仍标
+  本中间件不需要 ``await`` 任何 IO;故整个 ``awrap_model_call`` 仍标
   ``async`` 是为了与 deepagents 中间件签名一致(deepagents 0.6.x 主路径走
   ``await handler(request)``)。
+- sync 入口 ``wrap_model_call`` 不实现 —— LangChain 把 sync/async 视作两个
+  分立方法,async 必须挂到 ``awrap_model_call`` 才能被 ``agent.astream()``
+  发现(2026-07-13 journey-cold-start E2E 修)。
 - **fail-open 走 warning 通道**:LLM 已经生成了一段错误事实,我们既不能
   抹掉它(用户体验差),也不能直接放行(污染下游),所以把 report dict
   挂到 ``response["_fact_check_warnings"]``,由上游 WS 端决定是否在
@@ -82,12 +85,19 @@ class FactCheckMiddleware(AgentMiddleware[AgentState, Any, Any]):
         self.fail_strategy = fail_strategy
         self.pipeline = FactCheckPipeline(config=config)
 
-    async def wrap_model_call(
+    async def awrap_model_call(
         self,
         request: Any,
         handler: Callable[[Any], Awaitable[Any]],
     ) -> Any:
         """拦截模型输出,扫描事实声明,按 fail_strategy 抛错或附加 warning。
+
+        WHY ``awrap_model_call``(不是 ``wrap_model_call``):LangChain 0.3+
+        把 sync/async 当作两个独立方法注册到工厂。``async def wrap_model_call``
+        会被识别成 sync 入口但带 async 签名,深 agents 走 ``agent.astream()``
+        时父类 fallback ``raise NotImplementedError("Asynchronous implementation
+        of awrap_model_call is not available.")`` —— 这正是 2026-07-13
+        journey-cold-start E2E 失败的根因。
 
         流程:
           1. ``await handler(request)`` 拿到 LLM 输出(``ModelResponse`` /
@@ -239,7 +249,7 @@ class FactCheckMiddleware(AgentMiddleware[AgentState, Any, Any]):
         """从 deepagents AgentState 抽 ``session_id`` / ``message_id``。
 
         Args:
-            request: ``wrap_model_call`` 的 request 参数,期望是
+            request: ``awrap_model_call`` 的 request 参数,期望是
                 ``AgentState``(dict-like,含 ``messages``)。
 
         Returns:
@@ -288,7 +298,7 @@ class FactCheckMiddleware(AgentMiddleware[AgentState, Any, Any]):
           - ``dict``: 取 ``content`` 键(``ModelResponse.to_dict()`` 风格)
           - 对象: 取 ``.content`` 属性(langchain ``AIMessage`` 风格)
 
-        空值兜底返回 ``""``,由 ``wrap_model_call`` 视为"无文本可校验"
+        空值兜底返回 ``""``,由 ``awrap_model_call`` 视为"无文本可校验"
         直接放行。
         """
         if isinstance(response, str):

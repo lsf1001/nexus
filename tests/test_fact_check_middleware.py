@@ -62,7 +62,7 @@ class TestFactCheckMiddleware:
             return {"content": "明天是 2026年7月11日 星期六"}
 
         mw = FactCheckMiddleware()
-        result = await mw.wrap_model_call({}, handler)
+        result = await mw.awrap_model_call({}, handler)
         assert result["content"] == "明天是 2026年7月11日 星期六"
 
     @pytest.mark.asyncio
@@ -72,7 +72,7 @@ class TestFactCheckMiddleware:
 
         mw = FactCheckMiddleware(fail_strategy="closed")
         with pytest.raises(FactCheckError) as exc_info:
-            await mw.wrap_model_call({}, handler)
+            await mw.awrap_model_call({}, handler)
         assert "星期五" in str(exc_info.value)
         assert "星期六" in str(exc_info.value)
 
@@ -82,7 +82,7 @@ class TestFactCheckMiddleware:
             return {"content": "明天是 2026年7月11日 星期五"}
 
         mw = FactCheckMiddleware(fail_strategy="open")
-        result = await mw.wrap_model_call({}, handler)
+        result = await mw.awrap_model_call({}, handler)
         assert "星期五" in result["content"]
         assert result.get("_fact_check_warnings")
 
@@ -93,7 +93,7 @@ class TestFactCheckMiddleware:
 
         mw = FactCheckMiddleware(fail_strategy="closed")
         with pytest.raises(FactCheckError):
-            await mw.wrap_model_call({}, handler)
+            await mw.awrap_model_call({}, handler)
 
     @pytest.mark.asyncio
     async def test_exchange_rate_skipped_on_api_failure(self, monkeypatch):
@@ -105,5 +105,5 @@ class TestFactCheckMiddleware:
             return {"content": "100 USD = 9999 CNY"}  # wrong but API down
 
         mw = FactCheckMiddleware(fail_strategy="closed")
-        result = await mw.wrap_model_call({}, handler)
+        result = await mw.awrap_model_call({}, handler)
         assert "9999" in result["content"]  # passes through on skipped
