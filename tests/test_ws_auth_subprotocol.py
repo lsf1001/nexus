@@ -39,14 +39,18 @@ def _authed_token(monkeypatch) -> str:
 def test_ws_subprotocol_token_accepted(monkeypatch) -> None:
     """subprotocol token 合法 → 握手成功。"""
     _authed_token(monkeypatch)
+    expected = _b64u_subprotocol("test-token")
 
     with TestClient(app) as client:
         with client.websocket_connect(
             "/api/ws",
-            subprotocols=[_b64u_subprotocol("test-token")],
+            subprotocols=[expected],
         ) as ws:
-            # subprotocol 已协商;客户端应能收到 ws 服务端的 subprotocol
-            assert ws.accepted_subprotocol == "nxv1"
+            # 服务端必须 echo 客户端发的完整 nxv1-<b64u> 字符串,
+            # 不是截短的 'nxv1'(RFC 6455 §1.9)
+            assert ws.accepted_subprotocol == expected, (
+                f"server should echo full subprotocol, got {ws.accepted_subprotocol!r}"
+            )
             ws.send_json({"content": "ping", "title": "subprotocol-test"})
             # 立即 close,只验证握手路径
             ws.close()
@@ -71,13 +75,16 @@ def test_ws_subprotocol_token_wrong_rejected(monkeypatch) -> None:
 def test_ws_subprotocol_takes_priority_over_query(monkeypatch) -> None:
     """subprotocol 与 query 同时存在 → subprotocol 优先(若 query 是错的而 subprotocol 对,仍 OK)。"""
     _authed_token(monkeypatch)
+    expected = _b64u_subprotocol("test-token")
 
     with TestClient(app) as client:
         with client.websocket_connect(
             "/api/ws?token=garbage",
-            subprotocols=[_b64u_subprotocol("test-token")],
+            subprotocols=[expected],
         ) as ws:
-            assert ws.accepted_subprotocol == "nxv1"
+            assert ws.accepted_subprotocol == expected, (
+                f"server should echo full subprotocol, got {ws.accepted_subprotocol!r}"
+            )
             ws.close()
 
 
@@ -141,14 +148,17 @@ def test_ws_empty_expected_token_rejects_all(monkeypatch) -> None:
 def test_ws_subprotocol_multiple_values_parses_nexus(monkeypatch) -> None:
     """subprotocol 含多个值(包括其它协议),正确解析 nxv1-<b64u>。"""
     _authed_token(monkeypatch)
+    expected = _b64u_subprotocol("test-token")
 
     with TestClient(app) as client:
         with client.websocket_connect(
             "/api/ws",
-            subprotocols=["graphql-ws", _b64u_subprotocol("test-token")],
+            subprotocols=["graphql-ws", expected],
         ) as ws:
-            # 服务端只选 nxv1,客户端需配合(Starlette 仍协商)
-            assert ws.accepted_subprotocol == "nxv1"
+            # 服务端 next() 取第一个 nxv1-* 完整字符串 echo 回去
+            assert ws.accepted_subprotocol == expected, (
+                f"server should echo full subprotocol, got {ws.accepted_subprotocol!r}"
+            )
             ws.close()
 
 

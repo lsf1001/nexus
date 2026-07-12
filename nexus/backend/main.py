@@ -415,11 +415,18 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=4001, reason="未授权")
         return
 
-    # 选 subprotocol 时 echo 回客户端;若客户端用 fallback query,无 subprotocol 可选。
-    selected_subprotocol = "nxv1"
+    # 选 subprotocol 时 echo 客户端发的**完整**字符串(RFC 6455 §1.9:
+    # 服务端 Sec-WebSocket-Protocol 响应必须是客户端请求列表里的某个完整
+    # 子串,Chromium / tokbo-tungstenite 严格校验)。token 前缀 nxv1- 后接
+    # base64url token;客户端发的是完整 'nxv1-<b64u(token)>',不能用
+    # 截短的 'nxv1' — 否则 Chromium 拒接。
     header_value = websocket.headers.get("sec-websocket-protocol", "")
-    has_nexus_subprotocol = any(p.strip().startswith("nxv1-") for p in header_value.split(","))
-    if has_nexus_subprotocol:
+    requested_protocols = [p.strip() for p in header_value.split(",")] if header_value else []
+    selected_subprotocol = next(
+        (p for p in requested_protocols if p.startswith("nxv1-")),
+        None,
+    )
+    if selected_subprotocol is not None:
         await websocket.accept(subprotocol=selected_subprotocol)
     else:
         await websocket.accept()
