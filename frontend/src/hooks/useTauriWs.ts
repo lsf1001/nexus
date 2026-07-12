@@ -30,7 +30,7 @@ const WS_CLOSED = 3;
  * 因为 sidecar 崩溃会自动重启,WS session 由 ws_close 显式关。
  *
  * 鉴权(2026-07 改造):token 不再拼到 URL ?token=,改作为 invoke 参数独立传;
- * Rust relay 走 `Sec-WebSocket-Protocol: nexus-v1.token=<token>` 子协议头
+ * Rust relay 走 `Sec-WebSocket-Protocol: nxv1-<base64url(token)>` 子协议头
  * 完成 WS 升级握手(与浏览器原生 `new WebSocket(url, subprotocols)` 等价)。
  */
 export function useTauriWs<T = unknown>({

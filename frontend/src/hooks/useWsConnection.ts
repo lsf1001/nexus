@@ -4,6 +4,24 @@ import { useWebSocket } from './useWebSocket';
 import type { StreamEvent } from '../types';
 
 /**
+ * RFC 7230 §3.2.6 token ABNF:`=` 与 `.` 都是 delimiter,不在 tchar 内,Chromium ≥149
+ * 严格校验。修复后短前缀 `nxv1-` + base64url token(字符集 `[A-Za-z0-9-_]` 全在
+ * tchar 内),整个 subprotocol 字符串字面合规。
+ */
+function encodeWsTokenSubprotocol(token: string): string {
+  // btoa 对非 ASCII 抛;token 通常是 ASCII / base64 / hex,这里 fallback 用
+  // encodeURIComponent 保证 utf-8 字符也能正确编码成 ASCII 串。
+  const b64 = (typeof btoa !== 'undefined'
+    ? btoa(unescape(encodeURIComponent(token)))
+    : ''
+  )
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return `nxv1-${b64}`;
+}
+
+/**
  * WebSocket 连接适配层 — 集中 Tauri / 浏览器两种实现的选择逻辑。
  *
  * 为什么不直接拆子组件(在 ChatArea 用 isTauri 条件渲染)?
@@ -20,7 +38,7 @@ import type { StreamEvent } from '../types';
  *
  * WS 鉴权(2026-07 改造):token 通过 `token` 入参传入,适配层按环境分派:
  * - Tauri:作为 `ws_open` invoke 参数独立传给 Rust relay
- * - 浏览器:填入 `Sec-WebSocket-Protocol: nexus-v1.token=<token>` 子协议头
+ * - 浏览器:填入 `Sec-WebSocket-Protocol: nxv1-<base64url(token)>` 子协议头
  * 两条路径都不再让 token 进 URL ?token=,避免出现在代理 access log /
  * 浏览器历史 / 错误堆栈。
  */
@@ -45,11 +63,11 @@ export function useWsConnection({
   const isTauri =
     typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-  // 浏览器 WS 的子协议数组:浏览器原生 new WebSocket(url, ['nexus-v1.token=...'])。
+  // 浏览器 WS 的子协议数组:浏览器原生 new WebSocket(url, ['nxv1-<b64u>'])。
   // 用 useMemo 让引用稳定,避免 useWebSocket 依赖数组每次 render 都变,
   // 触发 useEffect 重连。空 token 不构造子协议(浏览器 dev 未注入 env 时优雅降级)。
   const subprotocols = useMemo(
-    () => (token ? [`nexus-v1.token=${token}`] : undefined),
+    () => (token ? [encodeWsTokenSubprotocol(token)] : undefined),
     [token],
   );
 

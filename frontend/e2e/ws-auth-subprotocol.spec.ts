@@ -6,7 +6,9 @@ import { openHome } from './helpers';
  *
  * 验证点:
  *   1. 浏览器 WS URL **不含** ?token=,token 改走 Sec-WebSocket-Protocol subprotocol
- *   2. 实际发出的 subprotocol 包含 nexus-v1.token=<token>
+ *   2. 实际发出的 subprotocol 包含 nxv1-<base64url(token)>(2026-07-12 改前缀,
+ *      旧 `nexus-v1.token=<value>` 含 `.` / `=` 违反 RFC 7230 §3.2.6 token ABNF,
+ *      Chromium ≥149 抛 SyntaxError,见 git log 2026-07-12 修复)
  *   3. 旧 query 风格不被使用 → 代理 access log 不会记录 token
  *
  * 设计:
@@ -97,11 +99,11 @@ test('WS 鉴权走 Sec-WebSocket-Protocol 子协议,token 不进 URL', async ({ 
     expect(url).toContain('/api/ws');
   }
 
-  // 至少一个 WS 用了 nexus-v1.token= 子协议。
+  // 至少一个 WS 用了 nxv1- 前缀的子协议(token 经 base64url 编码,见 useWsConnection.ts)。
   const hasSubprotocol = protocols.some(
     (protos) =>
       Array.isArray(protos) &&
-      protos.some((p) => typeof p === 'string' && p.startsWith('nexus-v1.token=')),
+      protos.some((p) => typeof p === 'string' && p.startsWith('nxv1-')),
   );
   expect(hasSubprotocol, '业务 WS 应通过 Sec-WebSocket-Protocol 子协议传递 token').toBe(true);
 });
