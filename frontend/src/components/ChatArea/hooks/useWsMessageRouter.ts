@@ -54,6 +54,7 @@ const HANDLERS: Readonly<Record<StreamEvent['type'], WsHandler>> = {
   stats: noop,
   clarification_request: handleClarificationRequest,
   confirmation_request: handleConfirmationRequest,
+  system: noop,
 };
 
 /**

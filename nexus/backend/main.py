@@ -426,13 +426,24 @@ async def websocket_endpoint(websocket: WebSocket):
     _ensure_agent_async(websocket.app)
 
     # 等 Agent 构造完成(首启 / PyInstaller 冷启场景下 10-30s 是常态)。
-    # 设 60s 上限,极端慢盘 / MCP 加载失败场景下放弃,让 _run_agent_streaming
-    # 走原 agent_unavailable 错误路径,而不是阻塞 WS 升级握手。
+    # 2026-07-12 Plan 3 Phase 4:60s 超时后**不**断 WS,改发 system 帧
+    # {type:'system', payload:{event:'agent_init_timeout', retry_in:5}}
+    # 客户端(Plan 3 WsClient)收到此帧后会临时拉长 baseDelay 5s 做退避
+    # hint,WS 自身仍保持连接 — 用户首条消息走 agent_unavailable 错误路径。
     if _agent is None and _agent_ready_event is not None:
         try:
             await asyncio.wait_for(_agent_ready_event.wait(), timeout=60.0)
         except TimeoutError:
-            logger.warning("Agent 懒构造 60s 超时,首条消息将走 agent_unavailable 错误路径")
+            logger.warning("Agent 懒构造 60s 超时,发送 system 帧给客户端作 retry hint")
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "system",
+                        "payload": {"event": "agent_init_timeout", "retry_in": 5},
+                    }
+                )
+            except Exception as e:  # noqa: BLE001 — send_json 失败时连接可能已断,吞掉
+                logger.warning(f"发送 agent_init_timeout 帧失败(WS 可能已断): {e}")
 
     def _get_quality_pipeline() -> Any:
         # 2026-06-29 重构:QualityPipeline 已删除,质量门由 deepagents RubricMiddleware

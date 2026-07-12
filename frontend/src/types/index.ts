@@ -39,7 +39,7 @@ export interface ChannelMessagePayload {
 }
 
 export interface StreamEvent {
-  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage' | 'channel_message' | 'session_created' | 'resume_token' | 'resume_ack' | 'invalid_resume_token' | 'stats' | 'clarification_request' | 'confirmation_request';
+  type: 'thinking' | 'chunk' | 'tool_call' | 'tool_result' | 'final' | 'done' | 'error' | 'token_usage' | 'channel_message' | 'session_created' | 'resume_token' | 'resume_ack' | 'invalid_resume_token' | 'stats' | 'clarification_request' | 'confirmation_request' | 'system';
   content?: string;
   token_count?: number;
   context_usage?: number;
@@ -64,6 +64,8 @@ export interface StreamEvent {
   // HITL 确认请求(type='confirmation_request')— Task 5 配套
   interrupt_id?: string;   // GraphInterrupt 的 Interrupt id,用于回传关联
   actions?: ConfirmationAction[]; // 待审批动作列表
+  // 系统帧(type='system')— 2026-07-12 Plan 3 Phase 4
+  payload?: { event: 'agent_init_timeout'; retry_in?: number };
 }
 
 /** HITL 决策选项(approve / reject 二选一,后端 langchain HITL 标准约定) */
