@@ -121,6 +121,12 @@ export default defineConfig({
       stderr: 'pipe',
       env: {
         VITE_API_TARGET: 'http://127.0.0.1:30000',
+        // 2026-07-12 修复:Vite 编译期 env 必须与后端 NEXUS_WS_TOKEN 一致,
+        // 否则 apiFetch 的 Authorization: Bearer header 缺失 → 后端 401 → 前端
+        // useBootstrap 收到 401 → SetupView 兜底 → ChatView 不渲染 → 所有
+        // E2E 在 30s 后 fail(openHome 等不到 prompt-card)。回退到与后端同款
+        // 默认 token,与 CLAUDE.md / env 表对齐。
+        VITE_NEXUS_WS_TOKEN: process.env.NEXUS_WS_TOKEN ?? 'nexus-default-token',
       },
     },
   ],
