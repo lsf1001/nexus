@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useStore } from '../../store/useStore';
+import { useStore } from '../../store';
 import { useBootstrap } from './hooks/useBootstrap';
 import { useDarkModeRoot } from './hooks/useDarkModeRoot';
 import { useChannelStatusPolling } from '../../hooks/useChannelStatusPolling';

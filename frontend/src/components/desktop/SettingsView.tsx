@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useStore } from '../../store/useStore';
+import { useStore } from '../../store';
 import { useCopyText } from '../../lib/useContextMenuTrigger';
 import ModelConfigModal from '../ModelConfigModal';
 

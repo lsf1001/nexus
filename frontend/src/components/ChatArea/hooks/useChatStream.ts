@@ -18,7 +18,7 @@
 
 import { useCallback } from 'react';
 import type { Message, StreamEvent } from '../../../types';
-import { useStore } from '../../../store/useStore';
+import { useStore } from '../../../store';
 
 /**
  * ChatArea 派生操作集。

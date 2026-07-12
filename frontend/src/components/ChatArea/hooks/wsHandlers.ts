@@ -15,7 +15,7 @@
 import type { StreamEvent, ConfirmationAction } from '../../../types';
 import type { LastError } from '../types';
 import type { ChatStreamActions } from './useChatStream';
-import { useStore } from '../../../store/useStore';
+import { useStore } from '../../../store';
 import { useToastStore } from '../../../store/useToast';
 
 export interface WsRouterCtx {

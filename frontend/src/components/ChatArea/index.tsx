@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useStore } from '../../store/useStore';
+import { useStore } from '../../store';
 import { useWsConnection } from '../../hooks/useWsConnection';
 import { useLoadingWatchdog } from '../../hooks/useLoadingWatchdog';
 import { getApiBase, getWsToken } from '../../lib/api';

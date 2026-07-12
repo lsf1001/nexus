@@ -6,7 +6,7 @@ import { Sidebar } from './Sidebar';
 import { SketchLine } from './SketchLines';
 import { ToastHost } from '../ToastHost';
 import { WechatAssistantView } from './WechatAssistantView';
-import { useStore } from '../../store/useStore';
+import { useStore } from '../../store';
 import type { Conversation } from '../../types';
 import type { DesktopShellContext, DesktopView } from './DesktopShell';
 

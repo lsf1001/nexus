@@ -11,7 +11,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report",
-    "test:unit": "node --test src/lib/ws/__tests__/*.test.cjs"
+    "test:unit": "node --test $(find src -name '*.test.cjs' -not -path '*/node_modules/*')"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",

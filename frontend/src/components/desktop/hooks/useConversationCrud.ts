@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/api';
-import { useStore } from '../../../store/useStore';
+import { useStore } from '../../../store';
 import type { Conversation } from '../../../types';
 
 const REQUEST_TIMEOUT_MS = 10_000;

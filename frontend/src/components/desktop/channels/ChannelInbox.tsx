@@ -9,8 +9,8 @@
  * 清空语义是"标记已读",下次 mount 或下次有新消息再继续累加。
  */
 
-import { useStore } from '../../../store/useStore';
-import type { ChannelInboxMsg } from '../../../store/useStore';
+import { useStore } from '../../../store';
+import type { ChannelInboxMsg } from '../../../store/slices/channels';
 import type { ChannelType } from '../../../types';
 
 interface ChannelInboxProps {

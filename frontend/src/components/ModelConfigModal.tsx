@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import type { Model } from '../types';
 import { apiFetch, getApiBase } from '../lib/api';
 import { openContextMenuAt } from '../lib/useContextMenuTrigger';

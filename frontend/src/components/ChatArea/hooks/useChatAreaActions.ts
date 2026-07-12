@@ -10,7 +10,7 @@
  */
 
 import { useCallback } from 'react';
-import { useStore } from '../../../store/useStore';
+import { useStore } from '../../../store';
 import { useToast } from '../../../store/useToast';
 import type { ChatStreamActions } from './useChatStream';
 
