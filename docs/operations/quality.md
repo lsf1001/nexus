@@ -383,19 +383,31 @@ ORDER BY rubric, fact_check_status;
 
 报警：当 `rubric='fact_check'` 的 fail 数突然上升，意味着模型开始系统性说错日期/星期/数学/单位 — 通常是 LLM provider 升级或路由变化导致，不要当「judge 太严」调，要去查上游。
 
-## 11. WS 鉴权协议 (2026-07 收紧)
+## 11. WS 鉴权协议 (2026-07 收紧 + 2026-07-12 ABNF 合规)
+
+### 11.0 协议格式变更历史
+
+- 2026-07 首次落地:`Sec-WebSocket-Protocol: nexus-v1.token=<secret>`
+- 2026-07-12 修复 ABNF:旧字符串含 `.` / `=`,都违反 RFC 7230 §3.2.6
+  `token` ABNF。Chromium ≥149 严格校验,旧格式在 ChatArea mount 时抛
+  SyntaxError,被 ErrorBoundary 接管,前端发送消息路径全面失效。改为:
+  ```
+  Sec-WebSocket-Protocol: nxv1-<base64url(secret)>
+  ```
+  整个字符串字面合规(browser + tungstenite + http::HeaderValue 三方
+  接受 tchar 字符)。旧前缀完全拒,不会"裸 token 解析"的语义漂移。
 
 ### 11.1 token 不再进 URL
 
 旧:`ws://host:30000/api/ws?token=<secret>` — 代理 access log / 浏览器历史 / 错误堆栈都会记下 token。
 
-新:`Sec-WebSocket-Protocol: nexus-v1.token=<secret>` 子协议头。RFC 6455 协商机制,服务端从 upgrade 头解析,token 不在任何 URL 字段。
+新:`Sec-WebSocket-Protocol: nxv1-<base64url(secret)>` 子协议头。RFC 6455 协商机制,服务端从 upgrade 头解析,token 不在任何 URL 字段。
 
 ### 11.2 双路径兼容
 
 | 路径 | 优先级 | 开关 | 适用 |
 |---|---|---|---|
-| `Sec-WebSocket-Protocol: nexus-v1.token=...` | 高 | 始终启用 | 生产 |
+| `Sec-WebSocket-Protocol: nxv1-<b64u>` | 高 | 始终启用 | 生产 |
 | `?token=...` query string | 低 | `NEXUS_WS_AUTH_QUERY_FALLBACK` (默认 true) | 旧客户端 / 调试 |
 
 下个 major 版本(`2.0.0`)删除 query fallback。
@@ -404,16 +416,26 @@ ORDER BY rubric, fact_check_status;
 
 **浏览器原生:**
 ```typescript
-new WebSocket('ws://host:30000/api/ws', ['nexus-v1.token=xxx']);
+import { encodeWsTokenSubprotocol } from '@/lib/api';
+new WebSocket('ws://host:30000/api/ws', [encodeWsTokenSubprotocol(token)]);
 ```
+
+或按 `frontend/src/hooks/useWsConnection.ts::encodeWsTokenSubprotocol` 手做:
+btoa 编码 → `+` → `-`、`/` → `_`、去 `=` padding,前缀 `nxv1-`。
 
 **Tauri (Rust relay):**
 ```rust
 // ws_relay.rs
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
+let subproto_value = format!(
+    "nxv1-{}",
+    URL_SAFE_NO_PAD.encode(token.as_bytes()),
+);
 let mut request = (&url).into_client_request()?;
 request.headers_mut().insert(
     "Sec-WebSocket-Protocol",
-    HeaderValue::from_str(&format!("nexus-v1.token={token}"))?,
+    HeaderValue::from_str(&subproto_value)?,
 );
 tokio_tungstenite::connect_async(request).await?;
 ```
@@ -427,5 +449,6 @@ tokio_tungstenite::connect_async(request).await?;
 ### 11.5 排错
 
 - **握手 close 4001 "未授权"**:token 不匹配 / 服务端 `ws_token` 为空
-- **subprotocol 返回空 `''`**:客户端发的 subprotocol 格式错(必须 `nexus-v1.token=...` 前缀)
+- **subprotocol 返回空 `''`**:客户端发的 subprotocol 格式错(必须 `nxv1-<b64u>` 前缀)
 - **Tauri 模式 `ws token is empty`**:Rust relay 检测到空 token,前端 `getWsToken()` 应已先抛
+- **Chromium 抛 `SyntaxError: Failed to construct 'WebSocket': The subprotocol 'X' is invalid`**:X 含 `.` 或 `=`,违反 RFC 7230 token ABNF,改用 `nxv1-<b64u>` 形式(2026-07-12 修复后默认合规)

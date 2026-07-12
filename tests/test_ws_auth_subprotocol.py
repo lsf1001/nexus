@@ -1,19 +1,31 @@
 """WebSocket Sec-WebSocket-Protocol 鉴权测试。
 
 覆盖:
-  1. 客户端用 subprotocol ``nexus-v1.token=<value>`` → 握手成功,服务端 echo subprotocol
+  1. 客户端用 subprotocol ``nxv1-<base64url(token)>`` → 握手成功,服务端 echo subprotocol
   2. 客户端用 subprotocol 但 token 错 → 握手失败 close 4001
   3. 客户端用 subprotocol 缺失 token 值 → 走 query fallback
   4. ``NEXUS_WS_AUTH_QUERY_FALLBACK=false`` → 关闭 query,纯 subprotocol
   5. 空 expected token → 任意客户端都被拒(防止默认 token 被错配)
-  6. subprotocol 多值(含其它协议) → 正确解析 nexus-v1.token=
+  6. subprotocol 多值(含其它协议) → 正确解析 nxv1-<b64u>
 """
 
 from __future__ import annotations
 
+import base64
+
 from fastapi.testclient import TestClient
 
 from nexus.backend.main import app
+
+
+def _b64u_subprotocol(token: str) -> str:
+    """生成 ``nxv1-<base64url(token)>`` 字符串(测试 helper)。
+
+    WHY helper:2026-07-12 改前缀后,每个用例都要写同一拼装逻辑。集中到
+    一个函数,base64 padding / 字符替换不会在 8 个测试里漂移。
+    """
+    b64u = base64.urlsafe_b64encode(token.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"nxv1-{b64u}"
 
 
 def _authed_token(monkeypatch) -> str:
@@ -31,10 +43,10 @@ def test_ws_subprotocol_token_accepted(monkeypatch) -> None:
     with TestClient(app) as client:
         with client.websocket_connect(
             "/api/ws",
-            subprotocols=["nexus-v1.token=test-token"],
+            subprotocols=[_b64u_subprotocol("test-token")],
         ) as ws:
             # subprotocol 已协商;客户端应能收到 ws 服务端的 subprotocol
-            assert ws.accepted_subprotocol == "nexus-v1"
+            assert ws.accepted_subprotocol == "nxv1"
             ws.send_json({"content": "ping", "title": "subprotocol-test"})
             # 立即 close,只验证握手路径
             ws.close()
@@ -51,7 +63,7 @@ def test_ws_subprotocol_token_wrong_rejected(monkeypatch) -> None:
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(
                 "/api/ws",
-                subprotocols=["nexus-v1.token=wrong-token"],
+                subprotocols=[_b64u_subprotocol("wrong-token")],
             ) as ws:
                 ws.receive_json()  # 不应到达
 
@@ -63,9 +75,9 @@ def test_ws_subprotocol_takes_priority_over_query(monkeypatch) -> None:
     with TestClient(app) as client:
         with client.websocket_connect(
             "/api/ws?token=garbage",
-            subprotocols=["nexus-v1.token=test-token"],
+            subprotocols=[_b64u_subprotocol("test-token")],
         ) as ws:
-            assert ws.accepted_subprotocol == "nexus-v1"
+            assert ws.accepted_subprotocol == "nxv1"
             ws.close()
 
 
@@ -121,27 +133,27 @@ def test_ws_empty_expected_token_rejects_all(monkeypatch) -> None:
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(
                 "/api/ws",
-                subprotocols=["nexus-v1.token=anything"],
+                subprotocols=[_b64u_subprotocol("anything")],
             ) as ws:
                 ws.receive_json()
 
 
 def test_ws_subprotocol_multiple_values_parses_nexus(monkeypatch) -> None:
-    """subprotocol 含多个值(包括其它协议),正确解析 nexus-v1.token=。"""
+    """subprotocol 含多个值(包括其它协议),正确解析 nxv1-<b64u>。"""
     _authed_token(monkeypatch)
 
     with TestClient(app) as client:
         with client.websocket_connect(
             "/api/ws",
-            subprotocols=["graphql-ws", "nexus-v1.token=test-token"],
+            subprotocols=["graphql-ws", _b64u_subprotocol("test-token")],
         ) as ws:
-            # 服务端只选 nexus-v1,客户端需配合(Starlette 仍协商)
-            assert ws.accepted_subprotocol == "nexus-v1"
+            # 服务端只选 nxv1,客户端需配合(Starlette 仍协商)
+            assert ws.accepted_subprotocol == "nxv1"
             ws.close()
 
 
 def test_ws_subprotocol_malformed_value_rejected(monkeypatch) -> None:
-    """subprotocol 存在但格式错误(非 nexus-v1.token=)→ 走 query 或拒绝。"""
+    """subprotocol 存在但格式错误(非 nxv1-)→ 走 query 或拒绝。"""
     _authed_token(monkeypatch)
 
     with TestClient(app) as client:

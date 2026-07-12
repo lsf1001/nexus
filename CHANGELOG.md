@@ -5,6 +5,64 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+### Breaking — WebSocket subprotocol 格式 (2026-07-12)
+
+协议前缀由 `nexus-v1.token=<value>` 改为 `nxv1-<base64url(token)>`。
+
+**WHY**:RFC 7230 §3.2.6 `token` ABNF 不允许 `=` 或 `.`(两者都是
+delimiter,不在 `tchar` 内)。Chromium ≥149 严格校验,旧格式在
+ChatArea mount 时抛 `SyntaxError`,被 ErrorBoundary 接管,前端
+发送消息路径全面失效(包括 journey spec 端到端 fail)。修复选
+短前缀 + base64url token,全字符在 tchar 内,browser + tungstenite
++ http::HeaderValue 三方都接受。
+
+**改动**:
+
+- `nexus/backend/api/ws/auth.py` — `_WS_SUBPROTOCOL_PREFIX = "nxv1-"` + 新
+  `_decode_subprotocol_token()` helper,`base64.urlsafe_b64decode` 解码
+  token,`try/except (binascii.Error, ValueError)` + `UnicodeDecodeError`
+  兜底,失败按"无 token"处理。
+- `nexus/backend/main.py` — `websocket_endpoint` 选 `selected_subprotocol = "nxv1"`,
+  `has_nexus_subprotocol` 检测从 `startswith("nexus-v1.token=")` 改为
+  `startswith("nxv1-")`。docstring 同步更新。
+- `tests/test_ws_auth_subprotocol.py` — 新增 `_b64u_subprotocol()` helper,9 个
+  测试断言从 `["nexus-v1.token=test-token"]` 改成
+  `[_b64u_subprotocol("test-token")]`(生成 `nxv1-dGVzdC10b2tlbg`),
+  `accepted_subprotocol` 断言改成 `"nxv1"`。
+- `frontend/src/hooks/useWsConnection.ts` — 新增 `encodeWsTokenSubprotocol()`:
+  `btoa(unescape(encodeURIComponent(token)))` → `+`→`-`、`/`→`_`、去
+  `=` padding,前缀 `nxv1-`。`subprotocols` memo 改用它。
+- `frontend/src/hooks/useTauriWs.ts` / `frontend/e2e/ws-auth-subprotocol.spec.ts` —
+  注释 + E2E 断言(`startsWith('nxv1-')`)同步。
+- `desktop/src-tauri/Cargo.toml` — 新增 `base64 = "0.22"` 依赖。
+- `desktop/src-tauri/src/ws_relay.rs` — `WS_SUBPROTOCOL_PREFIX = "nxv1-"` +
+  `encode_subprotocol_token()` 用 `base64::engine::general_purpose::URL_SAFE_NO_PAD`
+  编码 token,单元测试断言值同步更新(`"nxv1-YWJjMTIz"`)。
+- `docs/operations/quality.md` §11 — 加 §11.0 协议格式变更历史段,§11.1-11.5
+  全部改成 `nxv1-<b64u>` 表述,§11.5 加 Chromium SyntaxError 排错条目。
+
+**迁移**:
+
+- 后端 / 前端 / 桌面三端均改动,**不可拆分部署**(拆开部署服务端会拒旧
+  客户端 100% 失败,前端会继续抛 SyntaxError)。
+- 自定义客户端必须改协议前缀并先 base64url 编码 token
+  (Python `base64.urlsafe_b64encode(t).decode().rstrip("=")` /
+  JS `btoa(...)` + 三步替换 / Rust
+  `base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(...)`)。
+- 旧 subprotocol 字符串(含等号)完全不兼容,服务端按 prefix 检测后
+  走 query fallback 或直接拒,**不会出现** "裸 token" 的语义漂移。
+- query string `?token=` fallback 路径仍兼容(`NEXUS_WS_AUTH_QUERY_FALLBACK=true`
+  默认),但生产客户端应切换到新 subprotocol 格式。
+
+**Test Coverage**:
+
+- Python `pytest tests/test_ws_auth_subprotocol.py`:9/9 通过。
+- Rust `cargo test ws_relay`:4/4 通过(含新格式断言 `nxv1-YWJjMTIz`)。
+- 前端 `tsc --noEmit`:0 错。
+- `ruff check + format`:0 错。
+
+---
+
 ## [Unreleased] — WS 鉴权收紧 + 密钥脱敏 + ChatArea 拆解(2026-07-12)
 
 WS 鉴权 token 与 API key 存在三处泄密:

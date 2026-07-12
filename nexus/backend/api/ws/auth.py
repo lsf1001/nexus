@@ -2,7 +2,7 @@
 
 WebSocket 鉴权走两条路径(优先级从高到低):
 
-1. **Sec-WebSocket-Protocol** 子协议头:浏览器原生 ``new WebSocket(url, ['nexus-v1.token=...'])``、
+1. **Sec-WebSocket-Protocol** 子协议头:浏览器原生 ``new WebSocket(url, ['nxv1-<b64u>'])``、
    Rust relay / tokio-tungstenite 都能设,token 不进 URL,不进代理 access log、
    不进浏览器历史、不进错误堆栈。**首选**。
 2. **query string ``?token=...``**:旧客户端 / 第三方调试用,默认兼容,
@@ -14,6 +14,8 @@ WebSocket 鉴权走两条路径(优先级从高到低):
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hmac
 import os
 
@@ -24,11 +26,36 @@ from ...config import CONFIG
 __all__ = ["_extract_request_token", "_extract_ws_token", "require_token"]
 
 
-# Sec-WebSocket-Protocol 格式:``nexus-v1.token=<value>``。
-# WHY 命名空间:多协议并存时,subprotocols 字段是 string 数组,
-# 不同系统可在同一 WS 端点声明多个 subprotocol 协商;用 ``nexus-v1.`` 前缀
-# 避免与其它协议冲突,``.token=`` 后缀让解析无须 split-on-:-then-guess。
-_WS_SUBPROTOCOL_PREFIX = "nexus-v1.token="
+# Sec-WebSocket-Protocol 格式:``nxv1-<base64url(token)>``。
+#
+# WHY 改前缀(2026-07-12):RFC 7230 §3.2.6 token ABNF 不允许 ``.`` 或 ``=``(两者
+# 都是 delimiter,不在 tchar 内),Chromium ≥149 严格校验,旧 ``nexus-v1.token=<value>``
+# 形式在 ChatArea mount 时抛 SyntaxError,被 ErrorBoundary 接管。
+#
+# 修复:短前缀 ``nxv1-``(4+1 chars,``-`` 和字母数字全在 tchar 内) + base64url
+# 编码 token(base64url 字符集 ``[A-Za-z0-9-_]``,全在 tchar 内),整个 subprotocol
+# 字符串字面合规。Rust 的 HeaderValue 也接受这字符集。
+_WS_SUBPROTOCOL_PREFIX = "nxv1-"
+
+
+def _decode_subprotocol_token(b64u_part: str) -> str | None:
+    """把 base64url 段解码回 token;失败返回 None(调用方按无 token 处理)。
+
+    base64url 跟标准 base64 等价但用 ``-`` / ``_`` 替代 ``+`` / ``/``,且末尾
+    不带 ``=`` 填充。``base64.urlsafe_b64decode`` 要求显式补齐 padding 到
+    4 的倍数,否则抛 ``binascii.Error``。
+    """
+    if not b64u_part:
+        return None
+    pad = (-len(b64u_part)) % 4
+    try:
+        raw = base64.urlsafe_b64decode(b64u_part + ("=" * pad))
+    except (binascii.Error, ValueError):
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def _hmac_compare(candidate: str | None, expected: str) -> bool:
@@ -60,7 +87,7 @@ def _extract_ws_token(websocket: WebSocket) -> str | None:
     Implementation:
         Starlette ``WebSocket`` 没有 ``subprotocols`` 属性,要解析原始
         ``Sec-WebSocket-Protocol`` header。RFC 6455 规定多值用逗号分隔,
-        元素按客户端优先级排序;我们顺序扫描取第一个 ``nexus-v1.token=``。
+        元素按客户端优先级排序;我们顺序扫描取第一个 ``nxv1-<b64u>``。
     """
     # 1. Sec-WebSocket-Protocol header(RFC 6455 逗号分隔列表)
     header_value = websocket.headers.get("sec-websocket-protocol", "")
@@ -68,7 +95,9 @@ def _extract_ws_token(websocket: WebSocket) -> str | None:
         for proto in header_value.split(","):
             stripped = proto.strip()
             if stripped.startswith(_WS_SUBPROTOCOL_PREFIX):
-                return stripped[len(_WS_SUBPROTOCOL_PREFIX) :]
+                token = _decode_subprotocol_token(stripped[len(_WS_SUBPROTOCOL_PREFIX) :])
+                if token is not None:
+                    return token
 
     # 2. query string fallback(默认开,通过 env 关)
     if os.environ.get("NEXUS_WS_AUTH_QUERY_FALLBACK", "true").lower() == "true":
