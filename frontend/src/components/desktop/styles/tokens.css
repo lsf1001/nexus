@@ -114,24 +114,6 @@
   background: transparent;
 }
 
-/* ===== 手绘装饰定位 ===== */
-.sketch-line {
-  position: absolute;
-  pointer-events: none;
-  z-index: 2;
-}
-
-.sketch-line--top-right {
-  right: 70px;
-  top: 110px;
-}
-
-.sketch-line--bottom-left {
-  right: 124px;
-  bottom: 128px;
-  left: auto;
-}
-
 /* dark 主题下手绘装饰用更柔的笔触,避免在深色背景上像黑洞/疤痕 */
 .nexus-desktop[data-theme="dark"] .sketch-line ellipse[fill="none"] {
   stroke-opacity: 0.18;
