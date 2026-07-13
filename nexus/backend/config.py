@@ -69,9 +69,14 @@ def load_config() -> dict:
         "default_save_path": os.environ.get("DEFAULT_SAVE_PATH", str(nexus_home / "workspace" / "outputs")),
         "tavily_api_key": os.environ.get("TAVILY_API_KEY", ""),
         "openweathermap_api_key": os.environ.get("OPENWEATHERMAP_API_KEY", ""),
-        "ws_token": os.environ.get(
-            "NEXUS_WS_TOKEN", file_config.get("security", {}).get("ws_token", "nexus-default-token")
-        ),
+        # WS 鉴权 token 只信任 env `NEXUS_WS_TOKEN`。env 缺失 → 空串,
+        # 让后端启动期 fail-fast 而不是用 "nexus-default-token" 这种
+        # 公开字符串兜底(2026-07 pre-release hardening 收口。
+        # `~/.nexus/config.json` 的 security.ws_token 入口被移除 —
+        # 旧实现允许"用户改配置改 token",但前端 WS token 是 build 期
+        # 烘进 bundle 的 baked-in 字符串,改 config.json 也不会生效,
+        # 显式 dead 比"看起来能改"健康;若用户需要轮换,重装 DMG 即可)。
+        "ws_token": os.environ.get("NEXUS_WS_TOKEN", ""),
         "resume_secret": os.environ.get("NEXUS_RESUME_SECRET", ""),
         "context_window": int(os.environ.get("NEXUS_CONTEXT_WINDOW", "200000")),
         # 工作区目录
