@@ -103,6 +103,30 @@ def test_build_interrupt_resume_payload_rejects_unknown_interrupt() -> None:
     assert _build_interrupt_resume_payload((interrupt,), "expired", "approve") is None
 
 
+def test_build_interrupt_resume_payload_handles_non_dict_value() -> None:
+    """``Interrupt.value`` 不是 dict(例:str / list)时不崩,降级为空 decisions。
+
+    WHY:langgraph Interrupt 是用户自定义节点,value 类型由挂起方决定。
+    旧版直接 ``interrupt_value.get("action_requests", [])`` 在 value 不是
+    dict 时 AttributeError → 整个 confirmation_response 路径 500。
+    新版 ``isinstance(value, dict)`` 判断后兜底为空列表,
+    至少给前端一条 decisions: [{type: ...}] 的合理 payload。
+    """
+    from langgraph.types import Interrupt
+
+    from nexus.backend.api.ws.handlers import _build_interrupt_resume_payload
+
+    interrupt_str = Interrupt(value="freeform string value", id="str-id")
+    interrupt_list = Interrupt(value=[1, 2, 3], id="list-id")
+
+    payload_str = _build_interrupt_resume_payload((interrupt_str,), "str-id", "approve")
+    payload_list = _build_interrupt_resume_payload((interrupt_list,), "list-id", "reject")
+
+    # 不崩,降级为单条 decisions(value 不是 dict → action_requests=空 → max(1, 0)=1)
+    assert payload_str == {"str-id": {"decisions": [{"type": "approve"}]}}
+    assert payload_list == {"list-id": {"decisions": [{"type": "reject"}]}}
+
+
 @pytest.mark.asyncio
 async def test_run_agent_streaming_catches_graph_interrupt() -> None:
     """_run_agent_streaming 捕获 GraphInterrupt 并发 confirmation_request。
