@@ -3,19 +3,22 @@
  *
  * 启动方式(后端 env):
  *   NEXUS_E2E_MOCK=1
- *   NEXUS_E2E_SCENARIO=interrupt_agents_md
+ *   NEXUS_E2E_SCENARIO=interrupt_source
  *
  * mock 行为:不管用户 prompt 是什么,首次 LLM 调用就返回 write_file
- * 工具调用写 ~/.nexus/AGENTS.md → 命中 FilesystemPermission interrupt
- * 规则 → 后端发 confirmation_request → 前端 .confirm-card 出现。
+ * 工具调用写 nexus/backend/e2e_src.py(非白名单 + 非 AGENTS.md 受保护集)
+ * → PathAwareHITL 触发 GraphInterrupt → 后端发 confirmation_request
+ * → 前端 .confirm-card 出现。
  *
- * 副作用:会覆盖真 ~/.nexus/AGENTS.md。spec 用 beforeAll / afterAll
- * 备份还原。
+ * 副作用:会创建 nexus/backend/e2e_src.py,afterAll 清理。
  *
- * 为什么单独写一个 spec:后端启动时按 NEXUS_E2E_SCENARIO 锁定场景,
- * 一个 spec 跑不动两个 scenario;但 CI 默认 scenario=allow_nexus_write
- * 是不触发 HITL 的无害路径,只有专门测 HITL 的 spec 才需要切到
- * interrupt_agents_md。
+ * 为什么单独写一个 spec:跟 journey-hitl-workflow.spec.ts 等价断言,但
+ * 放在 e2e/ 根目录供"找 HITL 测试"时直接搜到。scenario 行为相同
+ * (interrupt_source),共享 mock LLM。
+ *
+ * 2026-07-13:之前用 interrupt_agents_md scenario,QualityGate 对
+ * AGENTS.md 写入是纯 deny/allow(返回错误),不调 interrupt,不弹
+ * .confirm-card。改用 interrupt_source(写项目源码)触发 PathAwareHITL。
  *
  * 2026-07-13:之前有 hitl-confirm.spec.ts(真 LLM)试图用自然语言 prompt
  * 诱导 LLM 主动调 edit_file 覆盖 AGENTS.md。真 LLM 在生产语义下不会主动
@@ -24,25 +27,33 @@
  * 真 LLM HITL 测试无意义,产品行为已用 mock 100% 覆盖。
  */
 import { test, expect } from '@playwright/test';
+import { existsSync, unlinkSync } from 'node:fs';
 import { openHome, messageInput, sendButton } from './helpers';
+
+const ARTIFACT_PATH = '/Users/yxb/projects/nexus/nexus/backend/e2e_src.py';
 
 test.skip(
   process.env.NEXUS_E2E_MOCK !== '1',
   '需要 NEXUS_E2E_MOCK=1 启用 mock LLM'
 );
 test.skip(
-  process.env.NEXUS_E2E_SCENARIO !== 'interrupt_agents_md',
-  '需要 NEXUS_E2E_SCENARIO=interrupt_agents_md 触发 HITL 路径'
+  process.env.NEXUS_E2E_SCENARIO !== 'interrupt_source',
+  '需要 NEXUS_E2E_SCENARIO=interrupt_source 触发 PathAwareHITL 路径'
 );
+
+test.afterAll(() => {
+  if (existsSync(ARTIFACT_PATH)) unlinkSync(ARTIFACT_PATH);
+});
 
 test('HITL 确认卡片 (mock):触发 → 批准 → 流完成', async ({ page }) => {
   test.setTimeout(60_000);
 
   await openHome(page);
 
-  // mock 收到 prompt 立刻返回 write_file(写 AGENTS.md)→ 命中 interrupt。
+  // mock 收到 prompt 立刻返回 write_file → nexus/backend/e2e_src.py
+  // (非白名单 + 非 AGENTS.md)→ PathAwareHITL 触发 GraphInterrupt。
   // prompt 内容对 mock 无意义,只填一个能明确语义的话。
-  const prompt = '请帮我整理一下长期记忆';
+  const prompt = '请在 nexus/backend/ 下生成 e2e_src.py';
   await expect(messageInput(page)).toBeEnabled({ timeout: 30_000 });
   await messageInput(page).fill(prompt);
   await sendButton(page).click();
@@ -71,8 +82,7 @@ test('HITL 确认卡片 (mock):触发 → 批准 → 流完成', async ({ page }
   );
   expect(judgeLeak).toBe(false);
 
-  // 注:不再断言 AGENTS.md 磁盘内容。deepagents write_file 走 StateBackend
-  // (虚拟,非真磁盘),HITL 批准后 StateBackend 写,文件不进 ~/.nexus/AGENTS.md
-  // 实盘。HITL 流程本身已通过"卡片 + 批准 + 流完成 + bug #58"验证。
-  // AGENTS.md 落盘正确性是 deepagents 内部职责,不在 e2e 范围。
+  // 注:不再断言 e2e_src.py 磁盘内容。deepagents write_file 走 StateBackend
+  // (虚拟,非真磁盘),HITL 批准后 StateBackend 写,文件不一定进真盘。HITL
+  // 流程本身已通过"卡片 + 批准 + 流完成 + bug #58"验证。
 });
