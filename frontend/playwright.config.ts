@@ -43,17 +43,22 @@ function loadActiveModelFromHome(): {
 }
 
 const homeModel = loadActiveModelFromHome();
-// shell env > ~/.nexus/models.json(api_key) > 占位符
+// shell env(只读 MINIMAX_API_BASE) > hardcoded minimax public base
 //
-// WHY api_base 不读 ~/.nexus/models.json:那个文件是用户在 Claude Desktop
+// WHY 不读 ~/.nexus/models.json 的 api_base:那个文件是用户在 Claude Desktop
 // 上配的,base 指向 Claude Desktop 本地 proxy (http://127.0.0.1:15721/...)
-// — 不能用于 E2E(2026-07-13 修)。直接 hardcode 走 minimaxi 公共 base。
+// — 不能用于 E2E(2026-07-13 修)。
+//
+// WHY 不读 shell 的 ``ANTHROPIC_BASE_URL``:local dev shell 通常为 Claude
+// Desktop proxy 设了这个 env;Playwright 直接透传会让 backend 拿 Claude
+// Desktop proxy 当 LLM endpoint → POST /chat/completions 返回 404
+// (proxy 不识别 ``MiniMax-M3`` 模型)。E2E 100% 必 fail。
+// 唯一允许的覆盖是 ``MINIMAX_API_BASE``,用户显式设来指向其他兼容端点
+// (如 apihub.agnes-ai.com)。其他 base 全部忽略。
 const effectiveApiKey =
   process.env.MINIMAX_API_KEY || homeModel?.api_key || 'e2e-placeholder';
 const effectiveApiBase =
-  process.env.MINIMAX_API_BASE ||
-  process.env.ANTHROPIC_BASE_URL ||
-  'https://api.minimaxi.com/v1';
+  process.env.MINIMAX_API_BASE || 'https://api.minimaxi.com/v1';
 const effectiveModelName =
   process.env.MODEL_NAME || homeModel?.name || 'MiniMax-M3';
 
