@@ -170,6 +170,10 @@ export default defineConfig({
         // (mock 默认 allow_nexus_write 不触发 HITL)。
         NEXUS_E2E_MOCK: process.env.NEXUS_E2E_MOCK ?? '0',
         NEXUS_E2E_SCENARIO: process.env.NEXUS_E2E_SCENARIO ?? 'allow_nexus_write',
+        // 流速控制(2026-07-13):mock sleep 2 秒,流持续 ~2s,确保 stop-mid-stream
+        // spec 的 stop-button 可见时间足够 click 命中。
+        // 其他 mock spec 也受益:慢一点的流让 polling assertion 更稳。
+        NEXUS_E2E_MOCK_DELAY_SEC: process.env.NEXUS_E2E_MOCK_DELAY_SEC ?? '2',
       },
     },
     {

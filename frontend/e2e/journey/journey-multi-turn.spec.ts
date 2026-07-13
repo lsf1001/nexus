@@ -13,10 +13,16 @@
  *   - 不强求引用全部 3 个关键词,至少 1 个(LLM 行为不可控)。
  *
  * 关键约束:全走真 LLM,timeout 240s(3 轮 × ~60-80s)。
+ * 必须 skip mock — mock LLM 只回固定反射文本(操作完成),无法回显前文关键词。
  */
 import { test, expect } from '@playwright/test';
 import { journeyOpenHome, sendSequence } from './helpers';
 import { messageCount } from '../helpers';
+
+test.skip(
+  process.env.NEXUS_E2E_MOCK === '1',
+  '上下文回显需要真 LLM,mock 模式只回固定反射文本,无法回显前文'
+);
 
 test('多轮上下文:3 条连发,引用前文', async ({ page }) => {
   test.setTimeout(240_000);
