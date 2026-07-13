@@ -76,23 +76,24 @@ export function useAutoScroll({
   useEffect(() => {
     // 跳过首屏(empty-state 由 hero 控制对齐,不滚)
     if (trigger.length === 0) return undefined;
-    if (rafRef.current !== null) {
-      window.cancelAnimationFrame(rafRef.current);
-    }
-    rafRef.current = window.requestAnimationFrame(() => {
+    const doScroll = () => {
       const el = scrollElRef.current ?? containerRef.current;
       if (el) {
         // 用户主动滚上去了,不要硬拽回去
-        if (userScrolledUpRef.current) {
-          rafRef.current = null;
-          return;
-        }
-        // 同步滚:llm 流速下,smooth 在 rAF 合并中反复被打断,scrollTop 一直为
-        // 0(instant 是同步设置,不会被 cancelAnimationFrame 撤销)。
+        if (userScrolledUpRef.current) return;
+        // 设置 scrollTop 到 scrollHeight 即可。
+        // 关键:必须拉到 max scrollTop —— scrollHeight 在 rAF 后可能还增长
+        // (LLM 流最后 chunk 没到),所以同一帧设两次,先让浏览器 paint,再
+        // 拿最新 scrollHeight 设一次。2026-07-13 真 LLM multi-turn 第二轮起
+        // 只滚一次会停在 rAF 内的中间高度,后续 chunk 撑出滚动条后 scrollTop
+        // 永远追不上,viewport ratio 0。
         el.scrollTop = el.scrollHeight;
+        requestAnimationFrame(() => {
+          el.scrollTop = el.scrollHeight;
+        });
       }
-      rafRef.current = null;
-    });
+    };
+    rafRef.current = window.requestAnimationFrame(doScroll);
     return () => {
       if (rafRef.current !== null) {
         window.cancelAnimationFrame(rafRef.current);
