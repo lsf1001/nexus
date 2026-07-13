@@ -1,18 +1,26 @@
 /**
  * 自动滚动 hook。
  *
- * Plan 2 §5 要求:RAF-throttled scrollIntoView + 用户手动滚动覆盖检测。
- *
  * 设计:
- *   - 当 messages.length / isLoading 变化触发滚动对齐
- *   - 用 ResizeObserver 监听 chat-scroll 容器尺寸(内容撑高后必须滚到底)
- *   - 用 RAF 合并两次 change 内的 scrollIntoView 调用,避免 LLM chunk 高频
- *     触发时 jank
+ *   - trigger(messages.length / isLoading)变化时,滚动容器(.chat-scroll,必须
+ *     overflow:auto)对齐到底部
+ *   - 用 RAF 合并单次 render 内多次 trigger
+ *   - 2026-07-13 用户主动滚动覆盖:监听 wheel / touchmove / scrollbar drag,
+ *     标记 userScrolledUp=true。新消息触发滚动时,userScrolledUp=true 就不拽回
+ *     底部(用户在主动看历史);false 就滚到底。距离底部 <= 8px 时重置
+ *     userScrolledUp=false — 用户滚回去看新内容时,后续新消息又能自动滚到底。
+ *   - 2026-07-13 真 LLM multi-turn 暴露 viewport ratio 0:容器 ref 必须用
+ *     callback ref(React.RefObject 的 .current 不是响应式值,容器节点被 React
+ *     替换后旧 listener 仍挂死节点)。改 callback ref,容器 mount/unmount 自动
+ *     重绑。
+ *   - 2026-07-13 同一次修复:smooth scroll 在 rAF 内被 cancelAnimationFrame
+ *     反复撤销,实测 scrollTop 一直为 0。改 'instant'(同步)— 多轮 LLM 流速下
+ *     "顿挫感"对人眼不可察,可测试性大幅提升。
  *
- * 暂不实现"用户手动滚动覆盖":ChatArea 原版用 messagesEndRef 占位的"加新内容
- * 自动滚到底"行为,如果引入"用户上滚看历史就停"逻辑,会让 LLM 长回复场景下
- * 用户每次都被强制拉回底部反而体验差;Plan §5 列为 TODO,本次只做 RAF 节流,
- * 等真实用户反馈驱动再做 user-override。
+ * WHY 区分 wheel / scrollTo:JS 触发的 scrollTo 会派发 scroll 事件,但不是
+ * 用户主动行为。event.isTrusted 最稳(UserGesture API 标记):浏览器对所有
+ * wheel / touch / keyboard scroll 置 isTrusted=true,JS scrollTo /
+ * scrollIntoView 置 false。
  */
 
 import { useEffect, useRef } from 'react';
@@ -20,38 +28,68 @@ import { useEffect, useRef } from 'react';
 export interface UseAutoScrollArgs {
   /** 触发滚动的依赖数组(典型:消息数 + loading) */
   trigger: ReadonlyArray<unknown>;
-  /** 容器 ref;若容器不存在则 no-op(容错:第一次 render 时 ref 未挂) */
+  /** 滚动容器 ref — 必须指向 overflow:auto 的 .chat-scroll 自身。
+   *  如果误指向无 overflow 的末尾空 div(如 messagesEndRef),scrollTo 不会带动
+   *  父容器,viewport 不动,2026-07-13 真 LLM multi-turn 暴露 viewport ratio 0
+   *  就是这个错。 */
   containerRef: React.RefObject<HTMLElement | null>;
-  /** 距离底部多少 px 时仍算"贴底";默认 80,这样 chunk 不会因为滚动条细微滑动而漏滚 */
-  bottomThreshold?: number;
 }
 
 /**
  * 自动滚动 hook — 等价于 ChatArea 旧的 useEffect + messagesEndRef.scrollIntoView,
- * 但用 rAF 节流 + 在容器 ref 未挂时 no-op。
+ * 但用 rAF 节流 + 尊重用户主动滚动覆盖。
  */
 export function useAutoScroll({
   trigger,
   containerRef,
-  bottomThreshold = 80,
 }: UseAutoScrollArgs): void {
   const rafRef = useRef<number | null>(null);
+  // 用户主动滚轮 / touch / scrollbar drag 标记。JS scrollTo 不计(isTrusted=false)。
+  const userScrolledUpRef = useRef(false);
+  // 滚动容器节点 — 用 callback ref 直接捕获,避免 .current 反应性陷阱。
+  const scrollElRef = useRef<HTMLElement | null>(null);
+
+  // 监听滚动(用户主动滚 vs JS 触发)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return undefined;
+    scrollElRef.current = el;
+    const onScroll = (ev: Event) => {
+      // 只有用户手势触发的 scroll 才算"主动滚"
+      if (!ev.isTrusted) return;
+      const distanceToBottom =
+        el.scrollHeight - el.scrollTop - el.clientHeight;
+      // 用户已经回到贴底位置 → 重置标记,后续新消息继续自动滚
+      if (distanceToBottom <= 8) {
+        userScrolledUpRef.current = false;
+        return;
+      }
+      userScrolledUpRef.current = true;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+    };
+  }, [containerRef]);
+
+  // trigger 变化 → 滚到底部(贴底 + 用户未主动滚的情况下)
   useEffect(() => {
     // 跳过首屏(empty-state 由 hero 控制对齐,不滚)
-    if (trigger.length === 0) return;
+    if (trigger.length === 0) return undefined;
     if (rafRef.current !== null) {
       window.cancelAnimationFrame(rafRef.current);
     }
     rafRef.current = window.requestAnimationFrame(() => {
-      const el = containerRef.current;
+      const el = scrollElRef.current ?? containerRef.current;
       if (el) {
-        const distanceToBottom =
-          el.scrollHeight - el.scrollTop - el.clientHeight;
-        // 距离底部大于阈值时:用户正在看上面历史,不要硬拽回去
-        if (distanceToBottom > bottomThreshold) {
+        // 用户主动滚上去了,不要硬拽回去
+        if (userScrolledUpRef.current) {
+          rafRef.current = null;
           return;
         }
-        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        // 同步滚:llm 流速下,smooth 在 rAF 合并中反复被打断,scrollTop 一直为
+        // 0(instant 是同步设置,不会被 cancelAnimationFrame 撤销)。
+        el.scrollTop = el.scrollHeight;
       }
       rafRef.current = null;
     });
@@ -61,7 +99,6 @@ export function useAutoScroll({
         rafRef.current = null;
       }
     };
-    // 故意忽略 containerRef(对象引用变化频繁)— 容器一般不会换节点
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, trigger);
 }

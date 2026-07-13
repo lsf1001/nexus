@@ -48,7 +48,10 @@ export function ChatArea({
   const [lastError, setLastError] = useState<LastError | null>(null);
   const [pendingClarification, setPendingClarification] =
     useState<PendingClarification | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  // 滚动容器 — 用作 useAutoScroll 的滚动目标(必须指向 .chat-scroll 自己,
+  // 不能用末尾的空 div messagesEndRef — 那个 div 没有 overflow,smooth scrollTo
+  // 不会带动父容器,2026-07-13 真 LLM multi-turn 暴露 viewport ratio 0)。
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const resetTriggerRef = useRef(resetTrigger ?? 0);
   const sessionIdRef = useRef<string | null>(conversationIdProp);
@@ -136,10 +139,13 @@ export function ChatArea({
     [wsSend],
   );
 
-  // === 自动滚动(rAF) ===
+  // === 自动滚动(rAF) — 滚动容器是 .chat-scroll(必须 overflow:auto),
+  // 不能是末尾空 div messagesEndRef — 那个 div 没有 overflow,smooth
+  // scrollTo 不会带动父容器。2026-07-13 真 LLM multi-turn 暴露 viewport
+  // ratio 0,根因就在这里。===
   useAutoScroll({
     trigger: [displayMessages.length, isLoading],
-    containerRef: messagesEndRef,
+    containerRef: chatScrollRef,
   });
 
   // === 单一发送入口 ===
@@ -202,7 +208,7 @@ export function ChatArea({
 
   return (
     <div className="chat-area">
-      <div className="chat-scroll">
+      <div className="chat-scroll" ref={chatScrollRef}>
         {isIdle ? (
           <EmptyState
             modelName={modelName}
@@ -245,7 +251,6 @@ export function ChatArea({
             onResolved={() => setPendingConfirmation(null)}
           />
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       {lastError && (
