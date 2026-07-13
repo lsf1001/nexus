@@ -1,0 +1,3 @@
+# Build-time WS token 持久化位置(build.rs 生成,64 hex 字符)
+# 同一台机器多次 cargo build 复用同一 token,DMG 重打不破坏老用户授权。
+.build_token
