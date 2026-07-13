@@ -5,6 +5,37 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+### [Unreleased] — Pre-release hardening (2026-07-14)
+
+#### Changed — WS 鉴权 token 随机化
+
+DMG bundle 内 WS 鉴权 token 由公开字符串 `nexus-default-token` 改为 build-time 随机生成(64 hex 字符),
+固化到前端 bundle + sidecar runtime env 两端对齐。
+
+- **`desktop/src-tauri/build.rs`**:编译期生成 `OUT_DIR/ws_token.rs`,含 `pub const WS_TOKEN: &str = "<hex>"`
+  - 优先级:`BUILD_WS_TOKEN` env → `desktop/src-tauri/.build_token` 持久化 → `openssl rand -hex 32` 首次生成
+  - 持久化保证:同一机器多次重打 DMG token 不变,老用户授权不失效
+- **`desktop/src-tauri/src/runtime.rs`**:`include!(concat!(env!("OUT_DIR"), "/ws_token.rs"))` 拿常量注入 sidecar env
+- **`scripts/build_dmg.sh`**:在 step 2 之前 export `VITE_NEXUS_WS_TOKEN` + `BUILD_WS_TOKEN`,
+  从 `.build_token` 读 token(或首次生成),同步给 Vite 编译期 + Rust 编译期
+- **`desktop/src-tauri/.gitignore`**:新增,忽略 `.build_token`
+
+#### Changed — 后端 `ws_token` 入口收紧 (breaking for config.json users)
+
+`nexus/backend/config.py` 删去 `file_config.security.ws_token` fallback + `"nexus-default-token"` 默认值:
+
+- 仅读 env `NEXUS_WS_TOKEN`,env 缺失 → **空串**(start_sidecar 会强制注入,所以正常运行)
+- 该字段即便在旧 version 一直被读也从未生效(前端 baked-in 才是真值),显式 dead 比"看起来能改"健康
+- **迁移提示**:`~/.nexus/config.json` 的 `security.ws_token` 字段被移除生效路径。本批 release 起,WS token 是 DMG 绑定的随机串,用户**无法**(也不需要)自行配置;需要轮换时重装 DMG 即可。
+
+#### Test plan
+
+- `tests/test_config_ws_token.py` 新增 3 个测试:env 缺失 → 空串 / env 设置 → 透传 / config.json 旧字段不再生效
+- 验证 `desktop/src-tauri/build.rs` 编译产物含新 token,不含 `nexus-default-token`
+- 验证 `release/Nexus-<ver>-arm64.dmg` 安装后用正确 token 200,`nexus-default-token` 401
+
+---
+
 ### test(e2e): journey 套件 Phase 2 扩到 8 条 (2026-07-13)
 
 新增 4 条 user-journey spec,补齐用户视角盲区:
