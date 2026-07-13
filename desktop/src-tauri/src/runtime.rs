@@ -85,6 +85,15 @@ pub async fn start_sidecar(app: &AppHandle) -> Result<(), String> {
 
     let mut cmd = Command::new(&sidecar_path);
     cmd.args(["--host", "127.0.0.1", "--port", "30000"])
+        // 显式注入 WS 鉴权 token,跟后端 nexus/backend/config.py 默认
+        // ("nexus-default-token") + tauri.conf.json beforeBuildCommand 里
+        // VITE_NEXUS_WS_TOKEN 三处对齐。前端 bundle 里 token 是 baked-in
+        // 字符串,运行时无法改;要让两端同步,必须三处都写同一个值。
+        //
+        // 为什么不随机 token:随机会让"用户在 ~/.nexus/config.json 改
+        // security.ws_token"的现有迁移路径失效(前端拿不到).先把硬编码
+        // 默认值打通 DMG,随机化留到单独 issue 配 Settings UI + build_token.rs.
+        .env("NEXUS_WS_TOKEN", "nexus-default-token")
         .kill_on_drop(true);
 
     let child = cmd

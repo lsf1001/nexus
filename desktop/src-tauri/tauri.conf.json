@@ -5,7 +5,7 @@
   "identifier": "cn.yexiaobai.nexus",
   "build": {
     "beforeDevCommand": "npm --prefix /Users/yxb/projects/nexus/frontend run dev",
-    "beforeBuildCommand": "VITE_TAURI=true npm --prefix /Users/yxb/projects/nexus/frontend run build && rm -rf /Users/yxb/projects/nexus/desktop/src-tauri/frontend-dist && mkdir /Users/yxb/projects/nexus/desktop/src-tauri/frontend-dist && cp -R /Users/yxb/projects/nexus/frontend/dist/. /Users/yxb/projects/nexus/desktop/src-tauri/frontend-dist/",
+    "beforeBuildCommand": "VITE_TAURI=true VITE_NEXUS_WS_TOKEN=nexus-default-token npm --prefix /Users/yxb/projects/nexus/frontend run build && rm -rf /Users/yxb/projects/nexus/desktop/src-tauri/frontend-dist && mkdir /Users/yxb/projects/nexus/desktop/src-tauri/frontend-dist && cp -R /Users/yxb/projects/nexus/frontend/dist/. /Users/yxb/projects/nexus/desktop/src-tauri/frontend-dist/",
     "devUrl": "http://localhost:30077",
     "frontendDist": "frontend-dist"
   },
