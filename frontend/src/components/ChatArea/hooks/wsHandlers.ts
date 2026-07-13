@@ -153,10 +153,7 @@ export const handleClarificationRequest: WsHandler = (ev, ctx) => {
     useStore.getState().setConversationMessages([
       ...msgs,
       {
-        id:
-          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-            ? crypto.randomUUID()
-            : `clar-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: crypto.randomUUID(),
         role: 'assistant',
         content: `[澄清中] ${question}`,
         createdAt: new Date(),
