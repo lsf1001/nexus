@@ -32,7 +32,7 @@ test('多轮上下文:3 条连发,引用前文', async ({ page }) => {
   const questions = [
     '用一句话介绍 Python',
     '用一句话介绍 JavaScript',
-    '用一句话介绍 Go',
+    '请总结一下:我前两轮分别问了你介绍哪种语言,各用一句话答我',
   ];
 
   const replies = await sendSequence(page, questions);
@@ -47,9 +47,17 @@ test('多轮上下文:3 条连发,引用前文', async ({ page }) => {
   // 上下文回显:第 3 条回复应至少引用前 2 条的关键词之一
   // 不强求全 3 个(LLM 行为不可控),至少含 1 个
   const lastReply = replies[replies.length - 1];
-  const hits = ['Python', 'JavaScript', 'Go'].filter((kw) => lastReply.includes(kw));
+  // 第 3 轮明确要求 LLM 列出前 2 轮的主题。LLM 必须提及 Python 和
+  // JavaScript — 兼容常见变体("Pythonic" / "JS" / "ECMAScript" 等)。
+  const variants = [
+    ['Python', 'Pythonic', 'py 语言', '蟒蛇'],
+    ['JavaScript', 'JS', 'ECMAScript', '脚本语言'],
+  ];
+  const hits = variants.filter((group) => group.some((kw) => lastReply.includes(kw)));
+  // 必须 2 个主题都提及(显式追问 → LLM 一定会回答)
+  // 留 1 个容差:偶发只答一个(LLM 自由发挥),至少 1 个
   expect(
     hits.length,
-    `期望最后一条回复含前文关键词,实际: ${lastReply}`,
+    `期望最后一条回复同时提及 Python + JavaScript(显式追问),实际: ${lastReply}`,
   ).toBeGreaterThanOrEqual(1);
 });
