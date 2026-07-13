@@ -71,6 +71,38 @@ def test_serialize_hitl_request_edit_file_preview_truncated() -> None:
     assert preview.endswith("...")
 
 
+def test_build_interrupt_resume_payload_targets_selected_interrupt() -> None:
+    """多个 pending interrupt 时必须只恢复用户选择的那一个。"""
+    from langgraph.types import Interrupt
+
+    from nexus.backend.api.ws.handlers import _build_interrupt_resume_payload
+
+    first = Interrupt(value={"action_requests": [{"name": "write_file"}]}, id="first")
+    second = Interrupt(
+        value={"action_requests": [{"name": "edit_file"}, {"name": "write_file"}]},
+        id="second",
+    )
+
+    payload = _build_interrupt_resume_payload((first, second), "second", "approve")
+
+    assert payload == {
+        "second": {
+            "decisions": [{"type": "approve"}, {"type": "approve"}],
+        }
+    }
+
+
+def test_build_interrupt_resume_payload_rejects_unknown_interrupt() -> None:
+    """过期的确认卡不能误恢复另一个挂起操作。"""
+    from langgraph.types import Interrupt
+
+    from nexus.backend.api.ws.handlers import _build_interrupt_resume_payload
+
+    interrupt = Interrupt(value={"action_requests": [{"name": "write_file"}]}, id="current")
+
+    assert _build_interrupt_resume_payload((interrupt,), "expired", "approve") is None
+
+
 @pytest.mark.asyncio
 async def test_run_agent_streaming_catches_graph_interrupt() -> None:
     """_run_agent_streaming 捕获 GraphInterrupt 并发 confirmation_request。

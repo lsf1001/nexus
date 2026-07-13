@@ -140,12 +140,28 @@ export const handleClarificationRequest: WsHandler = (ev, ctx) => {
         .slice(0, 6)
     : [];
   // 回填"[澄清中]"占位文案到 assistant 气泡,与 DB 历史一致,会话回放不丢上下文。
+  // race 修复:澄清帧可能抢在占位 assistant msg 之前到达(WS mock / 会话恢复),
+  // 此时 if 分支跳过 → 问题消息永远不进聊天历史。补 else 主动 push 一条新消息,
+  // 保证"无论帧序如何,澄清问题都会作为可见消息落进 ref"。
   const msgs = useStore.getState().conversationMessages;
   const last = msgs[msgs.length - 1];
   if (last && last.role === 'assistant' && last.content === '') {
     const next = [...msgs];
     next[next.length - 1] = { ...last, content: `[澄清中] ${question}` };
     useStore.getState().setConversationMessages(next);
+  } else {
+    useStore.getState().setConversationMessages([
+      ...msgs,
+      {
+        id:
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `clar-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        role: 'assistant',
+        content: `[澄清中] ${question}`,
+        createdAt: new Date(),
+      },
+    ]);
   }
   ctx.setPendingClarification({ question, options });
 };

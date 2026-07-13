@@ -3,7 +3,6 @@ import { ContextMenuHost } from './ContextMenuHost';
 import { SettingsView } from './SettingsView';
 import { SetupView } from './SetupView';
 import { Sidebar } from './Sidebar';
-import { SketchLine } from './SketchLines';
 import { ToastHost } from '../ToastHost';
 import { WechatAssistantView } from './WechatAssistantView';
 import { useStore } from '../../store';
@@ -69,9 +68,6 @@ export function ShellLayout({
           {view === 'settings' && <SettingsView onBack={() => onViewChange('chat')} />}
         </main>
 
-        {/* 手绘装饰:呼应原型的"暖色个人助理"风格 */}
-        <SketchLine position="top-right" />
-        <SketchLine position="bottom-left" />
       </div>
 
       {/* 全局右键菜单浮层(挂在最外层,避免被父级 overflow 切掉) */}

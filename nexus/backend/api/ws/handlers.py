@@ -145,6 +145,34 @@ def _invalidate_interrupts_cache(session_id: str) -> None:
     _interrupts_cache.pop(session_id, None)
 
 
+def _build_interrupt_resume_payload(
+    pending_interrupts: tuple[Any, ...],
+    interrupt_id: str,
+    decision: str,
+) -> dict[str, dict[str, list[dict[str, str]]] | None]:
+    """为指定的 LangGraph interrupt 构造 resume payload。
+
+    多个工具调用可在同一轮并行挂起。LangGraph 在这种场景要求
+    ``Command(resume={interrupt_id: value})``，不能再传一个未命名的 resume
+    值，否则会报“multiple pending interrupts”的运行时错误。
+    """
+    selected_interrupt = next(
+        (item for item in pending_interrupts if str(getattr(item, "id", "")) == interrupt_id),
+        None,
+    )
+    if selected_interrupt is None:
+        return None
+
+    interrupt_value = getattr(selected_interrupt, "value", {})
+    action_requests = interrupt_value.get("action_requests", []) if isinstance(interrupt_value, dict) else []
+    decision_count = max(1, len(action_requests))
+    return {
+        interrupt_id: {
+            "decisions": [{"type": decision} for _ in range(decision_count)],
+        }
+    }
+
+
 async def handle_websocket(
     websocket: WebSocket,
     *,
@@ -235,7 +263,7 @@ async def handle_websocket(
                         }
                     )
                     continue
-                interrupt_id = data.get("interrupt_id", "")  # noqa: F841 — 留作审计/日志,挂起项匹配由 checkpoint 接管
+                interrupt_id = str(data.get("interrupt_id", ""))
                 decision = data.get("decision", "reject")
                 if decision not in {"approve", "reject"}:
                     logger.warning("confirmation_response decision 无效: %s", decision)
@@ -263,10 +291,20 @@ async def handle_websocket(
                         }
                     )
                     continue
-                # HITL 期望的 resume payload:{"decisions": [{"type": ...}, ...]}
-                resume_payload: dict[str, Any] = {
-                    "decisions": [{"type": decision} for _ in pending_interrupts_for_resume]
-                }
+                resume_payload = _build_interrupt_resume_payload(
+                    pending_interrupts_for_resume,
+                    interrupt_id,
+                    decision,
+                )
+                if resume_payload is None:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error_code": "invalid_interrupt",
+                            "content": "待确认操作已失效，请重新发起请求",
+                        }
+                    )
+                    continue
                 # confirmation_response 路径不需要走 user 消息的 _classify_and_record
                 # 等流程,但 _run_agent_streaming 仍要 prompt 入参。command_resume
                 # 非空时,prompt["messages"] 会被忽略(改走 Command(resume=...))。

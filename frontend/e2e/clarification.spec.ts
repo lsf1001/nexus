@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { openHome, messageInput, sendButton } from './helpers';
+import { messageInput, sendButton } from './helpers';
 
 /**
  * 澄清流程 E2E（mock 后端）。
@@ -144,7 +144,7 @@ test('澄清流程：候选项渲染 + 点击候选项提交', async ({ page }) 
     },
   ]);
 
-  await openHome(page);
+  await page.goto('/app/');
   await waitForChatView(page);
 
   // 发消息(会触发 mock 的 clarification_request)
@@ -172,6 +172,11 @@ test('澄清流程：候选项渲染 + 点击候选项提交', async ({ page }) 
 
   // 验证澄清表单已清除
   await expect(clarifyCard).toBeHidden({ timeout: 2_000 });
+
+  // 澄清问题和选择均应成为可见消息，不能留下空白 assistant 气泡。
+  await expect(page.locator('.message-row.is-assistant', { hasText: '今天想吃什么?' })).toBeVisible();
+  await expect(page.locator('.message-row.is-user', { hasText: '烧烤' })).toBeVisible();
+  await expect(page.locator('.message-row.is-assistant .message-markdown')).not.toHaveText(/^\s*$/);
 });
 
 // ============== 2. 自由输入流程 ==============
@@ -188,7 +193,7 @@ test('澄清流程：无候选项时显示自由输入框 + Enter 提交', async
     },
   ]);
 
-  await openHome(page);
+  await page.goto('/app/');
   await waitForChatView(page);
 
   await messageInput(page).fill('模糊指令');
@@ -234,7 +239,7 @@ test('澄清流程：自由输入模式下取消按钮清除状态', async ({ pa
     },
   ]);
 
-  await openHome(page);
+  await page.goto('/app/');
   await waitForChatView(page);
 
   await messageInput(page).fill('cancel-test');
