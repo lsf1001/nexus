@@ -31,6 +31,18 @@ DMG_NAME="${APP_NAME}-${VERSION}-${ARCH}"
 echo ">>> step 1: build sidecar..."
 bash "$ROOT_DIR/scripts/build_sidecar.sh"
 
+# 1b. 准备 build-time 随机 WS token(2026-07 pre-release hardening)
+#     同一机器多次打 DMG 复用同一 token,重打不破坏老用户授权。
+#     build.rs 通过 env BUILD_WS_TOKEN 拿 + 持久化到 desktop/src-tauri/.build_token
+#     beforeBuildCommand 用 VITE_NEXUS_WS_TOKEN(env 注入) 给 Vite build 期 baked-in
+TOKEN_FILE="$ROOT_DIR/desktop/src-tauri/.build_token"
+if [ ! -f "$TOKEN_FILE" ]; then
+  openssl rand -hex 32 > "$TOKEN_FILE"
+  echo ">>> step 1b: generated WS token → $TOKEN_FILE"
+fi
+export VITE_NEXUS_WS_TOKEN="$(cat "$TOKEN_FILE")"
+export BUILD_WS_TOKEN="$VITE_NEXUS_WS_TOKEN"
+
 # 2. cargo tauri build(tauri.conf.json 的 targets=["app"],只产 .app 不打 DMG)
 #    不传 --target:让 cargo 用 host default target,产物在 target/release/bundle/macos/
 #    之前用 --target aarch64-apple-darwin 时 cargo 把 host default 写到了

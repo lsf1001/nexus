@@ -8,6 +8,9 @@ use tokio::process::{Child, Command};
 use tokio::sync::RwLock;
 use tokio::time::Instant;
 
+// build.rs 生成的编译期常量 WS_TOKEN(64 hex 字符),从 OUT_DIR 拿
+include!(concat!(env!("OUT_DIR"), "/ws_token.rs"));
+
 /// 全局 sidecar PID:主进程任何路径退出(cmd+Q / SIGTERM / panic)都靠这个杀子进程
 /// 不依赖 Tauri RunEvent,因为 macOS terminateApp 直接 SIGTERM 主进程,不走 ExitRequested
 static SIDECAR_PID: Lazy<std::sync::Mutex<Option<u32>>> =
@@ -85,15 +88,12 @@ pub async fn start_sidecar(app: &AppHandle) -> Result<(), String> {
 
     let mut cmd = Command::new(&sidecar_path);
     cmd.args(["--host", "127.0.0.1", "--port", "30000"])
-        // 显式注入 WS 鉴权 token,跟后端 nexus/backend/config.py 默认
-        // ("nexus-default-token") + tauri.conf.json beforeBuildCommand 里
-        // VITE_NEXUS_WS_TOKEN 三处对齐。前端 bundle 里 token 是 baked-in
-        // 字符串,运行时无法改;要让两端同步,必须三处都写同一个值。
-        //
-        // 为什么不随机 token:随机会让"用户在 ~/.nexus/config.json 改
-        // security.ws_token"的现有迁移路径失效(前端拿不到).先把硬编码
-        // 默认值打通 DMG,随机化留到单独 issue 配 Settings UI + build_token.rs.
-        .env("NEXUS_WS_TOKEN", "nexus-default-token")
+        // 把 build.rs 固化的常量 WS_TOKEN(OUT_DIR/ws_token.rs)注入 sidecar env,
+        // 与前端 Vite build 时 baked-in 的 VITE_NEXUS_WS_TOKEN 同源同值 —
+        // 两端字符串是在打包时按同一份 desktop/src-tauri/.build_token 决定的,
+        // 重打 DMG 不变更(除非用户主动 rotate)。原硬编码 "nexus-default-token"
+        // 公开字符串 + config.py fallback 的临时收口(commit ebb3808)正式收回。
+        .env("NEXUS_WS_TOKEN", WS_TOKEN)
         .kill_on_drop(true);
 
     let child = cmd
