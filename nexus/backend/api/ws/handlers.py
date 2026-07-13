@@ -326,19 +326,29 @@ async def handle_websocket(
             if not user_content:
                 continue
 
-            # 创建或获取会话。客户端可在 body 传 session_id(用于多轮/续传),
-            # 也可不传(让服务端自动分配)。无论谁给的 id,都需保证 sessions 表
-            # 里有该行,否则 add_message 会触发 FK constraint 失败。
-            # 旧实现只在 session_id is None 时才 create_session,导致客户端
-            # 传新 id 时直接 FK 失败 — 2026-06 E2E 用例 8/11 复现,详见 task #42。
+            # 解析本轮消息的会话标识。客户端可在 body 传 session_id(用于
+            # 多轮/续传),也可不传(让服务端自动分配)。
+            #
+            # 关键修复(2026-07-13):旧实现用外层 ``if session_id is None``
+            # 当门控,只在连接首条消息创建会话,后续 user 消息直接复用
+            # 累积的 session_id。这导致 client 端 ``onNewTask`` 后
+            # getSessionId()=null(发新会话的第一条消息),但 server 端
+            # ``session_id`` 还是上一轮的 uuid → 整段创建逻辑被跳过 →
+            # 不推 session_created → frontend sidebar 不会增长,用户体感
+            # "新对话按钮没生效"。
+            #
+            # 新实现:**每轮 user 消息独立解析**,不累积。confirmation_response
+            # 路径继续用外层 ``session_id``(它在 confirmation 之前已被
+            # 同一会话的 user 消息赋值,且 HITL 不允许在挂起期间插新 user
+            # 消息,值不会被覆盖)。
+            user_session_id: str | None = None
             new_session_created = False
             title = ""
-            client_supplied_id: str | None = None
-            if session_id is None:
-                client_supplied_id = data.get("session_id")
-                if not client_supplied_id:
-                    # 客户端没传,服务端生成新 id
-                    session_id = str(uuid.uuid4())
+            client_supplied_id: str | None = data.get("session_id")
+            if client_supplied_id:
+                # 客户端传了 id,先用它,再 ensure DB 行存在
+                user_session_id = client_supplied_id
+                if get_session(user_session_id) is None:
                     client_title = (data.get("title") or "").strip()
                     if client_title:
                         title = client_title
@@ -347,34 +357,38 @@ async def handle_websocket(
                         title = cleaned[:30] + ("…" if len(cleaned) > 30 else "")
                         if not title:
                             title = "新会话"
-                    create_session(session_id, title=title, channel="main")
+                    create_session(user_session_id, title=title, channel="main")
+                    # 客户端用的 id 是新的(此前 DB 无),发 session_created
+                    # 让客户端拿回服务端认可的 title 字段
                     new_session_created = True
                 else:
-                    # 客户端传了 id,先用它,再 ensure DB 行存在
-                    session_id = client_supplied_id
-                    if get_session(session_id) is None:
-                        client_title = (data.get("title") or "").strip()
-                        if client_title:
-                            title = client_title
-                        else:
-                            cleaned = user_content.strip().replace("\n", " ")
-                            title = cleaned[:30] + ("…" if len(cleaned) > 30 else "")
-                            if not title:
-                                title = "新会话"
-                        create_session(session_id, title=title, channel="main")
-                        # 客户端用的 id 是新的(此前 DB 无),发 session_created
-                        # 让客户端拿回服务端认可的 title 字段
-                        new_session_created = True
-                    else:
-                        # 会话已存在:若客户端带了非空 title 则应用,避免用户改名
-                        # 被静默丢弃。WHY:旧实现只走 ``if get_session is None``
-                        # 分支,复用已有 session 时 ``data["title"]`` 直接被忽略,
-                        # 前端改名 → 服务端不变 → 用户困惑。空 title 跳过以避免
-                        # 每次普通聊天都触发无谓 UPDATE + 改 updated_at。
-                        client_title = (data.get("title") or "").strip()
-                        if client_title:
-                            update_session(session_id, title=client_title)
-                            title = client_title
+                    # 会话已存在:若客户端带了非空 title 则应用,避免用户改名
+                    # 被静默丢弃。WHY:旧实现只走 ``if get_session is None``
+                    # 分支,复用已有 session 时 ``data["title"]`` 直接被忽略,
+                    # 前端改名 → 服务端不变 → 用户困惑。空 title 跳过以避免
+                    # 每次普通聊天都触发无谓 UPDATE + 改 updated_at。
+                    client_title = (data.get("title") or "").strip()
+                    if client_title:
+                        update_session(user_session_id, title=client_title)
+                        title = client_title
+            else:
+                # 客户端没传,服务端生成新 id
+                user_session_id = str(uuid.uuid4())
+                client_title = (data.get("title") or "").strip()
+                if client_title:
+                    title = client_title
+                else:
+                    cleaned = user_content.strip().replace("\n", " ")
+                    title = cleaned[:30] + ("…" if len(cleaned) > 30 else "")
+                    if not title:
+                        title = "新会话"
+                create_session(user_session_id, title=title, channel="main")
+                new_session_created = True
+
+            # 同步给外层 session_id,保证 confirmation_response / 后续逻辑
+            # 仍能读到"本轮的会话标识"。但下一次 user 消息来临时,此变量
+            # 会被 user_session_id 重新覆盖(每轮独立解析,不再累积)。
+            session_id = user_session_id
 
             if new_session_created:
                 await websocket.send_json(

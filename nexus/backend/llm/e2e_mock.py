@@ -159,6 +159,14 @@ class E2EMockChatModel(BaseChatModel):
         return "e2e-mock"
 
     def _generate(self, messages: list, stop=None, run_manager=None, **kwargs: Any) -> ChatResult:
+        # E2E 流速控制(2026-07-13):stop-mid-stream spec 依赖"流持续一段时间"
+        # 才能让用户点 stop。默认 0(mock 立即返回),NEXUS_E2E_MOCK_DELAY_SEC
+        # 设成 2 可让流持续 ~2 秒,足以触发 stop 按钮交互。
+        delay = float(os.environ.get("NEXUS_E2E_MOCK_DELAY_SEC", "0"))
+        if delay > 0:
+            import time as _time
+
+            _time.sleep(delay)
         # 错误注入场景:每次 invoke 都抛,模拟 LLM 端点错误。
         # WHY:让 stream_guard 走分类 + error 帧路径,验证前端 error 兜底。
         if self.scenario == "auth_401":
