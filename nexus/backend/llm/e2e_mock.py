@@ -4,8 +4,9 @@
 平时不加载,不影响生产。
 
 设计:NEXUS_E2E_SCENARIO 环境变量决定返回哪种预定义 AIMessage(tool_calls)。
-支持 7 类场景,覆盖 HITL 全部路径:
+支持 7 类工具场景 + 2 类错误注入场景,覆盖 HITL 全部路径 + 错误兜底:
 
+工具场景:
   - allow_nexus_write:返回 write_file 写到 .nexus/(应直接 allow,无 HITL)
   - interrupt_source:返回 write_file 写 nexus/backend/x.py(应 HITL,用户 approve)
   - interrupt_agents_md:返回 write_file 写 ~/.nexus/AGENTS.md(应 HITL + 评估)
@@ -13,6 +14,10 @@
   - multi_tool_calls:返回 2 个 tool_calls(1 allow + 1 interrupt)— HITL 批处理
   - reject_then_reflect:返回 write_file 写源码 → HITL → reject → 反思不再写
   - edit_file_interrupt:返回 edit_file 改源码(应 HITL)
+
+错误注入场景(每次 invoke 都 raise,不走 _build_message):
+  - auth_401:抛 openai.AuthenticationError(密钥失效)→ 走 stream_guard → error 帧
+  - rate_limit:抛 openai.RateLimitError(限流)→ 走 stream_guard 重试 + 兜底帧
 
 每次 mock LLM 调用返回一次预定义 AIMessage;后续轮次由 deepagents 自行
 处理(approve 后 LLM 不再调工具,reject 后 LLM 反思)。
@@ -28,6 +33,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import httpx
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -133,9 +139,13 @@ class E2EMockChatModel(BaseChatModel):
     """E2E 测试用 mock LLM:每次 invoke 返回下一个 AIMessage(tool_calls)。
 
     行为契约:
-      - 第 1 次 invoke:返回 ``_SCENARIOS[scenario][0]`` 的 tool_calls(预定义)
-      - 第 2 次 invoke(模拟 approve 后):返回无 tool_call 的 AIMessage(LLM 反思)
-      - 第 3+ 次 invoke:同样返回反思文本(防止 deepagents 循环)
+      - ``_SCENARIOS`` 中的场景:第 1 次 invoke 返回预设 tool_calls(模拟
+        LLM 决定写文件);后续走反思文本。
+      - 特殊场景 ``auth_401``:每次 invoke 都 raise ``AuthenticationError``,
+        模拟 LLM 端点 401 错误(密钥失效),走 stream_guard → 前端 error
+        帧。验证前端是否兜底回 SetupView 而不是无限 spinner。
+      - 特殊场景 ``rate_limit``:每次 invoke 都 raise ``RateLimitError``,
+        触发 stream_guard 重试 + 兜底(_exhausted 帧)。
 
     bind_tools / with_structured_output 返回自身(忽略 schema,因为 mock LLM
     不需要工具 schema — 直接返回预设的 tool_calls)。
@@ -149,6 +159,24 @@ class E2EMockChatModel(BaseChatModel):
         return "e2e-mock"
 
     def _generate(self, messages: list, stop=None, run_manager=None, **kwargs: Any) -> ChatResult:
+        # 错误注入场景:每次 invoke 都抛,模拟 LLM 端点错误。
+        # WHY:让 stream_guard 走分类 + error 帧路径,验证前端 error 兜底。
+        if self.scenario == "auth_401":
+            from openai import AuthenticationError
+
+            raise AuthenticationError(
+                "Incorrect API key provided",
+                response=httpx.Response(401, request=httpx.Request("POST", "/v1/chat/completions")),
+                body=None,
+            )
+        if self.scenario == "rate_limit":
+            from openai import RateLimitError
+
+            raise RateLimitError(
+                "Rate limit reached",
+                response=httpx.Response(429, request=httpx.Request("POST", "/v1/chat/completions")),
+                body=None,
+            )
         return ChatResult(
             generations=[
                 ChatGeneration(

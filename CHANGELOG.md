@@ -5,6 +5,27 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+### test(e2e): journey 套件 Phase 2 扩到 8 条 (2026-07-13)
+
+新增 4 条 user-journey spec,补齐用户视角盲区:
+
+- `journey-quick-prompts-and-history`: 4 个 QUICK_PROMPTS 填入 + 手动发送 + Sidebar 历史会话切换
+- `journey-stop-mid-stream`: 流期间 send-button disabled + 流结束恢复可点 + 气泡长度稳定
+- `journey-input-edge-cases`: 空消息(noop) / emoji / 多语言(中英日)3 个 sub-test
+- `journey-auth-401`: 模型密钥失效兜底(走 `NEXUS_E2E_SCENARIO=auth_401` mock 场景)
+
+**WHY**:Phase 1 落地 4 条 journey spec 后,用户视角还有"输入边界 / 交互流 / 错误路径"三类盲区没覆盖,本批补齐。
+微信扫码后"收消息 / 关键词回复"是另一个盲区,但后端无 HTTP inbound webhook 端点(消息走 WS 长连接),无法 mock,留待后续专项。
+
+**mock LLM 扩 2 个场景**(`nexus/backend/llm/e2e_mock.py`):
+
+- `auth_401`:每次 invoke 抛 `openai.AuthenticationError`,模拟 LLM 端点密钥失效
+- `rate_limit`:每次 invoke 抛 `openai.RateLimitError`,触发 stream_guard 重试 + 兜底
+
+详见 `docs/superpowers/plans/2026-07-12-e2e-journey-suite.md` Phase 2。
+
+---
+
 ### Breaking — WebSocket subprotocol 格式 (2026-07-12)
 
 协议前缀由 `nexus-v1.token=<value>` 改为 `nxv1-<base64url(token)>`。

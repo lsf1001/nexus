@@ -21,16 +21,21 @@ CI 必跑 + retries=2 兜底。
 | `wechat-channel.spec.ts` | 微信通道绑定 / 解绑 |
 | `ws-auth-subprotocol.spec.ts` | WS 鉴权协议契约 |
 
-### 4 条 user-journey spec(`frontend/e2e/journey/`)
+### 8 条 user-journey spec(`frontend/e2e/journey/`)
 
-模拟人工视角的端到端旅程,**全走真 LLM**,**CI 必跑**:
+模拟人工视角的端到端旅程。**默认全走真 LLM**,mock 模式(只 `auth_401` 一条)
+需显式 `NEXUS_E2E_MOCK=1`;**CI 必跑**。
 
-| Spec | 用户旅程 |
-| --- | --- |
-| `journey-cold-start.spec.ts` | 新用户冷启动 → 首次回复 |
-| `journey-multi-turn.spec.ts` | 多轮上下文累积与回显 |
-| `journey-hitl-workflow.spec.ts` | HITL 工作流:触发 → 批准 → 流续接 |
-| `journey-resilience.spec.ts` | 网络中断 → 重连 → 继续对话 |
+| Spec | 用户旅程 | LLM |
+| --- | --- | --- |
+| `journey-cold-start.spec.ts` | 新用户冷启动 → 首次回复 | 真 |
+| `journey-multi-turn.spec.ts` | 多轮上下文累积与回显 | 真 |
+| `journey-hitl-workflow.spec.ts` | HITL 工作流:触发 → 批准 → 流续接 | 真 |
+| `journey-resilience.spec.ts` | 网络中断 → 重连 → 继续对话 | 真 |
+| `journey-quick-prompts-and-history.spec.ts` | 4 个 QUICK_PROMPTS + Sidebar 历史切换 | 真 |
+| `journey-stop-mid-stream.spec.ts` | 流期间 send-button disabled + 流结束恢复 | 真 |
+| `journey-input-edge-cases.spec.ts` | 空 / emoji / 多语言 输入边界 | 真 |
+| `journey-auth-401.spec.ts` | 模型密钥失效兜底(需 `NEXUS_E2E_SCENARIO=auth_401`) | mock |
 
 `journey/` 目录内自带 `helpers.ts`,封装 journey 专用高层动作
 (`sendSequence` / `expectContextRecall` / `killBackend` 等),
@@ -40,9 +45,13 @@ CI 必跑 + retries=2 兜底。
 
 ```bash
 cd frontend
-npm run test:e2e                       # 全部 14 条
+npm run test:e2e                       # 全部 18 条
 npm run test:e2e -- e2e/journey/        # 只跑 journey
 npm run test:e2e -- e2e/chat-happy-path # 只跑单条
+
+# 跑 401 mock(只一条)
+NEXUS_E2E_MOCK=1 NEXUS_E2E_SCENARIO=auth_401 \
+  npm run test:e2e -- e2e/journey/journey-auth-401
 ```
 
 ## 调试工具
