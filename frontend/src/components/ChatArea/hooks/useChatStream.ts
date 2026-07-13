@@ -16,7 +16,7 @@
  * 同步通过 useStore.getState() 读最新值,保持 React 单向数据流。
  */
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import type { Message, StreamEvent } from '../../../types';
 import { useStore } from '../../../store';
 
@@ -45,6 +45,14 @@ export interface ChatStreamActions {
 
   /** 当前 React 状态里的消息快照(只读) */
   readonly snapshot: () => Message[];
+
+  /** 用户主动停止流:appendToAssistant 后续调用 noop,直到下次 pushUserAndPlaceholder 清旗 */
+  markUserStopped: () => void;
+
+  /** 用户未主动停止,允许把流式 patch 写到 store(2026-07-13:为 handleFinal 暴露
+   *  读路径,handleFinal 直接 setState 会绕过 appendToAssistant 的 stopped gate,
+   *  导致"已停止" marker 被覆盖。handleFinal 在写入前查这个 gate。 */
+  allowsStreaming: () => boolean;
 }
 
 export function useChatStream(): ChatStreamActions {
@@ -52,6 +60,15 @@ export function useChatStream(): ChatStreamActions {
   // 这样 store 的 selector(`useStore((s) => s.conversationMessages)`)继续生效,
   // 其它订阅者(右侧消息列表 / 上下文预览)保持现有行为。reducer 占位已不需要,
   // 因为 setConversationMessages 已经会触发订阅者重渲染。
+  //
+  // user-stopped gate:用 ref 而非 store 状态 — 服务端流继续推 chunk/final/thinking,
+  // 但客户端已"放弃"本条流。appendToAssistant 内部检查该 ref,true 直接 return,
+  // 避免把"已停止"标记后的内容又渲染出来。新一轮 pushUserAndPlaceholder 时清旗,
+  // 留空字符串 marker("已停止")在原 assistant 占位上,作为视觉信号。
+  //
+  // 为什么放 ref 不放 store:stop 是高频路径(chunk 每帧调一次),放 store 会触发
+  // 全订阅者重渲染,放 ref 只在 read 路径生效,0 render。
+  const stoppedRef = useRef(false);
 
   const ensureAssistantPlaceholder = useCallback((): boolean => {
     const msgs = useStore.getState().conversationMessages;
@@ -71,6 +88,9 @@ export function useChatStream(): ChatStreamActions {
 
   const appendToAssistant = useCallback(
     (patch: Partial<Pick<Message, 'content' | 'thinking'>>) => {
+      // user-stopped gate:点 stop 后服务端流仍可能继续推 chunk/final/thinking,
+      // 这里直接丢弃,不修改 store,避免"已停止"标记之后又冒出新文字。
+      if (stoppedRef.current) return;
       const msgs = useStore.getState().conversationMessages;
       const idx = msgs.length - 1;
       if (idx < 0) return;
@@ -91,6 +111,8 @@ export function useChatStream(): ChatStreamActions {
   );
 
   const pushUserAndPlaceholder = useCallback((userMsg: Message) => {
+    // 新一轮对话 → 清 stopped gate,让后续 chunk 正常写入。
+    stoppedRef.current = false;
     const msgs = useStore.getState().conversationMessages;
     const placeholder: Message = {
       id: crypto.randomUUID(),
@@ -114,10 +136,17 @@ export function useChatStream(): ChatStreamActions {
   }, []);
 
   const reset = useCallback(() => {
+    stoppedRef.current = false;
     useStore.getState().clearConversationMessages();
   }, []);
 
   const snapshot = useCallback(() => useStore.getState().conversationMessages, []);
+
+  const markUserStopped = useCallback(() => {
+    stoppedRef.current = true;
+  }, []);
+
+  const allowsStreaming = useCallback(() => !stoppedRef.current, []);
 
   return {
     ensureAssistantPlaceholder,
@@ -126,6 +155,8 @@ export function useChatStream(): ChatStreamActions {
     replaceAssistantWithPlaceholder,
     reset,
     snapshot,
+    markUserStopped,
+    allowsStreaming,
   };
 }
 

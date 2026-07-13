@@ -70,6 +70,16 @@ export const handleChunk: WsHandler = (ev, ctx) => {
 export const handleFinal: WsHandler = (ev, ctx) => {
   // 仅当 incoming 与当前累计内容不同时才覆盖 — 说明是 quality pipeline 替换,
   // 而非 chunks 总和(原 ChatArea 行为)。
+  //
+  // 2026-07-13:用户点 stop 后 appendToAssistant gate 已丢弃后续 chunk,但
+  // handleFinal 直接 useStore.setState 覆盖最后一条 assistant content — 会把
+  // handleStop 追加的 "[已停止]" marker 抹掉。这里必须尊重 user-stop gate,
+  // 否则最终 DOM 看不到 marker,journey-stop-mid-stream spec 永远失败。
+  if (!ctx.stream.snapshot().length || !ctx.stream.allowsStreaming()) {
+    ctx.setIsLoading(false);
+    ctx.disarmWatchdog();
+    return;
+  }
   if (typeof ev.content !== 'string') {
     ctx.setIsLoading(false);
     ctx.disarmWatchdog();

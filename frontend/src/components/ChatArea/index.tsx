@@ -174,6 +174,32 @@ export function ChatArea({
       ? '本地助手离线，请先在设置中检查模型'
       : '正在连接本地助手...';
 
+  // === 停止当前流(2026-07-13 新增) ===
+  // 客户端 gate:把 useChatStream 内部 stoppedRef 置 true,后续 chunk/thinking/final
+  // 都被丢弃,不写 store;再在最后一条 assistant 末尾追加"已停止" marker 作为视觉
+  // 反馈。同时 disarmWatchdog + setIsLoading(false),让 send 按钮重新可点。
+  //
+  // 为什么是"软停止"而不是断 WS:断 WS 会触发 wsConnected=false → useEffect onConnectedChange
+  // 通知上游 → store.wsConnected 抖动 → 用户看到连接断开提示。客户端 gate 保留了
+  // 同一个 WS,体感更平滑。代价:服务端 stream 继续跑到自然结束(后端无 abort 帧),
+  // 但客户端不再处理其 chunk。
+  const handleStop = useCallback(() => {
+    stream.markUserStopped();
+    // 立即写一个标记到当前 assistant 占位(appendToAssistant 已 gate,但 pushUserAndPlaceholder
+    // 没 gate;这里直接调 setConversationMessages 绕开 stopped gate)
+    const msgs = useStore.getState().conversationMessages;
+    const last = msgs[msgs.length - 1];
+    if (last && last.role === 'assistant') {
+      const stoppedSuffix = last.content?.includes('[已停止]') ? '' : '\n\n_[已停止]_';
+      useStore.getState().setConversationMessages([
+        ...msgs.slice(0, -1),
+        { ...last, content: (last.content ?? '') + stoppedSuffix },
+      ]);
+    }
+    disarmWatchdog();
+    setIsLoading(false);
+  }, [stream, disarmWatchdog, setIsLoading]);
+
   return (
     <div className="chat-area">
       <div className="chat-scroll">
@@ -230,6 +256,7 @@ export function ChatArea({
         placeholder={composerPlaceholder}
         disabled={!wsConnected}
         isLoading={isLoading}
+        onStop={handleStop}
         inputRef={inputRef}
       />
     </div>

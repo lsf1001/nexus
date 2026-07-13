@@ -49,6 +49,8 @@ function makeCtx(): {
       pushUserAndPlaceholder: vi.fn(),
       replaceAssistantWithPlaceholder: vi.fn(),
       snapshot: () => [],
+      markUserStopped: vi.fn(),
+      allowsStreaming: () => true,
     },
     setLastError: spies.setLastError,
     setIsLoading: spies.setIsLoading,
