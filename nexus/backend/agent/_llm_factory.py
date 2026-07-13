@@ -79,13 +79,18 @@ def get_llm(
         # 同时缺 model_name 与 api_key:保持旧行为,明确报错
         raise ValueError("model_name and api_key are both required")
     else:
-        # 走 CONFIG 默认渠道
+        # 走 CONFIG 默认渠道。
+        # WHY ``api_base or CONFIG["..."]``:`_create_agent_with_model` 可能显式
+        # 传入 model_config 的 api_base(用户 UI 配置),不要被 CONFIG(默认走
+        # ``ANTHROPIC_BASE_URL`` env)覆盖 — 否则 shell 里给 Claude Desktop proxy
+        # 配的 ANTHROPIC_BASE_URL 会让 E2E / Tauri 桌面端拿错误 base(2026-07-13
+        # journey E2E 404 NotFound 修复)。
         from langchain_openai import ChatOpenAI
 
         chat = ChatOpenAI(
             model=model_name,
             openai_api_key=CONFIG["minimax_api_key"],
-            openai_api_base=CONFIG["minimax_api_base"],
+            openai_api_base=api_base or CONFIG["minimax_api_base"],
             temperature=temperature if temperature is not None else CONFIG["temperature"],
             timeout=sdk_timeout,
             max_retries=0,

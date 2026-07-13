@@ -14,8 +14,12 @@ import { openHome, sendMessageAndWaitForReply } from './helpers';
  *  - Vite HMR 也会在浏览器里建一个 `ws://host/app/?token=...`，
  *    自带重连。如果测试捕获所有 WebSocket，关闭时会一起关掉，
  *    Vite 重连会污染 `__nexusSockets` 数组 → 无法判定业务 WS 是否真的重连。
- *  - 因此 init script 只 push 业务 WS（URL 包含 `/api/ws?` 的），
+ *  - 因此 init script 只 push 业务 WS（URL 包含 `/api/ws` 但不是 Vite HMR），
  *    Vite HMR 不进 `__nexusAppSockets`。
+ *  - 2026-07-12 WS 鉴权改造回归:旧匹配 `/api/ws?` 在 token 改走 subprotocol
+ *    后失效(URL 无 `?`)。改为只匹配 `/api/ws` + 排除 `vite-hmr` 子协议。
+ *    Vite HMR 在 dev 模式总是建 `ws://host/app/?token=...`(URL 带 `?token=`,
+ *    subprotocol `vite-hmr`),业务 WS 没 `?token=`、subprotocol `nxv1-<b64u>`。
  *  - 不再用 UI 文案 "本地在线" 断言：2026-06 macOS DMG 新 UI 在 WS
  *    connecting 状态时 pill 显示 "正在连接本地助手"，但具体文案易变；
  *    走编程式 WS 数组断言更稳定。
@@ -45,8 +49,11 @@ test('断线重连：WS 断开后能自动恢复并继续收发', async ({ page 
         protocols === undefined
           ? new OriginalWebSocket(url)
           : new OriginalWebSocket(url, protocols);
-      // 只收 Nexus 业务 WS（/api/ws?），Vite HMR（/app/?token=…）不收。
-      if (urlStr.includes('/api/ws?')) {
+      // 只收 Nexus 业务 WS(/api/ws),Vite HMR(/app/?token=...)不进。
+      // 2026-07-12 WS 鉴权改造后 token 走 Sec-WebSocket-Protocol,业务 URL
+      // 不再带 `?token=`;Vite HMR dev 总是 `ws://host/app/?token=...`。
+      // 旧 `/api/ws?` 匹配在 token 改走后失效(URL 无 `?`)。
+      if (urlStr.includes('/api/ws') && !urlStr.includes('?token=')) {
         const arr = (w[key as keyof typeof w] as WebSocket[] | undefined) ?? [];
         arr.push(ws);
       }
@@ -69,12 +76,18 @@ test('断线重连：WS 断开后能自动恢复并继续收发', async ({ page 
   }, APP_WS_KEY);
   expect(initialSockets).toBeGreaterThanOrEqual(1);
 
-  // 关闭业务 WS
+  // 关闭业务 WS——走非正常关闭(code=1006,wasClean=false)模拟网络断开,
+  // WsClient 的 wasClean 检测逻辑(code=1000 不重连)才会进入退避重连路径。
+  // WHY:Playwright 直接 ws.close() 默认 code=1000 正常 FIN,服务端 1000
+  // 响应,wasClean=true,WsClient 见 wasClean 就放弃 reconnect。
   await page.evaluate((key) => {
     const arr = (window as unknown as Record<string, WebSocket[] | undefined>)[key] ?? [];
     for (const ws of arr) {
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
+        // dispatchEvent 模拟异常断网(1006 abnormal closure)。不调 ws.close():
+        // 它默认 1000 会让 WsClient 误判 wasClean=true 而不重连。
+        const ev = new CloseEvent('close', { code: 1006, reason: 'abnormal', wasClean: false });
+        ws.dispatchEvent(ev);
       }
     }
   }, APP_WS_KEY);

@@ -1,12 +1,61 @@
 import { defineConfig, devices } from '@playwright/test';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 // 路径必须与 webServer.env.NEXUS_HOME 完全一致:
 // seedCmd 写到 $NEXUS_HOME/.nexus/models.json,但后端 load_models() 读
 // NEXUS_HOME/.nexus/models.json。两边都得是同一个值,否则 CI 写一份、
 // 后端读 ~/.nexus/models.json(api_key=空)→ useBootstrap 进 'setup' 视图。
 const e2eNexusHome = `${tmpdir()}/nexus-playwright-${process.pid}`;
+
+/**
+ * 从 ~/.nexus/models.json 拿 active 模型的 api_key / api_base / name。
+ *
+ * WHY:用户反馈"你不是用过吗 每次都问我要什么"——shell 经常没 export
+ * MINIMAX_API_KEY,但 ~/.nexus/models.json 里已经有现成的真实 key(用户在
+ * UI 上配的)。这条路径优先读这个,避免 dev 每次手动 export。
+ *
+ * 返回 null 时,seed 用 e2e-placeholder(常见情况:CI runner 没有
+ * ~/.nexus/models.json,只能依赖 shell env)。
+ */
+function loadActiveModelFromHome(): {
+  api_key: string;
+  api_base: string;
+  name: string;
+} | null {
+  const homeModels = join(homedir(), '.nexus', 'models.json');
+  if (!existsSync(homeModels)) return null;
+  try {
+    const data = JSON.parse(readFileSync(homeModels, 'utf-8'));
+    const models = Array.isArray(data?.models) ? data.models : [];
+    const active = models.find((m: { is_active?: boolean }) => m.is_active) ?? models[0];
+    if (!active) return null;
+    return {
+      api_key: String(active.api_key ?? ''),
+      api_base: String(active.api_base ?? 'https://api.minimaxi.com/v1'),
+      name: String(active.name ?? 'MiniMax-M3'),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const homeModel = loadActiveModelFromHome();
+// shell env > ~/.nexus/models.json(api_key) > 占位符
+//
+// WHY api_base 不读 ~/.nexus/models.json:那个文件是用户在 Claude Desktop
+// 上配的,base 指向 Claude Desktop 本地 proxy (http://127.0.0.1:15721/...)
+// — 不能用于 E2E(2026-07-13 修)。直接 hardcode 走 minimaxi 公共 base。
+const effectiveApiKey =
+  process.env.MINIMAX_API_KEY || homeModel?.api_key || 'e2e-placeholder';
+const effectiveApiBase =
+  process.env.MINIMAX_API_BASE ||
+  process.env.ANTHROPIC_BASE_URL ||
+  'https://api.minimaxi.com/v1';
+const effectiveModelName =
+  process.env.MODEL_NAME || homeModel?.name || 'MiniMax-M3';
 
 /**
  * Nexus 前端 E2E 测试配置。
@@ -66,15 +115,13 @@ export default defineConfig({
         // 问题(2026-07-01 实测 local + CI heredoc 不工作,/tmp/.../models.json
         // 根本不存在)。
         const isMock = process.env.NEXUS_E2E_MOCK === '1';
-        const apiKey = isMock
-          ? 'e2e-mock-placeholder'
-          : (process.env.MINIMAX_API_KEY ?? 'e2e-placeholder');
+        const apiKey = isMock ? 'e2e-mock-placeholder' : effectiveApiKey;
         const seedPayload = JSON.stringify({
           models: [{
             id: 'e2e-default',
-            name: process.env.MODEL_NAME ?? 'MiniMax-M3',
+            name: effectiveModelName,
             api_key: apiKey,
-            api_base: process.env.ANTHROPIC_BASE_URL ?? 'https://api.minimaxi.com/v1',
+            api_base: effectiveApiBase,
             temperature: 0.7,
             is_active: true,
           }],
@@ -85,22 +132,31 @@ export default defineConfig({
         // 直接把 nexusHome 拼进 python 脚本里(shell 转义 JSON.stringify 已经处理
         // 引号),保证 seed 100% 落到正确路径。
         const seedCmd = `mkdir -p ${nexusHome}/.nexus && python3 -c 'import json; open(${JSON.stringify(`${nexusHome}/.nexus/models.json`)},"w").write(${JSON.stringify(seedPayload)})'`;
+        // 把 backend stdout/stderr 写到 /tmp/nexus-e2e-backend-${pid}.log
+        // (Playwright 默认 pipe 不落盘,debug 看不到 LLM 请求日志)。
+        const backendLog = `/tmp/nexus-e2e-backend-${process.pid}.log`;
         if (existsSync(nexusVenv)) {
           // 装了 nexus CLI 的环境：切到 NEXUS_HOME 跑（NEXUS_HOME 路径下有 nexus 包）
-          return `${seedCmd} && cd ${nexusHome} && ${nexusVenv} -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000`;
+          return `${seedCmd} && cd ${nexusHome} && ${nexusVenv} -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000 > ${backendLog} 2>&1`;
         }
-        return `${seedCmd} && cd .. && ./.venv/bin/python -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000`;
+        return `${seedCmd} && cd .. && ./.venv/bin/python -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000 > ${backendLog} 2>&1`;
       })(),
       url: 'http://127.0.0.1:30000/health',
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
       stdout: 'pipe',
       stderr: 'pipe',
+      // 把 backend stdout/stderr 写到 /tmp 让 debug 时能看
+      // (Playwright 默认只 pipe,test pass 时静默丢,fail 也只显示摘要)
+      // E2E 2026-07-13 debug:NotFoundError 404 反复出现,但 stderr 没 leak,
+      // 加 stdout/stderr 文件路径让 debug 时能直接 tail。
+      // WHY 不在每次重跑时 unlink:append 模式 + 后端启动时间戳命名,
+      // 多个 spec 各自独立 log 文件,不会互相覆盖。
       env: {
-        MINIMAX_API_KEY: process.env.MINIMAX_API_KEY ?? '',
+        MINIMAX_API_KEY: effectiveApiKey,
         ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN ?? '',
-        ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL ?? '',
-        MODEL_NAME: process.env.MODEL_NAME ?? 'MiniMax-M3',
+        ANTHROPIC_BASE_URL: effectiveApiBase,
+        MODEL_NAME: effectiveModelName,
         NEXUS_HOME: e2eNexusHome,
         // 透传 mock LLM 开关。NEXUS_E2E_MOCK=1 时 nexus.backend.agent 加载
         // e2e_mock.py 替代真实 LLM(场景由 NEXUS_E2E_SCENARIO 决定),
