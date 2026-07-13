@@ -223,7 +223,15 @@ export function ChatArea({
           <ClarificationForm
             question={pendingClarification.question}
             options={pendingClarification.options}
-            onSubmit={send}
+            // 2026-07-13 修产品 bug:ClarificationForm onSubmit 直接调 send,但 send
+            // 不动 pendingClarification 本地 state → 提交后 .clarify-card 残留渲染
+            // (clarification.spec.ts 候选项 + 自由输入 2 个 case 都 fail)。Cancel
+            // 路径已通过 onCancel 清,submit 路径必须同样清。理由:澄清回答是 send
+            // 的一个分支,语义上"回答即关闭提问卡片"。
+            onSubmit={(content: string) => {
+              setPendingClarification(null);
+              send(content);
+            }}
             onCancel={() => setPendingClarification(null)}
           />
         )}
