@@ -149,7 +149,7 @@ def _build_interrupt_resume_payload(
     pending_interrupts: tuple[Any, ...],
     interrupt_id: str,
     decision: str,
-) -> dict[str, dict[str, list[dict[str, str]]] | None]:
+) -> dict[str, dict[str, list[dict[str, str]]]] | None:
     """为指定的 LangGraph interrupt 构造 resume payload。
 
     多个工具调用可在同一轮并行挂起。LangGraph 在这种场景要求
