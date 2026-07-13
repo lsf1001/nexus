@@ -34,6 +34,18 @@ DMG bundle 内 WS 鉴权 token 由公开字符串 `nexus-default-token` 改为 b
 - 验证 `desktop/src-tauri/build.rs` 编译产物含新 token,不含 `nexus-default-token`
 - 验证 `release/Nexus-<ver>-arm64.dmg` 安装后用正确 token 200,`nexus-default-token` 401
 
+#### Fixed — 测试 isolation 修跨文件污染 (2026-07-14)
+
+修 `tests/test_config_ws_token.py` 用 `importlib.reload(cfg_mod)` 重建 CONFIG dict 的反模式。
+根因:`auth.py` 等模块在 import 期用 `from ..config import CONFIG` 绑定了**旧 dict 对象**,
+reload 重建的 dict 没人引用,后续 test 的 `monkeypatch.setitem` 写到新 dict 而 `auth.py` 仍读旧
+空 dict → WS 鉴权幻性 401。显形:全量 `pytest tests/` 37 fail,单跑文件全过。
+
+修法:不 reload,直接 `cfg_mod.CONFIG["ws_token"] = ""/value` 模拟 `load_config()` 读 env 的产物。
+`tests/conftest.py::isolate_runtime_state` 加 docstring 警告后人不要走 reload。
+
+- **结果**:`pytest tests/` 从 `~756 passed / 37 failed` → **`793 passed / 0 failed / 12 skipped`** (39.6s)
+
 ---
 
 ### test(e2e): journey 套件 Phase 2 扩到 8 条 (2026-07-13)
