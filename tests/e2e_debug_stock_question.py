@@ -5,19 +5,24 @@ prompt FACT 块的自报身份话术),但 yandex_search 已搜到 162 / 135 / 73
 的搜索结果,LLM 没用。怀疑是某个 LLM(MiniMax-M3)把投资问题错判为身份问
 句,复读 system prompt 硬指令。本脚本通过 WS 直接发问并落盘所有 chunk,
 确认 agnes 模型是否能正确用搜索结果回答。
+
+WS token 默认从 desktop/src-tauri/.build_token 读,与 2026-07 hardening
+后的 DMG bundle baked-in 一致(避免连接被 401)。
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
 import websockets
 
-WS_URL = "ws://localhost:30000/api/ws?token=nexus-default-token"
-TOKEN = "nexus-default-token"
+_TOKEN_FILE = Path(__file__).parent.parent / "desktop" / "src-tauri" / ".build_token"
+TOKEN = _TOKEN_FILE.read_text().strip() if _TOKEN_FILE.exists() else ""
+WS_URL = f"ws://localhost:{os.environ.get('NEXUS_PORT', '30000')}/api/ws?token={TOKEN}"
 QUESTION = "元力股份 能买吗"
 SESSION_ID = "e2e-stock-test-2026-06-29"
 USER_ID = "e2e-test"

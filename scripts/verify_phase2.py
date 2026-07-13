@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 import warnings
@@ -32,7 +33,13 @@ from nexus.backend.db import get_db  # noqa: E402
 from nexus.backend.main import app  # noqa: E402
 
 WS_URL = "/api/ws?token={token}"
-TOKEN = CONFIG.get("ws_token", "nexus-default-token")
+# 优先从后端 env 拿真实 token(playwright webServer 注入),其次从 desktop
+# .build_token 拿(2026-07 hardening 后 DMG baked-in 的随机 token),最后兜底空串 —
+# 空串让后端拒连接,正好把硬编码 "nexus-default-token" 这条暗路径永久删掉。
+_TOKEN_FROM_ENV = os.environ.get("NEXUS_WS_TOKEN", "")
+_TOKEN_FILE = Path(__file__).parent.parent / "desktop" / "src-tauri" / ".build_token"
+_TOKEN_FROM_FILE = _TOKEN_FILE.read_text().strip() if _TOKEN_FILE.exists() else ""
+TOKEN = _TOKEN_FROM_ENV or _TOKEN_FROM_FILE
 FULL_URL = f"/api/ws?token={TOKEN}"
 
 

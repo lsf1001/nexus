@@ -27,8 +27,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import websockets  # type: ignore[import-not-found]
 
 
-async def collect_frames(message: str, token: str = "nexus-default-token") -> list[dict]:
-    """连 ws,发消息,收集所有帧直到 done/clarification_request/error。"""
+async def collect_frames(message: str, token: str | None = None) -> list[dict]:
+    """连 ws,发消息,收集所有帧直到 done/clarification_request/error。
+
+    token 默认从 desktop/src-tauri/.build_token 读 — 与 DMG bundle baked-in
+    token 保持一致。如要测试旧的 nexus-default-token 路径,显式传 token。
+    """
+    if token is None:
+        token_file = Path(__file__).parent.parent / "desktop" / "src-tauri" / ".build_token"
+        token = token_file.read_text().strip() if token_file.exists() else ""
     url = f"ws://127.0.0.1:{os.environ.get('NEXUS_PORT', '30000')}/api/ws?token={token}"
     frames: list[dict] = []
     try:
