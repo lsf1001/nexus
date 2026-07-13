@@ -1,9 +1,6 @@
 /**
  * HITL 确认卡片 E2E — mock LLM 模式。
  *
- * 配套 hitl-confirm.spec.ts:那个是真实 LLM 路径,LLM 行为不稳,本 spec
- * 是 mock LLM 路径,100% 决定性。
- *
  * 启动方式(后端 env):
  *   NEXUS_E2E_MOCK=1
  *   NEXUS_E2E_SCENARIO=interrupt_agents_md
@@ -19,6 +16,12 @@
  * 一个 spec 跑不动两个 scenario;但 CI 默认 scenario=allow_nexus_write
  * 是不触发 HITL 的无害路径,只有专门测 HITL 的 spec 才需要切到
  * interrupt_agents_md。
+ *
+ * 2026-07-13:之前有 hitl-confirm.spec.ts(真 LLM)试图用自然语言 prompt
+ * 诱导 LLM 主动调 edit_file 覆盖 AGENTS.md。真 LLM 在生产语义下不会主动
+ * 覆盖用户身份数据(`用户名字:小明` / `最喜欢的水果:榴莲`),表现为
+ * "拒绝 + 提建议",不调工具 → 不触发 HITL → spec 永远 timeout。已删除。
+ * 真 LLM HITL 测试无意义,产品行为已用 mock 100% 覆盖。
  */
 import { test, expect } from '@playwright/test';
 import { openHome, messageInput, sendButton } from './helpers';
