@@ -14,7 +14,12 @@ from nexus.backend import models_config
 
 @pytest.fixture(autouse=True)
 def isolate_runtime_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    """默认隔离运行时文件，避免测试读写真实用户目录。"""
+    """默认隔离运行时文件，避免测试读写真实用户目录。
+
+    不要 reload ``nexus.backend.config``:``auth.py`` 等模块用
+    ``from .config import CONFIG`` 在 import 时绑了 dict 对象,reload 会重
+    建 dict 但其它模块的引用仍是旧对象,跨文件测试出现幻性 401。
+    """
     runtime_dir = tmp_path / ".nexus"
     runtime_dir.mkdir()
     database_path = runtime_dir / "nexus.db"
