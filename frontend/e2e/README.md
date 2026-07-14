@@ -21,35 +21,38 @@ CI 必跑 + retries=2 兜底。
 | `wechat-channel.spec.ts` | 微信通道绑定 / 解绑 |
 | `ws-auth-subprotocol.spec.ts` | WS 鉴权协议契约 |
 
-### 8 条 user-journey spec(`frontend/e2e/journey/`)
+### 9 条 user-journey spec(`frontend/e2e/journey/`)
 
-模拟人工视角的端到端旅程。**默认全走真 LLM**,mock 模式(只 `auth_401` 一条)
-需显式 `NEXUS_E2E_MOCK=1`;**CI 必跑**。
+模拟人工视角的端到端旅程。**默认全走真 LLM**,mock 模式(`auth_401` /
+`stop-mid-stream` / `quick-prompts-and-history` 三条)需显式
+`NEXUS_E2E_MOCK=1`;**CI 必跑**。
 
 | Spec | 用户旅程 | LLM |
 | --- | --- | --- |
 | `journey-cold-start.spec.ts` | 新用户冷启动 → 首次回复 | 真 |
 | `journey-multi-turn.spec.ts` | 多轮上下文累积与回显 | 真 |
 | `journey-hitl-workflow.spec.ts` | HITL 工作流:触发 → 批准 → 流续接 | 真 |
-| `journey-resilience.spec.ts` | 网络中断 → 重连 → 继续对话 | 真 |
-| `journey-quick-prompts-and-history.spec.ts` | 4 个 QUICK_PROMPTS + Sidebar 历史切换 | 真 |
-| `journey-stop-mid-stream.spec.ts` | 流期间 send-button disabled + 流结束恢复 | 真 |
+| `journey-resilience.spec.ts` | 网络中断 → 重连 → 继续对话(CI-only) | 真 |
+| `journey-quick-prompts-and-history.spec.ts` | 4 个 QUICK_PROMPTS + Sidebar 历史切换 | mock |
+| `journey-stop-mid-stream.spec.ts` | 流期间 send-button disabled + 流结束恢复 | mock |
 | `journey-input-edge-cases.spec.ts` | 空 / emoji / 多语言 输入边界 | 真 |
 | `journey-auth-401.spec.ts` | 模型密钥失效兜底(需 `NEXUS_E2E_SCENARIO=auth_401`) | mock |
+| `journey-wechat-bound-receive.spec.ts` | 微信通道绑定状态切换(`/bind` mock) | 真后端 + route mock |
 
-`journey/` 目录内自带 `helpers.ts`,封装 journey 专用高层动作
-(`sendSequence` / `expectContextRecall` / `killBackend` 等),
-与上层 `e2e/helpers.ts` 底层选择器封装分层。
+`journey-wechat-bound-receive` 是 plan Task 15 降级版:仅覆盖绑定卡
+"未绑定 → 已绑定"反应性,收消息半段因后端无标准 inbound 端点暂留待后续。
 
 ## 运行
 
 ```bash
 cd frontend
-npm run test:e2e                       # 全部 18 条
+npm run test:e2e                       # 全部 19 条
 npm run test:e2e -- e2e/journey/        # 只跑 journey
 npm run test:e2e -- e2e/chat-happy-path # 只跑单条
 
-# 跑 401 mock(只一条)
+# 跑 mock 类 spec(默认 scenario = allow_nexus_write)
+NEXUS_E2E_MOCK=1 npm run test:e2e -- e2e/journey/journey-auth-401
+# 显式切到 auth_401 场景
 NEXUS_E2E_MOCK=1 NEXUS_E2E_SCENARIO=auth_401 \
   npm run test:e2e -- e2e/journey/journey-auth-401
 ```
