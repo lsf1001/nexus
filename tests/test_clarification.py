@@ -78,7 +78,13 @@ def test_ask_user_tool_triggers_clarification_request(monkeypatch) -> None:
 
 
 def test_ask_user_empty_options_lets_user_free_input(monkeypatch) -> None:
-    """ask_user 工具入参 options=None / [] → 客户端收到空 options,允许自由输入。"""
+    """ask_user 工具入参 options=None / [] → 客户端收到空 options,允许自由输入。
+
+    2026-07-14 修订:options 为空时前端会用 2 个 fallback 候选兜底(UX 改进),
+    后端 ``streaming.py`` 打 warning log 让 ops 知道这是 fallback 路径。
+    """
+    import logging
+
     _authed_token(monkeypatch)
 
     async def astream_events_factory(input, **kwargs):  # noqa: ARG001
@@ -93,26 +99,46 @@ def test_ask_user_empty_options_lets_user_free_input(monkeypatch) -> None:
             },
         }
 
-    with TestClient(app) as client:
-        with patch("nexus.backend.main._agent") as mock_agent:
-            mock_agent.astream_events = astream_events_factory
+    # 抓 streaming logger 的 warning
+    captured: list[logging.LogRecord] = []
 
-            with client.websocket_connect("/api/ws?token=test-token") as ws:
-                ws.send_json({"content": "模糊指令", "title": "clarify-free"})
+    class _ListHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured.append(record)
 
-                events: list[dict] = []
-                for _ in range(20):
-                    try:
-                        msg = ws.receive_json()
-                    except Exception:
-                        break
-                    events.append(msg)
-                    if msg.get("type") == "clarification_request":
-                        break
+    handler = _ListHandler()
+    stream_logger = logging.getLogger("nexus.backend.api.ws.streaming")
+    stream_logger.addHandler(handler)
+    stream_logger.setLevel(logging.WARNING)
+    try:
+        with TestClient(app) as client:
+            with patch("nexus.backend.main._agent") as mock_agent:
+                mock_agent.astream_events = astream_events_factory
+
+                with client.websocket_connect("/api/ws?token=test-token") as ws:
+                    ws.send_json({"content": "模糊指令", "title": "clarify-free"})
+
+                    events: list[dict] = []
+                    for _ in range(20):
+                        try:
+                            msg = ws.receive_json()
+                        except Exception:
+                            break
+                        events.append(msg)
+                        if msg.get("type") == "clarification_request":
+                            break
+    finally:
+        stream_logger.removeHandler(handler)
 
     clarify = next(e for e in events if e.get("type") == "clarification_request")
     assert clarify["content"] == "你能再说清楚点吗?"
-    assert clarify["options"] == []  # 空 list,前端走自由输入分支
+    assert clarify["options"] == []  # 后端原样下发 [];前端兜底成 fallback 候选
+
+    # warning log 必须出现 — 让 ops 能定位"哪条会话触发了 prompt 强约束违规"
+    warnings = [r for r in captured if r.levelno == logging.WARNING]
+    assert any("options 为空" in r.getMessage() for r in warnings), (
+        f"期望 streaming logger 打 options 为空 warning,实际: {[r.getMessage() for r in warnings]}"
+    )
 
 
 # ============== 2. 工具入参异常:缺 question → 降级 ==============

@@ -597,6 +597,16 @@ async def _handle_tool_start_event(
             "event_id": last_event_id,
         }
     )
+    # 2026-07-14 UX 兜底:LLM 违反 prompt "options 必须 2-6 个" 的强约束时,
+    # 前端会用 ['让 Nexus 帮我想', '我需要更多信息'] 兜底渲染。这里打 warning
+    # 让 ops 知道哪条会话触发了 fallback —— 频次高 = prompt 强约束没生效。
+    if not options:
+        logger.warning(
+            "WS clarification_request options 为空(session=%s, q=%s) — "
+            "前端将用 fallback 候选兜底,确认 prompt 强约束是否被 LLM 忽略",
+            session_id,
+            question[:60],
+        )
     logger.info(
         "WS clarification_request 发送: session=%s, q=%s, options=%d",
         session_id,
