@@ -89,9 +89,12 @@ function ChatBubbleInner({ message, showThinking = true, onCopy }: ChatBubblePro
             urlTransform={(value) => {
               // react-markdown 默认 urlTransform 不放行 file:// / blob: 等"非主流"协议
               // (白名单只含 https?|ircs?|mailto|xmpp),会把 src/href 抹空。
-              // 这里只放行 http(s) / file(本地文件),其他协议仍交给默认行为抹空
-              // (防御 javascript: 等 XSS 注入)。
+              // 这里放行:file://(浏览器/Preview 打开本地文件)、
+              //         http://asset.localhost(Tauri asset protocol,见 tauri.conf.json assetProtocol)、
+              //         http(s)://(外链)、相对路径、# 锚点。
+              // 其他协议仍交给默认行为抹空(防御 javascript: 等 XSS 注入)。
               if (value.startsWith('file://')) return value;
+              if (value.startsWith('http://asset.localhost')) return value;
               if (/^https?:\/\//i.test(value)) return value;
               if (/^[/.]/.test(value) || value === '#') return value;
               return '';

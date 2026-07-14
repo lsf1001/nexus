@@ -19,7 +19,7 @@
  *  - 图片路径 → <img class="file-image" src="file://...">
  *  - 非图片路径 → <a class="file-link" href="file://..." target="_blank">
  */
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { render } from '@testing-library/react'
 import ChatBubble from '../ChatBubble'
 import { chatBubblePropsAreEqual } from '../chatBubbleProps'
@@ -163,3 +163,50 @@ describe('ChatBubble 路径 linkify 集成 (2026-07-14)', () => {
     expect(container.textContent).toContain('/Users/yxb/x.jpg')
   })
 })
+
+describe('ChatBubble Tauri 模式 — asset protocol (2026-07-14)', () => {
+  let originalTauri: boolean;
+  beforeEach(() => {
+    originalTauri = '__TAURI_INTERNALS__' in window;
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      value: {
+        metadata: { currentWindow: { label: 'main' } },
+        // 模拟 Rust 注入的 native bridge
+        convertFileSrc: (filePath: string, protocol = 'asset') =>
+          `http://${protocol}.localhost/${encodeURI(filePath)}`,
+      },
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  afterEach(() => {
+    if (!originalTauri) {
+      // @ts-expect-error 清理测试注入的全局
+      delete window.__TAURI_INTERNALS__;
+    }
+  });
+
+  it('图片路径 → <img class="file-image" src="http://asset.localhost/..."> (Tauri DMG 模式)', () => {
+    const { container } = render(
+      <ChatBubble message={makeMsg({ content: '看 /Users/yxb/.nexus/outputs/koi.jpg 大图' })} />
+    );
+    const img = container.querySelector('img.file-image');
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute('src')).toContain('http://asset.localhost/');
+    expect(img!.getAttribute('src')).toContain('koi.jpg');
+    expect(img!.getAttribute('src')).not.toContain('file://');
+  });
+
+  it('非图片路径 → <a class="file-link" href="http://asset.localhost/..."> (Tauri DMG 模式)', () => {
+    const { container } = render(
+      <ChatBubble message={makeMsg({ content: '日志在 /Users/yxb/.nexus/outputs/run.log' })} />
+    );
+    const a = container.querySelector('a.file-link');
+    expect(a).not.toBeNull();
+    expect(a!.getAttribute('href')).toContain('http://asset.localhost/');
+    expect(a!.getAttribute('href')).toContain('run.log');
+    expect(a!.getAttribute('href')).not.toContain('file://');
+    expect(a!.getAttribute('target')).toBe('_blank');
+  });
+});
