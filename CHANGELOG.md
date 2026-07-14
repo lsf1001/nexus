@@ -183,6 +183,34 @@ LLM: [调用工具] shell_run ls -la ~/.nexus/outputs  → exit_code=0, stdout=f
      → outputs 目录下有:foo.txt, bar.py
 ```
 
+#### Added — 聊天消息本地路径 click-to-open + 图片内联缩略图 (file://) (2026-07-14)
+
+LLM 用 `shell_run open /Users/yxb/.nexus/outputs/koi.jpg` 后,assistant 消息里
+回显的绝对路径原样显示为纯文本,用户无法"点击直达 Preview / Finder"。
+本批把这类路径转成 click-to-open 的 `<a>` / `<img>` 节点:
+
+- **`frontend/src/lib/remarkPathLinkify.ts`**:remark 插件,扫 `text` 节点里的
+  绝对路径(`/Users/...`、`~/...`),扩展名为图片后缀(jpg/png/gif/webp/bmp/svg)
+  → 转 `image` AST 节点(直接展示缩略图);其他后缀 → 转 `link` AST 节点
+  (href=`file://...`)。inlineCode / 已有 link / 相对路径 / 无后缀词 不动。
+- **`frontend/src/components/ChatBubble.tsx`**:`ReactMarkdown` 接入上述 plugin,
+  加 `urlTransform` 绕开 react-markdown v10 默认白名单(只放行 `https?`/`file`/
+  相对/`#`,其他协议继续被抹空 — 防御 `javascript:` 等 XSS)。
+- **`frontend/src/components/desktop/styles/chat.css`**:`.file-link` 绿系强调色
+  + hover 浅背景 + 触摸目标放大;`.file-image` 最大 320px + 圆角 + 边框 +
+  loading=lazy。user / assistant 气泡各一套配色(dark mode 走 `data-theme=dark`)。
+- **测试覆盖**:
+  - `frontend/src/lib/__tests__/remarkPathLinkify.test.ts` 新增 6 个用例
+    (unified → remark → rehype 管线直接断言 HTML):图片→img / 路径→link +
+    title / inlineCode 内不动 / 相对路径不动 / 中文标点保留 / 多图
+  - `frontend/src/components/__tests__/ChatBubble.test.tsx` 新增 3 个用例
+    (RTL 渲染断言最终 DOM):`<a class="file-link" target="_blank">` / 
+    `<img class="file-image" src="file://..." loading="lazy">` / inlineCode 保留
+
+- **不写 E2E**:click-to-open / 缩略图加载是浏览器 + Electron WKWebView 原生
+  行为(file 协议走系统 handler,file→file 默认允许),不在 Nexus 代码路径
+  上;vitest 9 个用例已 100% 覆盖可控层(AST + DOM)。
+
 ---
 
 ### test(e2e): journey 套件 Phase 2 扩到 8 条 (2026-07-13)

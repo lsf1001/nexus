@@ -226,6 +226,52 @@
   color: var(--paper-tint);
 }
 
+/**
+ * file-link: 本地文件路径点击直达(macOS file:// → Preview.app / Finder)。
+ *
+ * - 颜色用 accent(绿系),与普通 https:// 链接区别,用户一眼能识别"这是本地"
+ * - hover 下划线 + 浅背景,触摸目标清晰
+ * - target=_blank + rel=noopener 防 window.opener 劫持(Electron WebView 也安全)
+ */
+.message-markdown a.file-link {
+  color: #4a7c59;
+  text-decoration: none;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(74, 124, 89, 0.08);
+  transition: background 0.15s;
+  word-break: break-all;
+}
+.message-markdown a.file-link:hover {
+  background: rgba(74, 124, 89, 0.18);
+  text-decoration: underline;
+}
+.message-user .message-markdown a.file-link {
+  color: #b8e6c4;
+  background: rgba(255, 255, 255, 0.10);
+}
+.message-user .message-markdown a.file-link:hover {
+  background: rgba(255, 255, 255, 0.20);
+}
+
+/**
+ * file-image: 本地图片缩略图(LLM 用 shell_run open 后回填的路径)。
+ *
+ * - max-width 与 message-bubble 一致,避免超长图片撑破布局
+ * - border-radius 8 + 浅边框与 paper 主题一致
+ * - loading=lazy 由 <img> 自带,避免长对话一次性加载 100+ 张
+ */
+.message-markdown img.file-image {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  margin: 6px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(74, 124, 89, 0.20);
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.04);
+}
+
 /* Loading 三点跳动 */
 .loading-bubble {
   display: flex;

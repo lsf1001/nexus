@@ -14,6 +14,10 @@
  * 简化方案:导出 `chatBubblePropsAreEqual` 供单测直接断言相等函数,
  * 这是 memo 行为的唯一约束来源;再用 React Testing Library 走一次完整
  * render 流程,断言 DOM 更新次数。
+ *
+ * 2026-07-14 增 pathLinkify 集成测试:
+ *  - 图片路径 → <img class="file-image" src="file://...">
+ *  - 非图片路径 → <a class="file-link" href="file://..." target="_blank">
  */
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '@testing-library/react'
@@ -122,5 +126,40 @@ describe('ChatBubble memo 集成行为', () => {
     expect(container.textContent).toContain('deep thought')
     rerender(<ChatBubble message={msg} showThinking={false} />)
     expect(container.textContent).not.toContain('deep thought')
+  })
+})
+
+describe('ChatBubble 路径 linkify 集成 (2026-07-14)', () => {
+  it('图片路径 → <img class="file-image" src="file://...">', () => {
+    const { container } = render(
+      <ChatBubble message={makeMsg({ content: '看 /Users/yxb/.nexus/outputs/koi.jpg 大图' })} />
+    )
+    const img = container.querySelector('img.file-image')
+    expect(img).not.toBeNull()
+    expect(img!.getAttribute('src')).toBe('file:///Users/yxb/.nexus/outputs/koi.jpg')
+    expect(img!.getAttribute('alt')).toBe('/Users/yxb/.nexus/outputs/koi.jpg')
+    expect(img!.getAttribute('loading')).toBe('lazy')
+  })
+
+  it('非图片路径 → <a class="file-link" target="_blank" rel="noopener noreferrer">', () => {
+    const { container } = render(
+      <ChatBubble message={makeMsg({ content: '日志在 /Users/yxb/.nexus/outputs/run.log' })} />
+    )
+    const a = container.querySelector('a.file-link')
+    expect(a).not.toBeNull()
+    expect(a!.getAttribute('href')).toBe('file:///Users/yxb/.nexus/outputs/run.log')
+    expect(a!.getAttribute('target')).toBe('_blank')
+    expect(a!.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(a!.textContent).toBe('/Users/yxb/.nexus/outputs/run.log')
+  })
+
+  it('inlineCode 内路径不被转(<code> 优先)', () => {
+    const { container } = render(
+      <ChatBubble message={makeMsg({ content: '看 `/Users/yxb/x.jpg` 这条' })} />
+    )
+    expect(container.querySelector('a.file-link')).toBeNull()
+    expect(container.querySelector('img.file-image')).toBeNull()
+    expect(container.querySelector('code')).not.toBeNull()
+    expect(container.textContent).toContain('/Users/yxb/x.jpg')
   })
 })

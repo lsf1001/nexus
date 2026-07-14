@@ -1,6 +1,8 @@
 import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useContextMenuTrigger } from '../lib/useContextMenuTrigger';
+import { remarkPathLinkify } from '../lib/remarkPathLinkify';
 import {
   chatBubblePropsAreEqual,
   type ChatBubbleProps,
@@ -82,7 +84,40 @@ function ChatBubbleInner({ message, showThinking = true, onCopy }: ChatBubblePro
           </div>
         )}
         <div className={`message-markdown ${isUser ? 'user' : 'assistant'}`}>
-          <ReactMarkdown>{message.content}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkPathLinkify]}
+            urlTransform={(value) => {
+              // react-markdown 默认 urlTransform 不放行 file:// / blob: 等"非主流"协议
+              // (白名单只含 https?|ircs?|mailto|xmpp),会把 src/href 抹空。
+              // 这里只放行 http(s) / file(本地文件),其他协议仍交给默认行为抹空
+              // (防御 javascript: 等 XSS 注入)。
+              if (value.startsWith('file://')) return value;
+              if (/^https?:\/\//i.test(value)) return value;
+              if (/^[/.]/.test(value) || value === '#') return value;
+              return '';
+            }}
+            components={{
+              a: (props) => {
+                const { href, children } = props as { href?: string; children?: React.ReactNode };
+                return (
+                  <a
+                    href={href ?? '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="file-link"
+                  >
+                    {children}
+                  </a>
+                );
+              },
+              img: ({ src, alt }) => (
+                // file:// 缩略图 — macOS Electron WebView 不允许 http→file 加载,
+                // 但 Electron WebView 默认允许 file→file 直接 fetch(local resource)。
+                // 设置 loading=lazy 避免长对话 100+ 张图片同时加载。
+                <img src={src} alt={alt} className="file-image" loading="lazy" />
+              ),
+            }}
+          >{message.content}</ReactMarkdown>
         </div>
       </div>
       {timestamp && <div className={`message-timestamp ${roleClass}`}>{timestamp}</div>}

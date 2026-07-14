@@ -6,7 +6,7 @@ CI 必跑 + retries=2 兜底。
 
 ## 测试分组
 
-### 10 条产品验收 spec(`frontend/e2e/`)
+### 9 条产品验收 spec(`frontend/e2e/`)
 
 | Spec | 覆盖 |
 | --- | --- |
@@ -42,11 +42,20 @@ CI 必跑 + retries=2 兜底。
 `journey-wechat-bound-receive` 是 plan Task 15 降级版:仅覆盖绑定卡
 "未绑定 → 已绑定"反应性,收消息半段因后端无标准 inbound 端点暂留待后续。
 
+### 不在 journey 套件里的功能(由 vitest 覆盖)
+
+- **聊天消息里绝对路径 click-to-open + 图片内联缩略图**(2026-07-14 加)
+  → `frontend/src/lib/__tests__/remarkPathLinkify.test.ts` (6 用例)
+  + `frontend/src/components/__tests__/ChatBubble.test.tsx` (3 用例)
+  点击直达 Preview/Finder 与 file→file 缩略图加载都是浏览器 / Electron
+  WKWebView 原生行为(file 协议 → macOS handler,file→file 默认 allow),
+  不在 Nexus 代码路径上;可控层(AST → DOM)由 vitest 100% 覆盖。
+
 ## 运行
 
 ```bash
 cd frontend
-npm run test:e2e                       # 全部 19 条
+npm run test:e2e                       # 全部 18 条
 npm run test:e2e -- e2e/journey/        # 只跑 journey
 npm run test:e2e -- e2e/chat-happy-path # 只跑单条
 
