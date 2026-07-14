@@ -1,12 +1,14 @@
 import datetime
 import logging
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool as langchain_tool
 
 from .config import CONFIG
+from .mcp.date_utils import SHANGHAI_TZ
 from .models_config import get_active_model_info
 
 logger = logging.getLogger(__name__)
@@ -22,6 +24,25 @@ def get_current_date() -> str:
     """获取今天的日期，格式 YYYY-MM-DD。"""
     today = datetime.date.today()
     return today.strftime("%Y-%m-%d")
+
+
+@langchain_tool
+def get_current_time(tz: str | None = None) -> str:
+    """返回当前时间(精确到秒),格式 ``YYYY-MM-DD HH:MM:SS``。
+
+    WHY 2026-07-14:之前 Nexus 没有"时分秒"工具,用户问"现在几点了"LLM 只能
+    承认"我无法直接获取当前时间"。本工具补齐该能力,与 ``fact_check.today``
+    共享 ``SHANGHAI_TZ``(项目事实源),保证 LLM 输出与 fact_check 校验时区一致。
+
+    Args:
+        tz: IANA 时区名(如 ``"Asia/Shanghai"`` / ``"UTC"``),传 ``None``
+            默认 ``Asia/Shanghai``。
+
+    Returns:
+        ``YYYY-MM-DD HH:MM:SS`` 格式字符串(24h)。
+    """
+    zone = ZoneInfo(tz) if tz else SHANGHAI_TZ
+    return datetime.datetime.now(zone).strftime("%Y-%m-%d %H:%M:%S")
 
 
 @langchain_tool
@@ -187,6 +208,7 @@ def ask_user(question: str, options: list[str] | None = None) -> str:
 
 TOOLS = [
     get_current_date,
+    get_current_time,
     yandex_search,
     web_search,
     wikipedia,
