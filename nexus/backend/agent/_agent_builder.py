@@ -154,6 +154,15 @@ def create_agent(
         protected_paths=tuple(str(p) for p in resolve_protected_paths(project_root)),
     )
 
+    # Shell HITL 守卫(2026-07-14):对 ``shell_run`` 工具强制走人类审批 +
+    # 沙箱短路(危险命令 / cwd 越界 → 直接 deny,不走 HITL 弹窗)。放在
+    # path_aware_hitl 之后(它俩都走 wrap_tool_call,放外层做通用 HITL,
+    # shell_hitl 在内层专门处理 shell_run —— 但因为都是基于 tool_call.name
+    # 短路,顺序不强制敏感,这里靠"通用 HITL 在前、专项 HITL 在后"语义分组)。
+    from ..middleware.shell import ShellHITLMiddleware
+
+    shell_hitl = ShellHITLMiddleware()
+
     # 动态身份 middleware:每次 LLM 调用前**实时**从 ``~/.nexus/models.json``
     # 读当前 active model,把 ``[FACT · 当前驱动模型]`` 块 prepend 到
     # ``request.system_message.content`` 的最前面。这是修复 E2E 2026-06-29
@@ -212,18 +221,22 @@ def create_agent(
         # middleware 顺序(由外到内,langchain 第一个是最外层最后执行):
         #   quality_gate      : 拦截 AGENTS.md 写入忠实度评估(配合 MemoryMiddleware)
         #   path_aware_hitl   : 对"非白名单"写工具触发 GraphInterrupt → confirmation_request
+        #   shell_hitl        : 对 shell_run 工具强制 HITL + 危险命令 / cwd 越界 deny
         #   dynamic_identity  : prepend FACT 块(注入当前激活模型)
         #   fact_check        : 拦截 LLM 输出,扫描日期/数学/汇率冲突(fail-closed)
         #   force_tool        : knowledge/task 类问题强制 LLM 调 yandex_search
         # path_aware_hitl 与 quality_gate 顺序: quality_gate 先(它只关心
         # AGENTS.md,直接透传其它路径);path_aware_hitl 后,对透传过来的
         # "非白名单 + 非 protected" 路径触发 HITL。
+        # shell_hitl 位置:在 path_aware_hitl 之后(同样基于 tool_call.name 短路,
+        # 互不冲突),其它 middleware 顺序不变。
         # fact_check 位置: 在 dynamic_identity 后(已注入 FACT 块)、force_tool 前
         # — 让 force_tool 仍可对"无 tool_call 的弱模型"打补丁,但 fact_check
         # 已经看到的输出是含 FACT 块的最终文本。
         middleware=[
             quality_gate,
             path_aware_hitl,
+            shell_hitl,
             dynamic_identity_middleware,
             fact_check,
             force_tool_mw,

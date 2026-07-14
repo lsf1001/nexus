@@ -40,8 +40,21 @@ def test_tools_includes_get_current_time() -> None:
     """
     names = {t.name for t in TOOLS if hasattr(t, "name")}
     assert "get_current_time" in names, (
-        "TOOLS 必须包含 get_current_time(YYYY-MM-DD HH:MM:SS),"
-        f"当前列表: {sorted(names)}"
+        f"TOOLS 必须包含 get_current_time(YYYY-MM-DD HH:MM:SS),当前列表: {sorted(names)}"
+    )
+
+
+def test_tools_includes_shell_run() -> None:
+    """``shell_run`` 必须在 TOOLS 里(2026-07-14 加),让 LLM 可申请执行命令。
+
+    配合 :class:`ShellHITLMiddleware` 使用:工具本体负责沙箱短路 + subprocess
+    执行 + 审计写入,HITL 弹窗由中间件触发。
+
+    若未来产品决定下架 shell 能力,改 ``TOOLS`` 列表即可,本测试会失败提醒。
+    """
+    names = {t.name for t in TOOLS if hasattr(t, "name")}
+    assert "shell_run" in names, (
+        f"TOOLS 必须包含 shell_run(HITL 守卫 + 沙箱校验的 shell 执行工具),当前列表: {sorted(names)}"
     )
 
 

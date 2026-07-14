@@ -1,5 +1,7 @@
 import datetime
 import logging
+import subprocess
+import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -10,6 +12,13 @@ from langchain_core.tools import tool as langchain_tool
 from .config import CONFIG
 from .mcp.date_utils import SHANGHAI_TZ
 from .models_config import get_active_model_info
+from .shell_audit import append_log as _audit_append
+from .shell_sandbox import (
+    classify_dangerous_command,
+    validate_command,
+    validate_cwd,
+    validate_timeout,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +215,131 @@ def ask_user(question: str, options: list[str] | None = None) -> str:
     return summary
 
 
+# === Shell 执行工具 ===
+# 关键设计(2026-07-14):
+#   1. HITL 弹窗由 ``ShellHITLMiddleware`` 在 wrap_tool_call 阶段触发,本工具
+#      **不**调 ``interrupt()`` —— ``@langchain_tool`` 装饰函数里调
+#      ``langgraph.types.interrupt`` 没有 Pregel 上下文,不会抛 GraphInterrupt。
+#   2. 沙箱"危险命令 / cwd 越界"在本工具**入口处短路** —— 直接返回 error 字符串,
+#      让 LLM 立刻看到错误并改写,**不**触发 HITL 弹窗(用户不该看 rm -rf / 弹卡)。
+#   3. 用户批准(HITL 通过) → 走 subprocess.run + audit log 完整记录。
+#   4. stdout/stderr 截断 5000 字符,避免 LLM 上下文被一个 100MB 日志撑爆。
+_STDOUT_MAX_CHARS = 5000
+_STDERR_MAX_CHARS = 5000
+
+
+@langchain_tool
+def shell_run(command: str, cwd: str, timeout: int | None = None) -> str:
+    """执行一条 shell 命令(需用户在 HITL 弹窗中确认后才会真正跑)。
+
+    适用场景:
+        - 用户让 AI 整理 ``~/.nexus/outputs/`` 下的文件(``ls`` / ``mv`` / ``cat``)
+        - 用户让 AI 跑一个 Python 数据处理脚本(``python3 script.py``)
+        - 用户让 AI 清理日志(``find ~/.nexus/logs -mtime +30 -delete`` —— 注意此
+          类命令可能被沙箱拒绝,见下方限制)
+
+    强制约束(沙箱):
+        - **必须**显式传 ``cwd``(默认 cwd 不可控,直接拒绝)
+        - ``cwd`` **必须**落在 ``~/.nexus/`` 白名单下(其它目录直接拒绝)
+        - 命令字符串触发危险模式黑名单(rm -rf / / sudo / fork bomb 等)直接拒绝
+        - ``timeout`` clamp 到 ``[1, 300]`` 秒(不传 → 30s 默认)
+
+    审计:无论结果如何,都会写入 ``~/.nexus/logs/shell_executions.log``
+    (JSONL + 0600 权限,10MB rotate),用户可在事后回查"AI 跑了什么/我批准了
+    什么/结果是什么"。
+
+    Args:
+        command: 要执行的 shell 命令字符串。
+        cwd: 工作目录绝对路径,**必须**在 ``~/.nexus/`` 下。
+        timeout: 超时秒数,clamp 到 [1, 300];不传默认 30s。
+
+    Returns:
+        退出码 + 截断 stdout/stderr 的可读报告字符串;失败原因直接说明。
+    """
+    # === 步骤 1:沙箱前置校验(危险命令短路 / cwd 越界短路)===
+    ok_cmd, cmd_reason = validate_command(command)
+    if not ok_cmd:
+        risk = classify_dangerous_command(command)
+        _audit_append(
+            command=command,
+            cwd=str(cwd),
+            exit_code=None,
+            user_decision="auto_deny",
+            risk_label=risk,
+        )
+        return f"[Shell 沙箱阻断] {cmd_reason}"
+
+    ok_cwd, resolved_cwd = validate_cwd(cwd)
+    if not ok_cwd:
+        _audit_append(
+            command=command,
+            cwd=str(cwd),
+            exit_code=None,
+            user_decision="auto_deny",
+        )
+        return f"[Shell 沙箱阻断] {resolved_cwd}"
+
+    # === 步骤 2:HITL 已经通过(middleware 已放行),执行 subprocess ===
+    timeout_s = validate_timeout(timeout)
+    started_at = time.monotonic()
+    try:
+        proc = subprocess.run(
+            command,
+            shell=True,  # noqa: S602 — LLM 工具无法避免 shell parse
+            cwd=resolved_cwd,
+            timeout=timeout_s,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        duration_ms = int((time.monotonic() - started_at) * 1000)
+        stderr_preview = (exc.stderr or "")[:_STDERR_MAX_CHARS] if isinstance(exc.stderr, str) else ""
+        _audit_append(
+            command=command,
+            cwd=resolved_cwd,
+            exit_code=None,
+            stderr_snippet=f"TIMEOUT after {timeout_s}s: {stderr_preview}",
+            user_decision="approve",
+            duration_ms=duration_ms,
+        )
+        return f"[Shell 超时] 命令在 {timeout_s}s 内未结束,已被强制终止。stderr: {stderr_preview}"
+    except subprocess.SubprocessError as exc:
+        duration_ms = int((time.monotonic() - started_at) * 1000)
+        _audit_append(
+            command=command,
+            cwd=resolved_cwd,
+            exit_code=None,
+            stderr_snippet=str(exc),
+            user_decision="approve",
+            duration_ms=duration_ms,
+        )
+        return f"[Shell 子进程错误] {exc}"
+
+    duration_ms = int((time.monotonic() - started_at) * 1000)
+    stdout_preview = (proc.stdout or "")[:_STDOUT_MAX_CHARS]
+    stderr_preview = (proc.stderr or "")[:_STDERR_MAX_CHARS]
+    _audit_append(
+        command=command,
+        cwd=resolved_cwd,
+        exit_code=proc.returncode,
+        stdout_snippet=stdout_preview,
+        stderr_snippet=stderr_preview,
+        user_decision="approve",
+        duration_ms=duration_ms,
+    )
+
+    if proc.returncode == 0:
+        return f"[exit_code=0] (cwd={resolved_cwd}, {duration_ms}ms)\nstdout:\n{stdout_preview}" + (
+            f"\nstderr:\n{stderr_preview}" if stderr_preview else ""
+        )
+    return (
+        f"[exit_code={proc.returncode}] (cwd={resolved_cwd}, {duration_ms}ms)\n"
+        f"stdout:\n{stdout_preview}\n"
+        f"stderr:\n{stderr_preview}"
+    )
+
+
 TOOLS = [
     get_current_date,
     get_current_time,
@@ -215,5 +349,6 @@ TOOLS = [
     list_dir,
     ask_user,
     get_model_info,
+    shell_run,
 ]
 TOOLS = [t for t in TOOLS if t is not None]
