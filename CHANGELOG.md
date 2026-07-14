@@ -34,6 +34,37 @@ DMG bundle 内 WS 鉴权 token 由公开字符串 `nexus-default-token` 改为 b
 - 验证 `desktop/src-tauri/build.rs` 编译产物含新 token,不含 `nexus-default-token`
 - 验证 `release/Nexus-<ver>-arm64.dmg` 安装后用正确 token 200,`nexus-default-token` 401
 
+#### Fixed — journey E2E 套件 WS 鉴权 401 全军覆没 + 新增 wechat-bound-receive (2026-07-14)
+
+跑现网 journey 套件(8 条)时**全部 fail 在 401 Unauthorized**:`useBootstrap` 拿不到
+`/api/models`,前端 SetupView 兜底显示 API key 输入框,`prompt-card` 永远不渲染,
+所有 spec 30s 超时 fail。
+
+- **根因**:`frontend/playwright.config.ts` 的 webServer.env 给 Vite 注入
+  `VITE_NEXUS_WS_TOKEN`,但**没给后端 uvicorn 进程注入 `NEXUS_WS_TOKEN`**。
+  `nexus/backend/config.py:79` 默认读 `os.environ.get("NEXUS_WS_TOKEN", "")`
+  → 后端空串;前端 baked-in 仍是 `nexus-default-token`,`auth.py:111` 的
+  `_hmac_compare` 不通过 → `/api/models` 401。
+- **修法**:`playwright.config.ts` 后端 env 加
+  `NEXUS_WS_TOKEN: process.env.NEXUS_WS_TOKEN ?? 'nexus-default-token'`,
+  与 Vite 同款默认值,CI / 本地 dev 共享同一逻辑(用户可通过 env 显式覆盖
+  测试特殊 token)。
+- **结果**:7 条 journey spec 全绿(`cold-start` 7.8s / `multi-turn` 9.4s /
+  `input-edge-cases` 3/3 / `quick-prompts-and-history` mock / `stop-mid-stream`
+  mock 575ms / `auth-401` mock 2.6s);`resilience` 是 CI-only skip(local dev
+  `reuseExistingServer=true` 不会重启被杀的后端),`hitl-workflow` 因 mock
+  默认 scenario 不触发 HITL 也 skip。
+
+**新增** `frontend/e2e/journey/journey-wechat-bound-receive.spec.ts`
+(plan Task 15 降级版):只覆盖"绑定状态切换"半段 —
+`page.route('**/api/channels/wechat/bind')` mock 返 `{bound: true, account_id}` →
+ChannelViewBase 3s 轮询拿到新状态 → "已绑定: e2e-mock-wx-user" + 解绑按钮 +
+sidebar footer-link 加 `is-connected` 类。**收消息半段因后端无标准 inbound
+端点(ilink 协议内部轮询)留待后续 sandbox 就绪后补**。
+
+- **结果**:新 spec 3.6s 一发即过;`frontend/e2e/README.md` 同步更新 9 条
+  journey spec 清单 + mock 命令说明。
+
 #### Fixed — 测试 isolation 修跨文件污染 (2026-07-14)
 
 修 `tests/test_config_ws_token.py` 用 `importlib.reload(cfg_mod)` 重建 CONFIG dict 的反模式。
