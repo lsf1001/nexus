@@ -55,7 +55,13 @@ async def main() -> int:
             print("[probe] no initial frame (server is passive)")
 
         # 发用户消息(WS 入站消息不带 type,直接 content 字段)
-        prompt = "请帮我看下 ~/.nexus/outputs/ 下面有哪些文件,用 shell_run 工具,cwd 设为 ~/.nexus/outputs"
+        # WHY 强制 "调用 shell_run":LLM 看到 ~/.nexus/outputs/ 已有内容
+        # 可能直接基于历史推断不调工具。用 "用 shell_run 工具,返回 stdout"
+        # 强制工具调用。
+        prompt = (
+            "请你调用 shell_run 工具执行命令 'echo shell_run_e2e_$(date +%s)' "
+            "把 stdout 完整返回给我,cwd 设为 ~/.nexus/outputs。"
+        )
         await ws.send(
             json.dumps(
                 {
