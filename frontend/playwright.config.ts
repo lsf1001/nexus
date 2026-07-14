@@ -162,6 +162,11 @@ export default defineConfig({
         ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN ?? '',
         ANTHROPIC_BASE_URL: effectiveApiBase,
         MODEL_NAME: effectiveModelName,
+        // 2026-07-14 修复:backend 必须显式注入 NEXUS_WS_TOKEN,
+        // 默认 config.py:79 读到空串 → 前端 Bearer nexus-default-token
+        // 与后端空串 _hmac_compare 不通过 → /api/models 401 →
+        // useBootstrap 走 setup 视图 → 所有 journey spec fail。
+        NEXUS_WS_TOKEN: process.env.NEXUS_WS_TOKEN ?? 'nexus-default-token',
         NEXUS_HOME: e2eNexusHome,
         // 透传 mock LLM 开关。NEXUS_E2E_MOCK=1 时 nexus.backend.agent 加载
         // e2e_mock.py 替代真实 LLM(场景由 NEXUS_E2E_SCENARIO 决定),
