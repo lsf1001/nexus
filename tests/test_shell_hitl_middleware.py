@@ -16,6 +16,8 @@ WHY 必须 mock ``interrupt``:
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -334,3 +336,43 @@ async def test_awrap_reject_denies(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert "[HITL 拒绝]" in result.content
     assert "no" in result.content
+
+
+# === 中间件 deny 写审计(2026-07-14 E2E 发现中间件短路漏 audit)===
+
+
+def test_dangerous_deny_writes_audit_log(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """危险命令被中间件拦截 → 审计 ``decision=auto_deny`` 写入。
+
+    WHY:之前中间件 deny 只返回 ToolMessage,不写审计 → 用户事后查
+    ``~/.nexus/logs/shell_executions.log`` 看不到"LLM 试图跑过 rm -rf"。
+    """
+    import nexus.backend.shell_audit as audit_mod
+
+    log_dir = tmp_path / "logs"
+    log_file = log_dir / "shell_executions.log"
+    monkeypatch.setattr(audit_mod, "AUDIT_LOG_DIR", log_dir)
+    monkeypatch.setattr(audit_mod, "AUDIT_LOG_FILE", log_file)
+
+    interrupt_calls: list[Any] = []
+    monkeypatch.setattr(
+        "nexus.backend.middleware.shell.interrupt",
+        lambda payload: interrupt_calls.append(payload) or {"decisions": [{"type": "approve"}]},
+    )
+
+    mw = ShellHITLMiddleware()
+    handler = _make_handler()
+    request = _make_request(
+        tool_name=_SHELL_TOOL_NAME,
+        args={"command": "rm -rf /", "cwd": str(path_home_nexus())},
+    )
+    result = mw.wrap_tool_call(request, handler)
+
+    assert "[Shell 沙箱阻断]" in result.content
+    assert interrupt_calls == [], "危险命令不应触发 HITL"
+    assert log_file.exists(), "中间件 deny 必须写审计"
+    record = json.loads(log_file.read_text(encoding="utf-8").strip())
+    assert record["decision"] == "auto_deny"
+    assert record["exit_code"] is None
+    assert record["risk_label"] == "recursive_force_delete"
+    assert "rm -rf" in record["command"]

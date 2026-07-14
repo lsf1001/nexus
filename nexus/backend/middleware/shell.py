@@ -33,6 +33,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command, interrupt
 
+from ..shell_audit import append_log as _audit_append
 from ..shell_sandbox import (
     classify_dangerous_command,
     validate_command,
@@ -92,6 +93,28 @@ class ShellHITLMiddleware(AgentMiddleware[Any, ContextT, ResponseT]):
             name=_SHELL_TOOL_NAME,
             status="error",
         )
+
+    def _audit_deny(self, tool_call: dict[str, Any], reason: str, risk_label: str | None) -> None:
+        """中间件级 deny 写审计(让安全审计反映完整拦截链)。
+
+        WHY 在中间件也写:
+          危险命令被中间件拦截 → ``shell_run`` 工具函数**未被 invoke** → 工具
+          入口的审计不写 → 用户事后查日志看不到"曾试图跑 rm -rf"。这里兜底
+          一行 ``decision=auto_deny``,exit_code=None。
+        """
+        shell_args = _extract_shell_args(tool_call)
+        try:
+            _audit_append(
+                command=shell_args["command"],
+                cwd=shell_args["cwd"] or "(未指定)",
+                exit_code=None,
+                stdout_snippet="",
+                stderr_snippet=f"沙箱拒绝: {reason}",
+                user_decision="auto_deny",
+                risk_label=risk_label,
+            )
+        except Exception as audit_exc:  # noqa: BLE001
+            logger.warning("ShellHITL audit_deny 失败: %s", audit_exc)
 
     def _build_hitl_request(self, tool_call: dict[str, Any], *, risk_label: str | None) -> dict[str, Any]:
         """构造 langchain HITL 标准 payload,供 ``interrupt()`` 抛。
@@ -185,6 +208,7 @@ class ShellHITLMiddleware(AgentMiddleware[Any, ContextT, ResponseT]):
                 reason,
                 risk_label,
             )
+            self._audit_deny(tool_call, reason, risk_label)
             return self._make_deny_message(tool_call, reason)
 
         hitl_request = self._build_hitl_request(tool_call, risk_label=None)
@@ -221,6 +245,7 @@ class ShellHITLMiddleware(AgentMiddleware[Any, ContextT, ResponseT]):
                 reason,
                 risk_label,
             )
+            self._audit_deny(tool_call, reason, risk_label)
             return self._make_deny_message(tool_call, reason)
 
         hitl_request = self._build_hitl_request(tool_call, risk_label=None)
