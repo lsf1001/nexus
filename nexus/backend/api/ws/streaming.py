@@ -22,6 +22,7 @@ WHY 单独成包:旧 ``api/ws.py`` 1386 行超 800 上限,把这部分拆出后
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -85,15 +86,73 @@ async def _emit_chunks(
     for kind, chunk_text in pairs:
         counter["event_id"] += 1
         counter["last_event_id"] = counter["event_id"]
+        # thinking 帧额外走一道"元话语剥离":LLM 训练范式偏向在 thinking
+        # 里"策划自己怎么回答"("I should be honest…" / "Let me respond…"),
+        # 跟正文强重叠,用户看完 thinking 觉得是复读机。剥离只影响 emit 给
+        # 前端的内容,``emitted_chunk_text``(入库到 messages.thinking_content)
+        # 仍保留 LLM 原始推理,质量门 MemoryFilter 不受影响。
+        emit_text = _strip_thinking_metacommentary(chunk_text) if kind == "thinking" else chunk_text
+        # 全被剥离 → 整帧 skip,event_id 已自增也没关系(仅占位,前端不感知)。
+        if not emit_text and kind == "thinking":
+            continue
         await websocket.send_json(
             {
                 "type": kind,
-                "content": chunk_text,
+                "content": emit_text,
                 "event_id": counter["event_id"],
             }
         )
         if kind == "chunk":
             counter["emitted_chunk_text"] += chunk_text
+
+
+# 元话语剥离 regex 清单 —— 匹配 LLM 训练里高频的"策划自己回答"句式。
+#
+# 设计要点:
+# - **句级**匹配(行边界 + 句号),不是字级;命中整句,不破坏段落
+# - 中英文都覆盖("我应该/让我" + "I should/Let me/Let us/I need to/I will")
+# - 句末的句号 / 问号 / 感叹号 / 换行都视为有效边界
+#
+# WHY 行级而非 token 级:token 级会把"I should be honest"切成 "should be
+# honest"(失去语义),用户看会更怪。整句删除最干净。
+_THINKING_METACOMMENTARY_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # 中文:我/让我/我需要 + 策划动词
+    re.compile(
+        r"[。\n；]?"
+        r"(?:我应该|让我|我需要|我打算|我会|我要|要不我|策略是|让我组织|让我想|让我先)[^。\n]*(?:[。\n]|$)",
+        re.IGNORECASE,
+    ),
+    # 英文:I should / Let me / I need to / I will / Let us / I'll
+    re.compile(
+        r"[.\n;]?"
+        r"(?:I should|Let me|I need to|Let me think|Let me organize|I will|Let us|I'll)[^.$\n]*(?:[.\n]|$)",
+        re.IGNORECASE,
+    ),
+    # 元话语动词前缀独立行(LLM 常用列表行)
+    re.compile(
+        r"^\s*(?:策略是|方法:|思路:|Approach:|Strategy:|Plan:)\s*[^\n]*\n",
+        re.IGNORECASE | re.MULTILINE,
+    ),
+)
+
+
+def _strip_thinking_metacommentary(thinking_text: str) -> str:
+    """剥离 thinking 块里的"策划自己回答"句式,保留真正的"对问题推理"。
+
+    典型输入:
+        "I should be honest about this limitation.\\nLooking at tools, I don't see..."
+
+    典型输出:
+        "Looking at tools, I don't see..."
+    """
+    if not thinking_text:
+        return thinking_text
+    out = thinking_text
+    for pat in _THINKING_METACOMMENTARY_PATTERNS:
+        out = pat.sub("", out)
+    # 多次剥离后,句首可能残留空白 / 多个换行;轻量 normalize
+    out = re.sub(r"\n{3,}", "\n\n", out).strip()
+    return out
 
 
 def _is_retryable_error_code(error_code: str) -> bool:
