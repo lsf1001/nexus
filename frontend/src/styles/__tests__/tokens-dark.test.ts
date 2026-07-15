@@ -79,9 +79,20 @@ function walkCss(dir: string): string[] {
 }
 
 function extractDarkBlock(css: string): string {
-  const m = css.match(/\.nexus-desktop\[data-theme="dark"\][\s\S]*?\n\}/);
-  if (!m) throw new Error('未找到 dark 模式 token 块');
-  return m[0];
+  // 匹配 `:root[data-theme="dark"] { ... }` 块(注释里出现的关键字不命中,
+  // 因为正则要求 `}` 后面必须紧跟 `{`,注释里的语句会被 `}` 后跟 `;` 或换行打断)。
+  // 兼容旧 `.nexus-desktop[data-theme="dark"] { ... }` 单选择器版本。
+  // 第五轮(2026-07-15)改双选择器,因为 SettingsView 把 data-theme 挂在
+  // `<html>` 不是 `.nexus-desktop`,旧选择器 specificity 命中不了,token 不生效。
+  const reList = [
+    /:root\[data-theme="dark"\]\s*\{[\s\S]*?\n\}/,
+    /\.nexus-desktop\[data-theme="dark"\]\s*\{[\s\S]*?\n\}/,
+  ];
+  for (const re of reList) {
+    const m = css.match(re);
+    if (m) return m[0];
+  }
+  throw new Error('未找到 dark 模式 token 块');
 }
 
 function getToken(block: string, name: string): string {

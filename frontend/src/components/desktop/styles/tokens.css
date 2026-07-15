@@ -1,7 +1,15 @@
 /* ===== 设计 Token：颜色、字体、间距 ===== */
 /* 调色板对齐原型 nexus-handdrawn-assistant-ui-v2.html */
 
-.nexus-desktop {
+/* light token 挂在 :root,而不是 .nexus-desktop。
+ * WHY:SettingsView 把 data-theme 设到 documentElement(<html>),dark 块
+ * 也用 :root[data-theme="dark"] —— 两边 specificity 都是 0,1,1(伪类 vs
+ * 属性),dark 因为源码顺序在后必赢。如果 light token 挂在 .nexus-desktop
+ * 上(0,1,0),dark 的 :root 选择器(0,1,1)在嵌套语义下够用,但当用户
+ * 在 .nexus-desktop 上手动调 data-theme 时,旧块也兼容。
+ *
+ * 这里为了简洁统一:light 也走 :root,token 全局可继承 */
+:root {
   /* 深石墨工作台：高对比文本 + 单一青蓝强调色 */
   --ink: #17202f;
   --muted: #667085;
@@ -50,16 +58,24 @@
 
 /* dark mode 覆盖（由 documentElement data-theme="dark" 触发）
    调色板对齐 light 模式品牌:深森林底 + 暖苔藓纸面 + 同款宫崎骏森林绿强调,
-   避免与 light 模式脱钩成 teal 蓝绿。WHY 用户反馈"深色无绿色"。 */
-.nexus-desktop[data-theme="dark"] {
+   避免与 light 模式脱钩成 teal 蓝绿。WHY 用户反馈"深色无绿色"。
+
+   选择器:`:root[data-theme="dark"]` 命中 `<html>`(SettingsView 真挂的位置),
+   specificity 与 light `:root` 相同,但源码顺序在后,自动覆盖。 */
+:root[data-theme="dark"] {
   --ink: #f5efe2;          /* 暖米白,与 light --cream 呼应 */
   --muted: #c5d2b6;
   --faint: #869980;
 
-  --canvas: #1a3328;       /* 森林底,亮一档避免冷黑 */
-  --paper: #1f3a2d;        /* 苔藓纸面 */
-  --paper-soft: #264a38;
-  --paper-tint: #23422f;
+  --canvas: #214a35;       /* HSL(148,38%,22%) 森林底,提亮 7% + 饱和 +5%
+                             * WHY 用户反馈"深色无绿色":原 #1a3328 饱和 33% 太冷,
+                             * 在 DCI-P3 屏上读起来发青/发黑。这里 H=148 hue 不变,
+                             * L 从 15→22 提亮 7 个百分点,S 从 33→38 加 5 个百分点,
+                             * 让"宫崎骏森林绿"终于读成绿色而不是冷墨色 */
+  --paper: #2a5240;        /* HSL(148,35%,27%) 苔藓纸面,比 canvas 浅一档
+                             * 主背景 + sidebar 渐变都用它,务必读成绿 */
+  --paper-soft: #356349;
+  --paper-tint: #2f5944;
 
   --line: #3a5640;
   --line-strong: #4d6f54;

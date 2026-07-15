@@ -22,8 +22,6 @@
         "decorations": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "transparent": true,
-        "backgroundColor": "#00000000",
         "visible": true
       }
     ],

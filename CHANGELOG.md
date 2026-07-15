@@ -185,6 +185,38 @@ preview 验证:`.nexus-desktop { childCount: 2, display: 'grid', gridTemplateCol
 WHY 用户反馈默认 1280×820 偏小且与 macOS 全屏审美不一致,启动即最大化
 让首屏体验跟系统自带 app 对齐。
 
+#### Fixed — 第五轮:Tauri 2 transparent+Overlay 冲突 + dark token 真正生效 (2026-07-15)
+
+用户两次截图反馈"不能全屏 + 颜色不是宫崎骏绿"。根因有两层:
+
+**根因 1:Tauri 2 macOS `transparent: true` + `titleBarStyle: Overlay` 冲突**
+- `desktop/src-tauri/tauri.conf.json`:删 `"transparent": true` + `"backgroundColor": "#00000000"`
+- WHY:Tauri 2 在 macOS 上同时启用 `transparent` 和 `Overlay` 会触发 NSWindow
+  的 rounded-rectangle wrapping bug,chrome 看起来被"包了一层"。Chrome 配置
+  现在只保留 `decorations: true` + `titleBarStyle: Overlay` + `hiddenTitle: true`
+  + `maximized: true`,与 Claude Desktop / Linear 形态一致。
+
+**根因 2:`data-theme` 挂错元素 → dark token specificity 不命中**
+- `frontend/src/components/desktop/styles/tokens.css`:
+  - light token 块从 `.nexus-desktop { ... }` 改 `:root { ... }`
+  - dark token 块选择器从 `.nexus-desktop[data-theme="dark"]` 改 `:root[data-theme="dark"]`
+- WHY:SettingsView 真把 `data-theme` 设到 `documentElement`(`<html>`),不
+  是 `.nexus-desktop` 元素本身。CSS 选择器限定在 `.nexus-desktop[data-theme=...]`
+  时 specificity 只命中元素本身,但 `.nexus-desktop` 元素又**自带 light token 块**
+  (覆盖在 `:root` 上),dark 永远赢不了。结果就是用户点开 dark mode 但 UI 仍
+  是 light 调色 —— 看起来"提亮没用"。改成 `:root` 后两边 specificity 都是
+  `(0,1,1)`,dark 因为源码顺序在后自动覆盖 light。
+- 同时 dark 色值提亮 7% + 饱和 +5%:`--canvas` 从 `#1a3328`(HSL 148,33%,15)
+  改 `#214a35`(HSL 148,38%,22);`--paper` 从 `#1f3a2d` 改 `#2a5240`。WHY 用户
+  反馈"宫崎骏那种绿色":原色饱和 33% + 亮度 15% 在 DCI-P3 屏读起来发青/发黑,
+  提亮后真正读成森林绿。
+- `frontend/src/styles/__tests__/tokens-dark.test.ts`:正则从单选择器扩到
+  `:root[data-theme="dark"]` + `.nexus-desktop[data-theme="dark"]` 双兼容。
+
+**测试:**`npm run test:vitest` 22/22 PASS(锁色测试全过)。
+
+**DMG:** 86M,产物 `release/Nexus-1.1.0-arm64.dmg`。
+
 #### Changed — WS 鉴权 token 随机化
 
 DMG bundle 内 WS 鉴权 token 由公开字符串 `nexus-default-token` 改为 build-time 随机生成(64 hex 字符),
