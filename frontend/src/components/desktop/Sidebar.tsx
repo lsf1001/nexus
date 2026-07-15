@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useContextMenuTrigger, openContextMenuAt } from '../../lib/useContextMenuTrigger';
 import type { Conversation } from '../../types';
 import type { DesktopView } from './DesktopShell';
@@ -35,12 +36,22 @@ export function Sidebar({
   onDeleteConversation,
   onNewTask,
 }: SidebarProps) {
+  // 第九轮(2026-07-16):会话搜索 — 顶栏下方 input[type=search],
+  // 按 title 子串过滤;空查询 = 全列表;无命中 = 显示"无匹配"提示
+  // (empty-tasks 只在 conversations 本就空时出现)。
+  const [searchQuery, setSearchQuery] = useState('');
+
   // 按更新时间倒序,新的在前 — 人类直觉就是"刚聊的放最上面"
   const sortedConversations = [...conversations].sort((a, b) => {
     const ta = new Date(a.updatedAt || a.createdAt).getTime();
     const tb = new Date(b.updatedAt || b.createdAt).getTime();
     return tb - ta;
   });
+
+  const trimmedQuery = searchQuery.trim();
+  const filteredConversations = trimmedQuery
+    ? sortedConversations.filter((c) => (c.title || '新对话').includes(trimmedQuery))
+    : sortedConversations;
 
   // 各交互元素右击复制(可访问性增强)
   const copyBrand = useContextMenuTrigger(() => 'Nexus · 个人 AI 助手', { label: '应用信息' });
@@ -146,6 +157,16 @@ export function Sidebar({
         <span>新对话</span>
       </button>
 
+      <div className="sidebar-search">
+        <input
+          type="search"
+          placeholder="搜索会话"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          aria-label="搜索会话"
+        />
+      </div>
+
       <div className="sidebar-section" aria-label="对话列表">
         <div className="sidebar-section-title">
           <span>对话</span>
@@ -164,8 +185,12 @@ export function Sidebar({
                 + 开始新对话
               </button>
             </div>
+          ) : filteredConversations.length === 0 ? (
+            <div className="sidebar-no-match" aria-live="polite">
+              无匹配 “{trimmedQuery}”
+            </div>
           ) : (
-            sortedConversations.map(renderTask)
+            filteredConversations.map(renderTask)
           )}
         </div>
       </div>
