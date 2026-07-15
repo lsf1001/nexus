@@ -42,33 +42,34 @@ export function ShellLayout({
 
   return (
     <div className="nexus-desktop">
-      <div className="window">
-        <Sidebar
-          onViewChange={onViewChange}
-          conversations={conversations}
-          currentConversationId={currentConversationId}
-          wechatConnected={wechatConnected}
-          wechatInboxCount={wechatInboxCount}
-          onSelectConversation={onSelectConversation}
-          onDeleteConversation={onDeleteConversation}
-          onNewTask={onNewTask}
-        />
+      {/* 整窗直接铺,不再有 .window 卡片嵌套。
+       * 顶部 38px 让给 macOS traffic lights (titleBarStyle=Overlay + hiddenTitle)。
+       * 拖拽区由 CSS .drag-region + data-tauri-drag-region 标记,
+       * sidebar 透到 traffic light 下方而不挡点。 */}
+      <Sidebar
+        onViewChange={onViewChange}
+        conversations={conversations}
+        currentConversationId={currentConversationId}
+        wechatConnected={wechatConnected}
+        wechatInboxCount={wechatInboxCount}
+        onSelectConversation={onSelectConversation}
+        onDeleteConversation={onDeleteConversation}
+        onNewTask={onNewTask}
+      />
 
-        <main className="main">
-          {view === 'setup' && <SetupView onDone={() => onViewChange('chat')} />}
-          {view === 'chat' && (
-            <ChatView
-              context={context}
-              onConnectedChange={onConnectedChange}
-              onSessionCreated={onSessionCreated}
-              resetCounter={resetCounter}
-            />
-          )}
-          {view === 'wechat' && <WechatAssistantView onBack={() => onViewChange('chat')} />}
-          {view === 'settings' && <SettingsView onBack={() => onViewChange('chat')} />}
-        </main>
-
-      </div>
+      <main className="main">
+        {view === 'setup' && <SetupView onDone={() => onViewChange('chat')} />}
+        {view === 'chat' && (
+          <ChatView
+            context={context}
+            onConnectedChange={onConnectedChange}
+            onSessionCreated={onSessionCreated}
+            resetCounter={resetCounter}
+          />
+        )}
+        {view === 'wechat' && <WechatAssistantView onBack={() => onViewChange('chat')} />}
+        {view === 'settings' && <SettingsView onBack={() => onViewChange('chat')} />}
+      </main>
 
       {/* 全局右键菜单浮层(挂在最外层,避免被父级 overflow 切掉) */}
       <ContextMenuHost />

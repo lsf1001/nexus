@@ -40,7 +40,7 @@ export function ChatView({
 
   return (
     <>
-      <header className="topbar">
+      <header className="topbar" data-tauri-drag-region>
         <div className="topbar-topic">
           <strong title={currentConv?.title || '新任务'}>
             {currentConv?.title || '新任务'}

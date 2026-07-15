@@ -115,7 +115,10 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand" onContextMenu={copyBrand}>
+      {/* 整列拖拽(Tauri 2 属性标记);
+       * sidebar 顶部 38px 与 macOS traffic lights 同高,整列可拖但
+       * 内 button 等会自动 no-drag(tokens.css 全局规则)。 */}
+      <div className="sidebar-brand" data-tauri-drag-region onContextMenu={copyBrand}>
         <div className="sidebar-brand-mark">N</div>
         <div className="sidebar-brand-text">
           <strong>Nexus</strong>

@@ -75,13 +75,11 @@ export function DesktopShell() {
 
   if (isBootstrapping) {
     return (
-      <div className="nexus-desktop">
-        <div className="window window--loading">
-          <div className="loading-copy">
-            <div className="sidebar-brand-mark">N</div>
-            <strong>Nexus 正在准备本地助手</strong>
-            <span>检查模型配置、会话和微信状态...</span>
-          </div>
+      <div className="nexus-desktop nexus-desktop--loading">
+        <div className="loading-copy">
+          <div className="sidebar-brand-mark">N</div>
+          <strong>Nexus 正在准备本地助手</strong>
+          <span>检查模型配置、会话和微信状态...</span>
         </div>
       </div>
     );
