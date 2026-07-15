@@ -78,23 +78,60 @@
   --shadow-sm: 0 7px 18px rgba(0, 0, 0, 0.18);
 }
 
-/* ===== Reset ===== */
+/* ===== 顶层容器:全屏 single-layer grid(SHiTCH from ".window" wrapper)
+ * 整窗直接铺,不再用 1 个居中卡片冒充窗口(那是上一个产品"窗口嵌应用"的旧方案)。
+ * 取自参考:Claude Desktop / Linear 这种 macOS 原生 chrome APP 的形态:
+ *   - sidebar 与 main 平铺,父容器直接 display:grid
+ *   - 顶部 38px 让给 macOS traffic lights(titleBarStyle=Overlay + hiddenTitle),
+ *     由 Tauri 2 自动保留窗口原生三圆点
+ *   - sidebar 透到 traffic light 下方而不在 38px 内挡点,拖拽区由
+ *     data-tauri-drag-region 标记 */
 .nexus-desktop *,
 .nexus-desktop *::before,
 .nexus-desktop *::after {
   box-sizing: border-box;
 }
 
+/* ===== 顶层容器:整窗直铺 grid =====
+ * 参考 Claude Desktop/Linear 这种 macOS 原生 chrome APP:
+ * - sidebar 与 main 在同一个 grid,父容器直接 display:grid,不嵌套 .window 卡片
+ * - 顶部 38px 让给 macOS traffic lights(titleBarStyle=Overlay + hiddenTitle);
+ *   Tauri 2 自动保留窗口原生三圆点,sidebar 透到 traffic light 下方,
+ *   拖拽区由 data-tauri-drag-region 标记
+ * - 整窗背景 `--paper`,与浅一档 `--canvas` 形成层次
+ */
 .nexus-desktop {
   min-height: 100vh;
+  min-width: 100vw;
   overflow: hidden;
   color: var(--ink);
   font-family: var(--font-sans);
-  background: #e9eef5;
+  background: var(--paper);
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
 }
 
 .nexus-desktop[data-theme="dark"] {
-  background: #1a3328;
+  background: var(--paper);
+}
+
+/* 拖拽区 — Tauri 2 macOS chrome 需要给"标题栏区域"打 drag,其它 UI 自动 no-drag。
+ * 用属性级标记(.nexus-desktop [data-tauri-drag-region] = drag),其他 button/input
+ * 自动 no-drag。这样不需要给每个交互元素单独写。 */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.nexus-desktop button,
+.nexus-desktop input,
+.nexus-desktop textarea,
+.nexus-desktop select,
+.nexus-desktop [role="button"],
+.nexus-desktop .task-item,
+.nexus-desktop .recent-panel,
+.nexus-desktop .empty-tasks {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 /* 网格纸纹理：与原型同款 42px + multiply */
