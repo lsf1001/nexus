@@ -3,7 +3,19 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   thinking?: string;
+  /** 第九轮:agent 工具调用透明卡片。多个 toolCall 顺序追加,默认折叠。 */
+  toolCalls?: ToolCall[];
   createdAt: Date;
+}
+
+/** 第九轮:单条 tool 调用状态 — ToolCallCard 渲染单元。
+ *  state 流转:running(刚发出 tool_call)→ success / error(tool_result 到达)。 */
+export interface ToolCall {
+  id: string;
+  name: string;
+  state: 'running' | 'success' | 'error';
+  args?: Record<string, unknown>;
+  result?: string;
 }
 
 export interface Conversation {

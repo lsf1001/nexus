@@ -178,5 +178,74 @@ export const handleConfirmationRequest: WsHandler = (ev, ctx) => {
   });
 };
 
-/** 兜底:tool_call / tool_result / token_usage / stats / resume_* 等观测帧 noop */
+/** 第九轮(2026-07-16):tool_call 帧 → append ToolCall(running) 到当前
+ * assistant message 的 toolCalls 数组。content 是 JSON 字符串,字段:
+ *   { id: string, name: string, args?: object }
+ * 解析失败 → warn + noop,不抛错(后端协议演进时兼容)。 */
+export const handleToolCall: WsHandler = (ev, ctx) => {
+  if (typeof ev.content !== 'string') return;
+  let payload: { id?: string; name?: string; args?: Record<string, unknown> };
+  try {
+    payload = JSON.parse(ev.content) as typeof payload;
+  } catch {
+    useToastStore.getState().push('warn', 'tool_call 帧 JSON 解析失败,已忽略');
+    return;
+  }
+  if (!payload.id || !payload.name) {
+    useToastStore.getState().push('warn', 'tool_call 帧缺 id / name,已忽略');
+    return;
+  }
+  const msgs = useStore.getState().conversationMessages;
+  const last = msgs[msgs.length - 1];
+  if (!last || last.role !== 'assistant') return;
+  const next = [...msgs];
+  const existing = last.toolCalls ?? [];
+  next[next.length - 1] = {
+    ...last,
+    toolCalls: [
+      ...existing,
+      { id: payload.id, name: payload.name, state: 'running', args: payload.args },
+    ],
+  };
+  useStore.getState().setConversationMessages(next);
+  // tool_call 期间 isLoading 仍为 true,继续等后续 chunk / result
+  ctx.disarmWatchdog();
+};
+
+/** 第九轮:tool_result 帧 → 更新对应 ToolCall 的 result + state。
+ *  content JSON:{ id, result?, error? }
+ *  error 非空 → state='error' + result=error;
+ *  result 字段(可能很长)— 原样存进 ToolCall.result。 */
+export const handleToolResult: WsHandler = (ev, ctx) => {
+  if (typeof ev.content !== 'string') return;
+  let payload: { id?: string; result?: string; error?: string | null };
+  try {
+    payload = JSON.parse(ev.content) as typeof payload;
+  } catch {
+    useToastStore.getState().push('warn', 'tool_result 帧 JSON 解析失败,已忽略');
+    return;
+  }
+  if (!payload.id) return;
+  const msgs = useStore.getState().conversationMessages;
+  const last = msgs[msgs.length - 1];
+  if (!last || last.role !== 'assistant' || !last.toolCalls) return;
+  const idx = last.toolCalls.findIndex((tc) => tc.id === payload.id);
+  if (idx < 0) return;
+  const hasError = typeof payload.error === 'string' && payload.error.length > 0;
+  const updated: typeof last.toolCalls = last.toolCalls.map((tc, i) =>
+    i === idx
+      ? {
+          ...tc,
+          state: hasError ? 'error' : 'success',
+          result: hasError ? payload.error! : payload.result ?? tc.result,
+        }
+      : tc
+  );
+  const next = [...msgs];
+  next[next.length - 1] = { ...last, toolCalls: updated };
+  useStore.getState().setConversationMessages(next);
+  ctx.disarmWatchdog();
+};
+
+/** 兜底:token_usage / stats / resume_* 等观测帧 noop */
 export const noop: WsHandler = () => undefined;

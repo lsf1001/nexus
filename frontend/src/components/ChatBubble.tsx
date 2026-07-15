@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useContextMenuTrigger } from '../lib/useContextMenuTrigger';
 import { remarkPathLinkify } from '../lib/remarkPathLinkify';
+import { ToolCallCard } from './ChatArea/ToolCallCard';
 import {
   chatBubblePropsAreEqual,
   type ChatBubbleProps,
@@ -116,6 +117,13 @@ function ChatBubbleInner({ message, showThinking = true, onCopy }: ChatBubblePro
             {thinkingExpanded && (
               <pre className="thinking-content">{message.thinking}</pre>
             )}
+          </div>
+        )}
+        {message.toolCalls && message.toolCalls.length > 0 && (
+          <div className="message-tool-calls">
+            {message.toolCalls.map((tc) => (
+              <ToolCallCard key={tc.id} call={tc} />
+            ))}
           </div>
         )}
         <div className={`message-markdown ${isUser ? 'user' : 'assistant'}`}>
