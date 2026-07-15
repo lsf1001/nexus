@@ -30,25 +30,25 @@ export function WechatAssistantView({ onBack }: WechatAssistantViewProps = {}) {
   const [showBindModal, setShowBindModal] = useState(false);
 
   return (
-    <ChannelViewBase channelType="wechat">
-      <div className="chat-area-wrap">
-        <header className="chat-status-bar" data-tauri-drag-region>
-          <span className="chat-status-topic" title="微信通道">
-            微信通道
-          </span>
-          {onBack && (
-            <button
-              type="button"
-              className="chat-status-action"
-              onClick={onBack}
-              aria-label="返回聊天"
-              title="返回聊天"
-            >
-              ← 返回聊天
-            </button>
-          )}
-        </header>
+    <div className="chat-area-wrap">
+      <header className="chat-status-bar" data-tauri-drag-region>
+        <span className="chat-status-topic" title="微信通道">
+          微信通道
+        </span>
+        {onBack && (
+          <button
+            type="button"
+            className="chat-status-action"
+            onClick={onBack}
+            aria-label="返回聊天"
+            title="返回聊天"
+          >
+            ← 返回聊天
+          </button>
+        )}
+      </header>
 
+      <ChannelViewBase channelType="wechat">
         <section className="wechat-copy-inline">
           <div className="wechat-mark">微</div>
           <h1>微信通道是 Nexus 的随身入口。</h1>
@@ -74,9 +74,9 @@ export function WechatAssistantView({ onBack }: WechatAssistantViewProps = {}) {
             </button>
           </div>
         </section>
-      </div>
+      </ChannelViewBase>
 
       <WechatPluginModal isOpen={showBindModal} onClose={() => setShowBindModal(false)} />
-    </ChannelViewBase>
+    </div>
   );
 }
