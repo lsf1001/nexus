@@ -1,5 +1,7 @@
 import datetime
 import logging
+import os
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -19,6 +21,7 @@ from .shell_sandbox import (
     validate_cwd,
     validate_timeout,
 )
+from .skills import REGISTRY, SKILLS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +218,83 @@ def ask_user(question: str, options: list[str] | None = None) -> str:
     return summary
 
 
+# === Skill 调用工具 ===
+# WHY(2026-07-15):用户在 ``~/.nexus/skills/<name>/SKILL.md`` 放的 skill
+# 需要一个 LLM 入口工具触发。本工具做 3 件事:
+#   1. 从 REGISTRY 查 skill(查不到直接报错)
+#   2. 检查 ``requires`` env(缺直接报错,**不**触发 HITL——环境变量缺失
+#      是配置问题,弹卡给用户看也没用)
+#   3. 拼接 cmd + cwd + timeout=120,内部转交给 :func:`shell_run` —— 走
+#      现有沙箱 + 审计 + 危险命令 auto-deny
+#
+# WHY ``skill_args`` 不叫 ``args``:langchain 1.x Pydantic schema 把
+# ``args`` / ``kwargs`` 当作 ``*args`` / ``**kwargs`` 的合成字段剔除
+# (tools/base.py _parse_input 第 2148 行 filter),同名参数会丢。改叫
+# ``skill_args`` 一劳永逸。
+#
+# HITL:**不**弹 ConfirmationCard(方案 A)。skill 是用户自己写的,
+# entrypoint 是绝对路径,cwd 锁在 skill 目录内——再让用户每次确认
+# 会变成点 100 次 OK 才能跑。
+_RUN_SKILL_TIMEOUT_S = 120
+
+
+@langchain_tool
+def run_skill(skill_name: str, skill_args: str = "") -> str:
+    """调用 ``~/.nexus/skills/<name>/`` 下注册的 skill。
+
+    **适用场景**:
+        - 用户输入命中了某个 skill 的 trigger(见 system prompt 的
+          ``## 已加载 Skills`` 段)
+        - skill 是用户自己写的脚本(entrypoint 必须是绝对路径)
+
+    **强制约束**:
+        - ``skill_name`` 必须在 REGISTRY 里(查不到 → 错误,不调 shell)
+        - skill 声明的 ``requires`` env var 必须都已设置(缺 → 错误)
+        - ``skill_args`` 用 :func:`shlex.quote` 转义,空格 / 特殊字符不会
+          被 shell 拆成多参数
+        - ``cwd`` 强制锁在 ``~/.nexus/skills/<skill_name>/``,不允许
+          entrypoint 跑错目录
+
+    沙箱:转交给 :func:`shell_run`,走 ``shell_sandbox`` 危险命令黑名单 +
+    cwd 白名单 + ``_audit_append`` 审计。skill 写出 ``rm -rf /`` 仍会被拦。
+
+    Args:
+        skill_name: SKILL.md frontmatter 里的 ``name`` 字段。
+        skill_args: 传给 entrypoint 的参数,整段会被 ``shlex.quote`` 包成
+            一个 shell 参数;传空字符串 = 不传任何参数。
+
+    Returns:
+        shell_run 的可读报告字符串(含 exit_code / stdout / stderr)。
+        skill 不存在 / 缺 env / 沙箱阻断时返回明确错误。
+    """
+    # === 步骤 1:查 REGISTRY ===
+    manifest = REGISTRY.get(skill_name)
+    if manifest is None:
+        loaded = sorted(REGISTRY.keys())
+        return f"[Skill 错误] 未找到 skill '{skill_name}'。当前已加载: {loaded if loaded else '(无)'}。"
+
+    # === 步骤 2:env 检查 ===
+    missing = [name for name in manifest.requires if not os.environ.get(name)]
+    if missing:
+        return f"[Skill 错误] skill '{skill_name}' 缺环境变量: {missing}。请先 export 后重试。"
+
+    # === 步骤 3:拼 cmd ===
+    # skill_args 空 → 不带 trailing space;非空 → shlex.quote 转义
+    cmd_parts = [manifest.entrypoint]
+    if skill_args:
+        cmd_parts.append(shlex.quote(skill_args))
+    cmd = " ".join(cmd_parts)
+
+    # cwd = skill 目录(<SKILLS_DIR>/<name>/)
+    skill_cwd = SKILLS_DIR / skill_name
+
+    # === 步骤 4:转交 shell_run(走沙箱 + 审计 + HITL)===
+    # 直接调底层函数,不调 .invoke —— .invoke 是 langchain ToolNode
+    # 给 LLM 用的入口,带 callback 配置 / pydantic schema 校验,
+    # 这里已是 Python 内部调用,绕过这层。
+    return shell_run(command=cmd, cwd=str(skill_cwd), timeout=_RUN_SKILL_TIMEOUT_S)
+
+
 # === Shell 执行工具 ===
 # 关键设计(2026-07-14):
 #   1. HITL 弹窗由 ``ShellHITLMiddleware`` 在 wrap_tool_call 阶段触发,本工具
@@ -349,6 +429,7 @@ TOOLS = [
     list_dir,
     ask_user,
     get_model_info,
+    run_skill,
     shell_run,
 ]
 TOOLS = [t for t in TOOLS if t is not None]

@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from nexus.backend.identity.directives import DIRECTIVES
+from nexus.backend.skills import REGISTRY, render_skills_for_prompt
 
 logger = __import__("logging").getLogger(__name__)
 
@@ -189,7 +190,18 @@ ask_user 会暂停当前回合,前端弹出结构化澄清表单(候选项 / 自
 - 一次性简单事实问答 → 直接回答
 - 闲聊 → 自然对话即可"""
 
-    return "\n\n".join([identity, clarification_rule, security])
+    parts = [identity, clarification_rule, security]
+
+    # 末尾拼运行时加载的 skills(2026-07-15 引入)
+    # WHY 在这里拼,不在 DynamicIdentityMiddleware 拼:
+    #   - skills 是 ~/.nexus/skills/ 目录的运行时扫描结果,跟模型无关
+    #   - DynamicIdentityMiddleware 只管 FACT 块(模型身份),职责分离
+    #   - reload_system_prompt() 清缓存后下次 get_system_prompt 重新读 REGISTRY
+    skills_block = render_skills_for_prompt(list(REGISTRY.values()))
+    if skills_block:
+        parts.append(skills_block)
+
+    return "\n\n".join(parts)
 
 
 _CACHED_PROMPT: dict[str, str] = {}

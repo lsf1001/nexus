@@ -7,6 +7,31 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ### [Unreleased] — Pre-release hardening (2026-07-14)
 
+#### Added — 运行时 SKILL.md loader
+
+用户把 `~/.nexus/skills/<name>/SKILL.md` 放进本地目录,后端 lifespan 启动时
+自动扫描 + 解析 + 注入 system prompt。LLM 在对话里看到 trigger 命中就调
+`run_skill` 工具,内部走既有 `shell_run` 沙箱 + 审计 + 危险命令 auto-deny。
+
+形态参考 Claude Code `.claude/skills/`(单 md 文件 + frontmatter,放进目录就生效)。
+
+- **`nexus/backend/skills/schema.py`**:`SkillManifest(BaseModel)` 校验 `name / description / triggers / entrypoint / inputs / requires / body`
+- **`nexus/backend/skills/loader.py`**:`parse_skill_md()` 拆 frontmatter + `yaml.safe_load`;`scan_skills_dir()` 单文件损坏 skip + warn 不阻断启动;`render_skills_for_prompt()` 渲染成 prompt markdown 段
+- **`nexus/backend/skills/__init__.py`**:`SKILLS_DIR = ~/.nexus/skills` + `REGISTRY` module-level 字典
+- **`nexus/backend/tools.py`**:`run_skill(skill_name, skill_args)` 工具,内部 `shlex.quote(skill_args)` + 直接调 `shell_run(command=..., cwd=skill_dir, timeout=120)`,走既有沙箱 + 审计
+- **`nexus/backend/agent/_system_prompt.py`**:`_build_system_prompt` 末尾 append skills 段,空时跳过
+- **`nexus/backend/main.py`**:lifespan `init_db()` 之后调 `scan_skills_dir()` + `reload_system_prompt()`
+
+WHY `skill_args` 不叫 `args`:langchain 1.x Pydantic schema 把 `args`/`kwargs`
+当作 `*args`/`**kwargs` 合成字段剔除,同名参数会丢;改名一劳永逸。
+
+WHY 不弹 ConfirmationCard(方案 A):用户拍板直接执行,危险命令仍被
+`shell_sandbox._should_deny` 拦,LLM 收到 error ToolMessage。
+
+测试:`tests/test_skills_loader.py` (10) + `tests/test_run_skill.py` (5),共 15 个单测覆盖正常/边界/异常三类路径。
+
+DMG 不受影响:`~/.nexus/skills/` 是用户运行时数据,不在 `_up_/` 里,改后端代码 + 用户自己写 SKILL.md 即用,无需重打。
+
 #### Changed — WS 鉴权 token 随机化
 
 DMG bundle 内 WS 鉴权 token 由公开字符串 `nexus-default-token` 改为 build-time 随机生成(64 hex 字符),

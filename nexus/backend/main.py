@@ -25,6 +25,7 @@ from .models_config import get_active_model
 from .observability import setup_logging
 from .routes import model_config as model_config_routes
 from .sessions import router as sessions_router
+from .skills import scan_skills_dir
 
 _agent = None
 _mcp_tools: list[Any] = []
@@ -132,6 +133,17 @@ async def lifespan(app: FastAPI):
     from .db import init_db
 
     init_db()
+    # 扫描运行时 skills(2026-07-15 引入)
+    # WHY init_db 之后:skill 加载失败不应阻断 DB 初始化。
+    # WHY 单独 try-except:用户 ~/.nexus/skills/ 损坏不该阻断整个启动。
+    try:
+        scan_skills_dir()
+    except Exception as e:  # noqa: BLE001 — 兜底任意扫描异常,不阻断启动
+        logger.warning("[skills] scan 失败,继续启动(无 skill 可用): %s", e, exc_info=True)
+    # 清空 system prompt 缓存,下次 get_system_prompt 会拼上新加载的 skills
+    from .agent._system_prompt import reload_system_prompt
+
+    reload_system_prompt()
     # MCP 加载延后到 agent 首次构造时（省 0.5-3s）
     _mcp_tools = []
     # 关键：_agent 不在 lifespan 内构造。首次 WS 消息 / setup 完成时
