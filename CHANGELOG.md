@@ -52,9 +52,46 @@ DMG 不受影响:`~/.nexus/skills/` 是用户运行时数据,不在 `_up_/` 里,
 - **`--ink`**: `#eef4ff` → `#f0ebe3`(暖米白,与 light `--cream` 呼应)
 - **`index.css` `prefers-color-scheme: dark`** 兜底:`#0f0f12` → `#0d1f17`,与 token 对齐
 
+#### Changed — 第三轮:硬编码 teal 清扫 + 提亮 (2026-07-15)
+
+第二轮修完 token + 重打 DMG 后,用户截图仍反馈"还有蓝绿"。**根因是
+token 只是表层,组件 CSS 里硬编码的色值才是大面积背景的真正来源**:
+
+| 文件 | 旧硬编码 | 角色 |
+|---|---|---|
+| `shell.css:782` | `#111b2b` | sidebar 蓝黑底 |
+| `shell.css:792` | `linear-gradient(#36bdd1, #13859d)` | brand-mark teal gradient |
+| `shell.css:803` | `#1c3046` | btn-new-task 深蓝 |
+| `shell.css:807-808` | `#24415b` / `#28a9c0` | btn hover + plus-mark teal |
+| `shell.css:813-814` | `#20364c` / `#32bdd1` | task-item is-current 深蓝 + 左边框 teal |
+| `chat.css:693` | `#1f251f` | dark textarea focus 蓝绿 |
+| `chat.css:717` | `#172a38` / `#32778a` | dark prompt-card hover 深蓝 + teal 边 |
+
+修法:**全部切到 token**(让 light/dark 自动跟随):
+
+- `var(--paper)` / `var(--paper-soft)` 替换蓝黑底
+- `var(--forest)` / `var(--forest-soft)` 替换 teal 强调 + hover
+- brand-mark gradient 改 `#5fa37f → #3a5640`(森林绿 → 深苔藓)
+- 同时第一轮的 `#0d1f17` 提亮一档 → `#1a3328`,避免深底上看着像冷黑
+
+锁测试追加:`tokens-dark.test.ts` 加 12 个硬编码黑名单扫描,任一旧色值
+再出现在 `components/desktop/styles/*.css` 即挂测试(防回归)。
+
+preview 截图确认:`.nexus-desktop` bg = `#1a3328`,sidebar = `#1f3a2d`,
+brand-mark gradient 起止 = `#5fa37f → #3a5640`,plus-mark = `#5fa37f`,
+整体深森林绿系,**无 teal**。
+
+DMG **需要重打** 让新色进 bundle。
+
 测试:`frontend/src/styles/__tests__/tokens-dark.test.ts` 新增 3 个锁色单测
 (forest B/R 比 < 2.0 / canvas 非冷黑 / ink R-B ≥ 5),共 59 vitest 全过。
 DMG **需要重打** 一次才能让新色进 bundle。
+
+#### Changed — 窗口启动时最大化 (2026-07-15)
+
+`desktop/src-tauri/tauri.conf.json` 主窗口加 `"maximized": true`。
+WHY 用户反馈默认 1280×820 偏小且与 macOS 全屏审美不一致,启动即最大化
+让首屏体验跟系统自带 app 对齐。
 
 #### Changed — WS 鉴权 token 随机化
 
