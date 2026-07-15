@@ -1905,6 +1905,39 @@ Nexus 仍在 pre-1.0 阶段，版本号在 0.x 区间。本节内容合并到下
 
 ---
 
+### [1.1.0] — 2026-07-15 第六轮 + 第七轮 前端单层化 + composer 暗色修复
+
+#### Changed — 前端 Claude Desktop 形态重构(第六轮)
+
+用户截图反馈"为什么还是这样分层的,不能全屏,重新设计前端吧,按照 Claude desktop 的前端,根据 nexus 的功能重新设计"。旧形态用居中卡片 `.window` 冒充窗口,有内边距+阴影+圆角"窗口嵌应用"语义;新形态跟 Claude Desktop / Linear 同款 macOS 原生 chrome:整窗直铺 grid,sidebar 与 main 平铺,顶部 38px 让给 macOS traffic lights。
+
+- **`tokens.css:111-136`**:`.nexus-desktop` 从 `min-height: 100vh`(实测 3178px 溢出) 改 `height: 100vh` + `overflow: hidden`,强约束 viewport,content 在内部 `.chat-scroll` 处滚动;grid `264px / minmax(0, 1fr)`
+- **`shell.css`**:`.main` 改 `1fr auto` grid(content + 钉底 composer);`.chat-area-wrap` flex column + `min-height: 0`;`.chat-status-bar` 36px
+- **`views.css`**:SetupView 与 ChatView 各自重写,去掉 `.window` 卡片嵌套,直接铺在 `.main` 里
+- **`ChatView.tsx` / `SetupView.tsx`** 同步删 wrapper
+
+WHY 单层化:"窗口嵌应用"是上一个产品的旧方案,desktop-native APP 必须整窗直铺,sidebar 与 main 是同一 grid item,不是套娃的两层;否则 traffic light 会被卡片遮住,drag 区域无法跨越 sidebar。
+
+#### Fixed — Dark 模式 composer 输入框视觉对比修复(第七轮)
+
+用户截图反馈"你咋不用脑子呢,输入框呢"——DMG dark 模式下 composer-shell 完全看不见。
+
+根因:`chat.css:741-749` 一段没有 `@media` 包裹的"小屏 override",把 `.composer { background: var(--paper) }` 强制写死。dark 模式下 `--paper` = `#2a5240` = 整窗 `.nexus-desktop` 背景 canvas 色,**RGB 差值 (0,0,0)**——composer 跟画布完全融在一起,用户感知不到输入框存在。
+
+修复:
+- `.composer` dark 模式 `background: var(--paper)` 改 `var(--paper-soft)` (`#356349`,比 canvas 亮 5%,RGB 差值 (20,25,20) 视觉可辨)
+- `border: 1.5px` + dark 用 `var(--line-strong)` (`#4d6f54`) 加深色描边
+- `composer-wrap` dark 渐变底从 `var(--canvas)` 改 `var(--paper)`,跟 composer 主色对接
+- `focus-within` dark shadow 透明度 0.28 → 0.32,focus 圈更清楚
+
+WHY 不删 741-749 整段:那段是 2026-07-14 第六轮加的"小屏紧凑布局",有 `padding 12px 34px 26px` 和 `width min(820px,100%)` 这些不能丢的微调;只覆盖 `.composer` 的 background + border 这两个冲突字段即可。
+
+验证:`docs/screenshots/2026-07-15-v7-dmg-dark.png` 真桌面截图,composer 在 dark 森林绿画布上浮起,placeholder "告诉 Nexus 你想完成什么" + hint "个人任务助手 · 本地运行" + 发送按钮都清楚可见。puppeteer `getComputedStyle` 验过:dark 模式下 `.composer { background: rgb(53,99,73) }` = `#356349` = `paper-soft`,`.nexus-desktop` 背景 `rgb(33,74,53)` = canvas。
+
+测试:vitest 78/78 全过(含 tokens-dark 锁测试);pytest 926/936 过(10 个 e2e 因 `Nexus.app` 占 30000 端口连不上,与本改动无关);ruff check + format 都 0 diff。
+
+---
+
 ## 链接
 
 - [v0.1.0 release notes](./RELEASE_NOTES_v0.1.0.md)
