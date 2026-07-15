@@ -7,10 +7,16 @@
  * 锁住:dark `--forest` 必须在森林绿族(R 通道 ≥ 70 且 R-G ≥ -10);
  *      dark `--canvas` 不能是纯黑(`#000` / `#080d15` 这种冷黑也不行)。
  *
+ * 2026-07-15 追加硬编码扫描:
+ *   组件 CSS 里硬编码的 teal 蓝绿色(`#28a9c0` / `#1c3046` 等)即便 token
+ *   调成森林绿也不会生效,导致侧边栏/按钮/hover 仍是冷蓝绿。
+ *   WHY:Token 修了但用户看到还是蓝绿 → 排查发现 shell.css:808
+ *   `.btn-new-task .plus-mark { background: #28a9c0 }` 等孤儿硬编码。
+ *
  * WHY 文件读取 vs jsdom 解析:CSS 解析要起 jsdom 拉 stylesheet 太重,
  * 我们只校验 hex 字符串本身,正则足够。
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -23,9 +29,40 @@ const TOKENS_PATH = join(
   'styles',
   'tokens.css',
 );
+const STYLES_DIR = join(__dirname, '..', '..', 'components', 'desktop', 'styles');
+
+// 第二轮回归黑名单:这些色值出现在组件 CSS 里会让侧边栏/按钮/hover 仍是
+// teal 蓝绿,与森林绿品牌脱钩。锁死,出现即失败。
+const FORBIDDEN_HEX = [
+  '#28a9c0', // 旧 plus-mark teal
+  '#32bdd1', // 旧 task-item is-current 左边框 teal
+  '#36bdd1', // 旧 brand-mark gradient 起 teal
+  '#13859d', // 旧 brand-mark gradient 止 teal
+  '#66d0e1', // 旧 btn-new-task inset 边 teal
+  '#1c3046', // 旧 btn-new-task 深蓝底
+  '#24415b', // 旧 btn-new-task hover 深蓝
+  '#20364c', // 旧 task-item is-current 深蓝底
+  '#111b2b', // 旧 sidebar 蓝黑底
+  '#172a38', // 旧 dark prompt-card hover 深蓝
+  '#32778a', // 旧 dark prompt-card hover 边框 teal
+  '#1f251f', // 旧 dark textarea focus 蓝绿底
+];
 
 function readTokens(): string {
   return readFileSync(TOKENS_PATH, 'utf-8');
+}
+
+function walkCss(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) {
+      out.push(...walkCss(p));
+    } else if (p.endsWith('.css')) {
+      out.push(p);
+    }
+  }
+  return out;
 }
 
 function extractDarkBlock(css: string): string {
@@ -87,4 +124,27 @@ describe('tokens.css dark 模式调色', () => {
     // 暖白:R ≥ B 至少 5
     expect(r - b, `ink=${ink} R-B 差太小,可能偏冷`).toBeGreaterThanOrEqual(5);
   });
+});
+
+describe('组件 CSS 硬编码扫描', () => {
+  const cssFiles = walkCss(STYLES_DIR);
+
+  it('styles/ 下应至少有一份组件 CSS(防 walk 空)', () => {
+    expect(cssFiles.length).toBeGreaterThan(0);
+  });
+
+  it.each(FORBIDDEN_HEX)(
+    '组件 CSS 不应再出现 %s(2026-07 第二轮 teal 蓝绿回归)',
+    (hex) => {
+      const lower = hex.toLowerCase();
+      const offenders: string[] = [];
+      for (const file of cssFiles) {
+        const src = readFileSync(file, 'utf-8');
+        if (src.toLowerCase().includes(lower)) {
+          offenders.push(file);
+        }
+      }
+      expect(offenders, `${hex} 仍出现在: ${offenders.join(', ')}`).toEqual([]);
+    },
+  );
 });

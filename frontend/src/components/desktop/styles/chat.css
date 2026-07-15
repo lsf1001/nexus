@@ -690,7 +690,7 @@
 }
 
 .nexus-desktop[data-theme="dark"] .clarify-textarea:focus {
-  background: #1f251f;
+  background: var(--paper-tint);
 }
 
 /* ===== 对话工作区视觉升级 ===== */
@@ -714,7 +714,7 @@
 }
 .prompt-card::before { content: "↗"; display: inline-block; margin-right: 10px; color: var(--forest); font-size: 16px; }
 .prompt-card:hover { border-color: #9ed9e3; background: #f8feff; box-shadow: 0 10px 22px rgba(24, 74, 103, 0.08); transform: translateY(-2px); }
-.nexus-desktop[data-theme="dark"] .prompt-card:hover { background: #172a38; border-color: #32778a; }
+.nexus-desktop[data-theme="dark"] .prompt-card:hover { background: var(--paper-tint); border-color: var(--forest); }
 
 .status-card {
   max-width: 760px;

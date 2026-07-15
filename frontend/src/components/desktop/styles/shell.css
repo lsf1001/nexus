@@ -779,7 +779,7 @@
 .sidebar {
   gap: 18px;
   padding: 22px 14px 16px;
-  background: #111b2b;
+  background: var(--paper);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -789,8 +789,8 @@
   height: 34px;
   border-radius: 11px;
   border: 0;
-  background: linear-gradient(145deg, #36bdd1, #13859d);
-  box-shadow: 0 8px 18px rgba(12, 181, 204, 0.20);
+  background: linear-gradient(145deg, #5fa37f, #3a5640);
+  box-shadow: 0 8px 18px rgba(95, 163, 127, 0.22);
 }
 .sidebar-brand-text strong { font-size: 15px; letter-spacing: -0.02em; }
 .sidebar-brand-text span { color: rgba(220, 236, 255, 0.52); font-size: 10px; }
@@ -800,18 +800,18 @@
   min-height: 44px;
   border: 0;
   border-radius: 11px;
-  background: #1c3046;
-  color: #eff9ff;
-  box-shadow: inset 0 0 0 1px rgba(102, 208, 225, 0.18);
+  background: var(--paper-soft);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px rgba(95, 163, 127, 0.20);
 }
-.btn-new-task:hover { background: #24415b; border-color: transparent; }
-.btn-new-task .plus-mark { background: #28a9c0; }
+.btn-new-task:hover { background: var(--forest-soft); border-color: transparent; }
+.btn-new-task .plus-mark { background: var(--forest); }
 
 .sidebar-section-title { margin: 3px 7px 7px; color: rgba(210, 228, 246, 0.42); }
 .task-item { border-radius: 10px; padding: 10px 11px; }
 .task-item:hover, .task-item.is-current {
-  background: #20364c;
-  box-shadow: inset 3px 0 0 #32bdd1;
+  background: var(--forest-soft);
+  box-shadow: inset 3px 0 0 var(--forest);
 }
 .task-item-body strong { font-weight: 650; }
 .task-item-body span { color: rgba(212, 228, 246, 0.46); }
