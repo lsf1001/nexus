@@ -20,7 +20,7 @@
  *  - 非图片路径 → <a class="file-link" href="file://..." target="_blank">
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render } from '@testing-library/react'
+import { render, fireEvent } from '@testing-library/react'
 import ChatBubble from '../ChatBubble'
 import { chatBubblePropsAreEqual } from '../chatBubbleProps'
 import type { Message } from '../../types'
@@ -102,9 +102,11 @@ describe('ChatBubble memo 集成行为', () => {
   })
 
   it('thinking 字段值变化 → DOM 文本节点更新(流式思考块行为)', () => {
+    // 第九轮:默认折叠 — 点 toggle 展开后才能看到完整 thinking 文本
     const msg1 = makeMsg({ thinking: 'first thought' })
     const msg2 = makeMsg({ thinking: 'first thought + step 2' })
     const { rerender, container } = render(<ChatBubble message={msg1} showThinking />)
+    fireEvent.click(container.querySelector('.thinking-toggle') as HTMLElement)
     rerender(<ChatBubble message={msg2} showThinking />)
     expect(container.textContent).toContain('first thought + step 2')
   })
@@ -121,8 +123,10 @@ describe('ChatBubble memo 集成行为', () => {
   })
 
   it('showThinking 由 true → false → 思考块消失(用户切开关)', () => {
+    // 第九轮:showThinking=true 时默认折叠 → 先点 toggle 展开
     const msg = makeMsg({ thinking: 'deep thought', content: 'reply' })
     const { rerender, container } = render(<ChatBubble message={msg} showThinking />)
+    fireEvent.click(container.querySelector('.thinking-toggle') as HTMLElement)
     expect(container.textContent).toContain('deep thought')
     rerender(<ChatBubble message={msg} showThinking={false} />)
     expect(container.textContent).not.toContain('deep thought')

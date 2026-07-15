@@ -165,13 +165,45 @@
   color: var(--forest);
 }
 
-/* 思考过程：暗色卡片配绿叶图标 */
+/* 思考过程：暗色卡片配绿叶图标。第九轮改为可折叠,toggle 占顶部
+ * 一行,展开后才显示 .thinking-content。 */
 .thinking-card {
   margin-bottom: 12px;
   border: 1px solid rgba(7, 193, 96, 0.20);
   border-radius: var(--r-md);
   background: rgba(49, 79, 56, 0.06);
-  padding: 12px 14px;
+  padding: 10px 12px;
+}
+
+.thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--forest);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+
+.thinking-toggle:hover {
+  color: var(--forest-strong, var(--forest));
+}
+
+.thinking-chevron {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+  transition: transform 120ms ease;
+}
+
+.thinking-chevron.is-open {
+  color: var(--forest);
 }
 
 .thinking-title {
@@ -185,7 +217,8 @@
 }
 
 .thinking-content {
-  margin: 0;
+  margin: 8px 0 0 0;
+  padding: 0;
   color: var(--muted);
   white-space: pre-wrap;
   font-family: var(--font-mono);

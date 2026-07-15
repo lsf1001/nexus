@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useContextMenuTrigger } from '../lib/useContextMenuTrigger';
@@ -7,6 +7,19 @@ import {
   chatBubblePropsAreEqual,
   type ChatBubbleProps,
 } from './chatBubbleProps';
+
+/** 第九轮(2026-07-16):思考块折叠偏好 — localStorage key,
+ * 用户上次展开/折叠决定下次默认状态。
+ * WHY:Claude Desktop / ChatGPT 形态。 */
+const THINKING_EXPANDED_KEY = 'nexus_thinking_expanded';
+
+function readThinkingPref(): boolean {
+  try {
+    return localStorage.getItem(THINKING_EXPANDED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
 
 /** 友好时间格式:今天 HH:MM / 昨天 HH:MM / YYYY-MM-DD HH:MM */
 function formatTimestamp(d: Date): string {
@@ -26,6 +39,16 @@ function formatTimestamp(d: Date): string {
 function ChatBubbleInner({ message, showThinking = true, onCopy }: ChatBubbleProps) {
   const isUser = message.role === 'user';
   const roleClass = isUser ? 'is-user' : 'is-assistant';
+
+  // 第九轮:思考块折叠 — localStorage 持久化用户偏好,默认折叠
+  const [thinkingExpanded, setThinkingExpanded] = useState<boolean>(() => readThinkingPref());
+  useEffect(() => {
+    try {
+      localStorage.setItem(THINKING_EXPANDED_KEY, String(thinkingExpanded));
+    } catch {
+      // localStorage 不可用,降级为内存态
+    }
+  }, [thinkingExpanded]);
 
   const handleCopy = () => {
     const text = message.content || message.thinking || '';
@@ -77,10 +100,22 @@ function ChatBubbleInner({ message, showThinking = true, onCopy }: ChatBubblePro
         )}
         {showThinking && message.thinking && (
           <div className="thinking-card">
-            <div className="thinking-title">
-              <span aria-hidden="true">🌿</span> 思考过程
-            </div>
-            <pre className="thinking-content">{message.thinking}</pre>
+            <button
+              type="button"
+              className="thinking-toggle"
+              onClick={() => setThinkingExpanded((v) => !v)}
+              aria-expanded={thinkingExpanded}
+              aria-label={thinkingExpanded ? '收起思考过程' : '展开思考过程'}
+            >
+              <span aria-hidden="true">🌿</span>
+              <span>{thinkingExpanded ? '收起思考过程' : `已思考 ${message.thinking.length} 字 · 点开看`}</span>
+              <span aria-hidden="true" className={`thinking-chevron ${thinkingExpanded ? 'is-open' : ''}`}>
+                {thinkingExpanded ? '▾' : '▸'}
+              </span>
+            </button>
+            {thinkingExpanded && (
+              <pre className="thinking-content">{message.thinking}</pre>
+            )}
           </div>
         )}
         <div className={`message-markdown ${isUser ? 'user' : 'assistant'}`}>
