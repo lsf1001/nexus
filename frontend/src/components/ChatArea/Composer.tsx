@@ -56,6 +56,20 @@ export function Composer({
             className="composer-textarea"
           />
           <div className="composer-bottom">
+            <button
+              type="button"
+              className="composer-plus"
+              aria-label="添加附件 / 截图 / 选 skill"
+              title="添加附件 · 截图 · 选 skill(后续版本开放)"
+              onClick={() => {
+                /* 第九轮占位:无行为,后续 PR 加附件 / 截图 / skill 选择 */
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
             <span className="hint">
               {isLoading ? '正在生成中...可点击右侧按钮停止' : '个人任务助手 · 本地运行'}
             </span>
