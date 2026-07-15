@@ -126,6 +126,59 @@ DMG bundle 验证:`dist/assets/index-DlL9OApD.css` grep 上述 4 色 = **0 行**
 
 测试:`npm run test:vitest` 78/78 PASS(锁色 22 + 色族 3 + 其他模块 53)。
 
+#### Fixed — 第四轮:架构层 macOS native chrome 单层化 (2026-07-15)
+
+第三轮把 `--forest` 改森林绿后用户仍吐槽"APP 界面是分层的"。**根因不在颜色,
+而是 DOM 三层嵌套**:
+
+```
+旧结构(分层观感的来源)
+.nexus-desktop       ← 蓝色背景
+  .window              ← 灰色圆角卡片(背离 macOS 全屏审美)
+    .sidebar            ← 森林绿
+    .main               ← 米色
+
+新结构(参考 Claude Desktop)
+.nexus-desktop        ← 全屏直铺,直接 display:grid
+  .sidebar             ← 森林绿,在原生 chrome traffic lights 下方
+  .main                ← 米色,grid 第二列
+```
+
+修法两路并进:
+
+**1) `desktop/src-tauri/tauri.conf.json` macOS chrome 配置** —
+
+| 字段 | 旧 | 新 |
+|---|---|---|
+| `decorations` | `false`(自己画) | `true`(用 macOS 原生 chrome) |
+| `titleBarStyle` | — | `"Overlay"`(三圆点透到内容) |
+| `hiddenTitle` | — | `true`(标题栏只在拖拽时显示) |
+| `transparent` | — | `true`(窗口背景透掉) |
+| `backgroundColor` | — | `"#00000000"`(透明) |
+
+效果:窗口标题栏不再由 webview 自己画,而是 macOS 原生 NSWindow 把标题栏
+overlay 在 webview 上,traffic lights 直接落在 sidebar 顶端 38px 高度内,
+sidebar 透到 traffic light 下方而不在 38px 内挡点。
+
+**2) 前端 DOM 单层 + drag 区域** —
+
+- **`ShellLayout.tsx`**:删除 `.window` 包裹 div,`.nexus-desktop` 直接挂 `<Sidebar/> + <main>`,preview 验证 `childCount = 2`
+- **`DesktopShell.tsx`**:bootstrap loading 状态去掉 `.window window--loading`,改 `.nexus-desktop--loading` 平铺
+- **`tokens.css`**:`.nexus-desktop` 直接 `display: grid; grid-template-columns: 264px minmax(0, 1fr)`,接管原 `.window` 的 grid 职责;`.sidebar { padding-top: 38px }` 让位给 traffic lights
+- **`shell.css`**:删除 `.window` 两处(749-819 整段 dead code) + sidebar 顶部 brand-mark 残留覆写 + `.main { grid-template-rows }` 残留覆写;`.sidebar-brand` 和 `.topbar` 加 `data-tauri-drag-region` 标记拖拽
+- **`Sidebar.tsx`**:`.sidebar-brand` 加 `data-tauri-drag-region`;按钮/任务条目等自动 no-drag(tokens.css 全局规则覆盖)
+
+**WHY 整段 dead code 一定要删**:那段覆写的 `.sidebar { background: var(--paper) }` 仍然生效,
+即便 grid 单层化了,sidebar 会变成白底而不是森林绿 — 与品牌"宫崎骏森林绿"再次冲突。
+
+**WHY 顶层不再画标题栏**:用户原话"一个 APP 界面为什么是分层的"。
+答案就是:把 macOS 原生 chrome 让回来,sandbox 自带的 `decorations: true + Overlay`
+才是这个平台应有的 native chrome,在它上面叠 webview 内容比自画窗口像"卡片嵌应用"。
+
+测试:`npm run test:vitest` 78/78 PASS(锁色测试 24 + 其他 54)。
+preview 验证:`.nexus-desktop { childCount: 2, display: 'grid', gridTemplateColumns: '264px ...' }`。
+**DMG 必须重打** 让 tauri.conf.json 的 chrome 配置 + 新 bundle CSS 进 `.app`。
+
 #### Changed — 窗口启动时最大化 (2026-07-15)
 
 `desktop/src-tauri/tauri.conf.json` 主窗口加 `"maximized": true`。
