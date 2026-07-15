@@ -51,30 +51,30 @@
    调色板对齐 light 模式品牌:深森林底 + 暖苔藓纸面 + 同款宫崎骏森林绿强调,
    避免与 light 模式脱钩成 teal 蓝绿。WHY 用户反馈"深色无绿色"。 */
 .nexus-desktop[data-theme="dark"] {
-  --ink: #f0ebe3;          /* 暖米白,与 light --cream 呼应 */
-  --muted: #b8c5a8;
-  --faint: #7a8c6e;
+  --ink: #f5efe2;          /* 暖米白,与 light --cream 呼应 */
+  --muted: #c5d2b6;
+  --faint: #869980;
 
-  --canvas: #0d1f17;       /* 深森林底 */
-  --paper: #142a1e;        /* 深苔藓纸面 */
-  --paper-soft: #1c3528;
-  --paper-tint: #1a2f23;
+  --canvas: #1a3328;       /* 森林底,亮一档避免冷黑 */
+  --paper: #1f3a2d;        /* 苔藓纸面 */
+  --paper-soft: #264a38;
+  --paper-tint: #23422f;
 
-  --line: #2a4030;
-  --line-strong: #3d5742;
+  --line: #3a5640;
+  --line-strong: #4d6f54;
 
-  --forest: #4a8a6f;       /* 宫崎骏森林绿,深底上保持可读 */
-  --forest-2: #6ba989;     /* 浅一档:hover/active */
-  --forest-soft: #1a3328;  /* 深底 chip 背景 */
+  --forest: #5fa37f;       /* 宫崎骏森林绿,亮一档在深底上醒目 */
+  --forest-2: #7fbf9b;     /* 浅一档:hover/active */
+  --forest-soft: #23442f;  /* 深底 chip 背景 */
 
-  --sage: #88a89a;
-  --tea: #d6923b;
+  --sage: #9bb9aa;
+  --tea: #e0a45a;
 
   --wechat: #07c160;
 
-  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.55);
-  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.35);
-  --shadow-sm: 0 7px 18px rgba(0, 0, 0, 0.22);
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.30);
+  --shadow-sm: 0 7px 18px rgba(0, 0, 0, 0.18);
 }
 
 /* ===== Reset ===== */
@@ -93,7 +93,7 @@
 }
 
 .nexus-desktop[data-theme="dark"] {
-  background: #0d1f17;
+  background: #1a3328;
 }
 
 /* 网格纸纹理：与原型同款 42px + multiply */
