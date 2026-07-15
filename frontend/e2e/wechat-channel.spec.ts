@@ -72,11 +72,11 @@ test('微信通道：侧栏入口 → 绑定弹窗 → QR 请求', async ({ page
   await closeBtn.click();
   await expect(modal).toBeHidden({ timeout: 5_000 });
 
-  // 7. 返回 chat 入口还在
-  const backBtn = page.locator('button.back-btn', { hasText: '返回聊天' });
+  // 7. 返回 chat 入口还在(第八轮 2026-07-15:返回按钮现在是
+  //   chat-status-bar 内的 .chat-status-action,不再是绝对定位的 .back-btn)
+  const backBtn = page.locator('button.chat-status-action', { hasText: '返回聊天' });
   if (await backBtn.count()) {
     await backBtn.click();
-    // 返回 ChatView → 微信通道入口文字应再次可见
     await expect(wechatLink).toBeVisible({ timeout: 5_000 });
   }
 });
