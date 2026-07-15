@@ -25,8 +25,8 @@ html, body {
 }
 @media (prefers-color-scheme: dark) {
   html, body {
-    background: #0f0f12;
-    color: #e8e8ea;
+    background: #0d1f17;
+    color: #f0ebe3;
   }
 }
 @media (prefers-color-scheme: light) {

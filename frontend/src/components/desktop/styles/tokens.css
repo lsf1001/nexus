@@ -47,23 +47,34 @@
   --r-2xl: 28px;
 }
 
-/* dark mode 覆盖（由 documentElement data-theme="dark" 触发） */
+/* dark mode 覆盖（由 documentElement data-theme="dark" 触发）
+   调色板对齐 light 模式品牌:深森林底 + 暖苔藓纸面 + 同款宫崎骏森林绿强调,
+   避免与 light 模式脱钩成 teal 蓝绿。WHY 用户反馈"深色无绿色"。 */
 .nexus-desktop[data-theme="dark"] {
-  --ink: #eef4ff;
-  --muted: #9ba9bc;
-  --faint: #708096;
-  --canvas: #0b111b;
-  --paper: #111a27;
-  --paper-soft: #172231;
-  --paper-tint: #eaf3ff;
-  --line: #263446;
-  --line-strong: #394a61;
-  --forest: #25a4be;
-  --forest-2: #43b8cf;
-  --forest-soft: #112e38;
-  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.46);
-  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.30);
-  --shadow-sm: 0 7px 18px rgba(0, 0, 0, 0.20);
+  --ink: #f0ebe3;          /* 暖米白,与 light --cream 呼应 */
+  --muted: #b8c5a8;
+  --faint: #7a8c6e;
+
+  --canvas: #0d1f17;       /* 深森林底 */
+  --paper: #142a1e;        /* 深苔藓纸面 */
+  --paper-soft: #1c3528;
+  --paper-tint: #1a2f23;
+
+  --line: #2a4030;
+  --line-strong: #3d5742;
+
+  --forest: #4a8a6f;       /* 宫崎骏森林绿,深底上保持可读 */
+  --forest-2: #6ba989;     /* 浅一档:hover/active */
+  --forest-soft: #1a3328;  /* 深底 chip 背景 */
+
+  --sage: #88a89a;
+  --tea: #d6923b;
+
+  --wechat: #07c160;
+
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 7px 18px rgba(0, 0, 0, 0.22);
 }
 
 /* ===== Reset ===== */
@@ -82,7 +93,7 @@
 }
 
 .nexus-desktop[data-theme="dark"] {
-  background: #080d15;
+  background: #0d1f17;
 }
 
 /* 网格纸纹理：与原型同款 42px + multiply */
