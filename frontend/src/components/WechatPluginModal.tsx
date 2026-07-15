@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import { apiFetch, getApiBase } from '../lib/api';
 
 interface WechatPluginModalProps {
@@ -93,13 +94,19 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
   }, [step, qrData?.session_key, apiUrl, onSuccess]);
 
   // 绘制二维码
+  //
+  // WHY 静态 import QRCode(vs 原来动态载入 qrcode 的形式):
+  // DMG 1.1.0 (2026-07-15 build) 装到 /Applications 后,modal 弹出 → 调
+  // /api/channels/wechat/qr → 200 OK → canvas 空白。诊断:qrcode 包有
+  // `browser` 入口字段,vite code-split 把它打成 `browser-xxx.js` 独立
+  // chunk,运行时 webview 通过 `asset://` 协议动态加载该 chunk 路径解析失败,
+  // mod.toCanvas 永远 undefined → canvas 静默不渲染。
+  // 改静态 import → qrcode 23KB 全打主 bundle → 0 dynamic chunk → 100% 可靠。
   useEffect(() => {
     if (qrData?.qrcode_url && canvasRef.current) {
-      import('qrcode').then((mod) => {
-        mod.toCanvas(canvasRef.current!, qrData.qrcode_url, {
-          width: 200,
-          margin: 1,
-        }).catch(console.error);
+      QRCode.toCanvas(canvasRef.current, qrData.qrcode_url, {
+        width: 200,
+        margin: 1,
       }).catch(console.error);
     }
   }, [qrData]);

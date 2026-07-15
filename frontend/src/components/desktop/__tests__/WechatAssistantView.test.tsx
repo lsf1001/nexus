@@ -25,11 +25,26 @@ vi.mock(import("../../../lib/api"), async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    apiFetch: vi.fn(() =>
+    apiFetch: vi.fn((): Promise<Response> =>
       Promise.resolve({
         ok: true,
+        status: 200,
+        statusText: "OK",
+        headers: new Headers(),
+        redirected: false,
+        type: "basic",
+        url: "",
         json: () => Promise.resolve({ bound: false }),
-      }),
+        text: () => Promise.resolve(""),
+        blob: () => Promise.resolve(new Blob()),
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+        formData: () => Promise.resolve(new FormData()),
+        bodyUsed: false,
+        body: null,
+        clone: function () {
+          return this;
+        },
+      } as unknown as Response),
     ),
   };
 });
@@ -112,7 +127,7 @@ describe("WechatAssistantView 结构契约(chat-status-bar 必须置顶)", () =>
     const backBtn = container.querySelector("button.chat-status-action");
     expect(backBtn).not.toBeNull();
     expect(backBtn?.textContent).toContain("返回聊天");
-    backBtn?.click();
+    backBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 

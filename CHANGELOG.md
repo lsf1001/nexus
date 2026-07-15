@@ -7,6 +7,25 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ### [Unreleased] — Pre-release hardening (2026-07-14)
 
+#### Fixed — WechatPluginModal 二维码 DMG 不渲染 (2026-07-16)
+
+系统性测微信通道所有交互时发现:vite dev 模式 modal 点"绑定微信" → canvas
+画好 QR;但 DMG 1.1.0 装到 `/Applications/Nexus.app` 后同样动作 → canvas 永远
+空白。诊断 — `import('qrcode')` 动态载入被 vite code-split 成 `browser-xxx.js`
+独立 chunk,Tauri webview 通过 `asset://` 协议动态加载该 chunk 路径解析失败,
+`mod.toCanvas` 永远 `undefined` → canvas 静默不渲染。
+
+修法:`WechatPluginModal.tsx` 把动态 import 换成静态 `import QRCode from 'qrcode'`。
+静态 import 后 `qrcode` 23KB 全打主 bundle,0 dynamic chunk,`asset://` webview
+100% 可靠。
+
+- **`frontend/src/components/WechatPluginModal.tsx`**:静态 `import QRCode from 'qrcode'` + 头部 WHY 注释 + `useEffect` 同步 `QRCode.toCanvas`
+- **`frontend/src/components/__tests__/WechatPluginModal.test.ts`**:契约锁测试 3 条 — 不允许动态 `import('qrcode')`、必须静态 `from 'qrcode'`、`QRCode.toCanvas` 同步不走 then 链
+
+端到端验证:Playwright headless 跑 vite dev (30077) + 真实后端 (30000),走完 sidebar → wechat → modal → 绑定微信 → canvas,200x200 canvas 含 **18776 个深色像素**(QR 真渲染)。截图 `/tmp/qr_step3_modal_full.png` 可见完整微信登录二维码。
+
+DMG bundle 交叉验证:`/Applications/Nexus.app/Contents/Resources/frontend-dist/assets/index-D33c6Upz.js` 内 `toCanvas` 命中 1 次,无 `browser-*` chunk,跟 vite dev 静态 import 链路一致。
+
 #### Added — 运行时 SKILL.md loader
 
 用户把 `~/.nexus/skills/<name>/SKILL.md` 放进本地目录,后端 lifespan 启动时
