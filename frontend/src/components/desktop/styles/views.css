@@ -1,75 +1,30 @@
-/* ===== Setup / Wechat / Settings 视图通用布局 ===== */
+/* ===== Setup 视图(沿用 inline 表单形态) ===== */
 /* 第六轮(2026-07-15)重构 — Claude Desktop 极简风:
  *   setup-view 改成单列左对齐,左 60px padding 起步,max-width: 560px
- *   不再有 setup-copy 左文案栏 —— 标题文案并入 setup-card heading 一行 */
+ *   不再有 setup-copy 左文案栏 —— 标题文案并入 setup-card heading 一行。
+ * 第八轮(2026-07-15):跟 ChatView/SettingsView/Wechat 一致改用 .chat-area-wrap
+ *   落地(flex column + 顶部 chat-status-bar 占 macOS chrome drag 区域),
+ *   .setup-view 这层是 chat-area-wrap 内部的内层 padding-left 60px 容器,
+ *   跟 settings-list / wechat-copy-inline 保持同一组 60px 起始位。 */
 .setup-view {
-  height: 100%;
   min-height: 0;
-  display: block;
-  padding: 60px 0 0 60px;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 36px 60px 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
 }
 
 .nexus-desktop[data-theme="dark"] .setup-view {
   /* dark 模式沿用父 --canvas 底,不再叠 hero 浮雕 */
 }
 
-/* Settings 视图特例:居中单列全宽 */
-.settings-view {
-  height: 100%;
-  min-height: 0;
-  padding: 60px 0 0 60px;
-  display: block;
-}
-
-/* Wechat 视图:保留双栏(左窄右宽,因为 bind-card 内容多) */
-.wechat-view {
-  height: 100%;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
-}
-
-/* Wechat / Settings 保留的左侧文案区(setup-view 不再用) */
-.wechat-copy,
-.settings-copy {
-  border-right: 1px solid var(--line);
-  padding: 48px 44px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 18px;
-}
-
-.nexus-desktop[data-theme="dark"] .wechat-copy,
-.nexus-desktop[data-theme="dark"] .settings-copy {
-  border-right-color: var(--line);
-}
-
-.wechat-copy h1,
-.settings-copy h1 {
-  margin: 0;
-  max-width: 560px;
-  font-size: 44px;
-  line-height: 1.04;
-  letter-spacing: -0.012em;
-  color: var(--ink);
-  font-weight: 800;
-}
-
-.wechat-copy h1 {
-  font-size: 28px;
-  line-height: 1.26;
-  letter-spacing: -0.006em;
-}
-
-.wechat-copy p,
-.settings-copy p {
-  max-width: 500px;
-  margin: 0;
-  line-height: 1.78;
-  color: var(--muted);
-  font-size: 15px;
-}
+/* settings / wechat 现在复用 .chat-area-wrap(在 shell.css 定义),
+ * 不再各自定义顶层 .settings-view / .wechat-view grid。
+ * 各自所需的"主区内 inline padding"由 .settings-list / .wechat-copy-inline
+ * 控制,见下方。 */
 
 /* Kicker：暖色调，浅森林色背景 */
 .kicker {
@@ -104,9 +59,11 @@
   padding: 0;
 }
 
-.wechat-view {
-  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
-}
+/* 第八轮(2026-07-15):删 .wechat-view 双栏 grid(0.72fr / 1.28fr) + border-right。
+ * 微信通道现在跟 ChatView 同源:.chat-area-wrap 单列 flex column,
+ * 顶部 36px chat-status-bar,中部 brand-copy inline 单列(向左 60px padding 与
+ * settings/setup 对齐),底部 ChannelViewBase 自带的 bind card + inbox。
+ * 没有"左窄右宽"分隔栏,因为 ChannelViewBase 已经把 bind 卡放在主区上方。 */
 
 .nexus-desktop[data-theme="dark"] .setup-card,
 .nexus-desktop[data-theme="dark"] .wechat-bind-card {
@@ -426,32 +383,40 @@
   line-height: 1.5;
 }
 
-/* ===== Settings 视图 ===== */
+/* ===== Settings 视图(第八轮 2026-07-15 — Claude Desktop 单层化) ===== */
+/* 顶层 chat-area-wrap(在 shell.css 定义)负责 flex column 布局,
+ * settings-list 跟 chat-scroll 同级,直接吃主区剩余高度 */
 .settings-list {
   min-height: 0;
   overflow: auto;
-  padding: 44px;
+  padding: 36px 60px 60px;
   display: grid;
-  gap: 14px;
+  gap: 0;
   align-content: start;
-  /* 单列布局后，限制最大宽度让行不撑满整个 1320px 窗口 */
-  width: min(720px, 100%);
-  justify-self: center;
-  align-self: center;
+  width: 100%;
+  max-width: 720px;
 }
 
+/* 第八轮:去 .setting-row 卡片(border + radius + shadow + paper bg),
+ * 改成"行+分割线"扁平结构 —— 跟 macOS 系统设置一样,行就是 row,
+ * 视觉边界靠底部分割线而非每行独立圆角卡片。
+ * 为什么是 border-bottom 1px line 而不是紧贴底:bg 是 paper,line 颜色跟
+ * 父级 line 变量同步,再叠 .nexus-desktop 的 paper-soft(dark)底色也能复用。 */
 .setting-row {
-  border: 1px solid var(--line);
-  border-radius: var(--r-xl);
-  background: var(--paper);
-  padding: 18px;
+  border-bottom: 1px solid var(--line);
+  padding: 20px 4px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
+  gap: 24px;
   align-items: center;
-  box-shadow: 0 10px 26px rgba(24, 26, 32, 0.05);
+  background: transparent;
   min-width: 0;
   user-select: none;
+}
+
+.setting-row:last-child {
+  /* 末行不画分割线,避免跟主区底边形成双线 */
+  border-bottom: 0;
 }
 
 .setting-row > div {
@@ -469,12 +434,6 @@
   word-break: break-word;
 }
 
-.nexus-desktop[data-theme="dark"] .setting-row {
-  background: var(--paper-soft);
-  border-color: var(--line);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25);
-}
-
 .setting-row strong,
 .setting-row span {
   display: block;
@@ -490,6 +449,7 @@
 .setting-row strong {
   color: var(--ink);
   font-size: 15px;
+  font-weight: 600;
 }
 
 .setting-row .toggle {
@@ -549,6 +509,43 @@
   background: var(--paper-soft);
   color: var(--muted);
   border-color: var(--line);
+}
+
+/* ===== Wechat 通道(单列 inline 形态) ===== */
+/* 第八轮(2026-07-15)对齐 SetupView 左 60px padding 的起手:
+ * brand-copy 由 mark + h1 + p + benefits + primary 按钮竖排。
+ * 用主区天然滚(macOS: chat-area-wrap flex column 内部 flex column),
+ * 内容溢出由父级 .channel-children(min-height:0;flex column)上下再 flex 撑满。 */
+.wechat-copy-inline {
+  padding: 36px 60px 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  max-width: 720px;
+}
+
+.wechat-copy-inline h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.26;
+  letter-spacing: -0.006em;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.wechat-copy-inline p {
+  margin: 0;
+  max-width: 520px;
+  line-height: 1.78;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.wechat-extra-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
 }
 
 /* ===== 右击复制菜单（全局浮层） ===== */
@@ -615,60 +612,11 @@
   opacity: 0.7;
 }
 
-/* ===== 子视图顶部返回条(settings / wechat 共用) ===== */
-/* 进入设置/微信通道时,主聊天区被替换,用户没有"返回"出口容易迷失。
-   顶部贴一条小尺寸的返回按钮,沿用主题色,不和 .btn-primary 抢眼。 */
-.settings-header,
-.wechat-header {
-  position: absolute;
-  top: 14px;
-  left: 18px;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.settings-header .back-btn,
-.wechat-header .back-btn {
-  appearance: none;
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--ink);
-  background: rgba(255, 248, 236, 0.7);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: 6px 12px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  transition: background 0.15s ease, transform 0.1s ease;
-  backdrop-filter: blur(6px);
-}
-
-.settings-header .back-btn:hover,
-.wechat-header .back-btn:hover {
-  background: rgba(91, 65, 34, 0.08);
-}
-
-.settings-header .back-btn:active,
-.wechat-header .back-btn:active {
-  transform: scale(0.97);
-}
-
-.nexus-desktop[data-theme="dark"] .settings-header .back-btn,
-.nexus-desktop[data-theme="dark"] .wechat-header .back-btn {
-  color: var(--ink);
-  background: rgba(36, 32, 27, 0.7);
-  border-color: var(--line);
-}
-
-.nexus-desktop[data-theme="dark"] .settings-header .back-btn:hover,
-.nexus-desktop[data-theme="dark"] .wechat-header .back-btn:hover {
-  background: rgba(255, 248, 236, 0.10);
-}
+/* ===== 子视图顶部返回条已删(第八轮 2026-07-15)=====
+ * settings / wechat 现在跟 ChatView 同源:共用 .chat-status-bar 36px 高顶部条,
+ *   左 = 视图标题,右 = .chat-status-action 返回按钮(由 shell.css 定义)。
+ *   .chat-status-bar 整条是 data-tauri-drag-region,让 macOS chrome 整窗可拖,
+ *   但单个按钮是 no-drag(tokens.css 全局 app-region: no-drag 自动覆盖)。*/
 
 /* ===== ChannelViewBase: 多通道共享的 bind 卡 + 收件箱 + children 槽 =====
  *

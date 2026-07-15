@@ -498,6 +498,44 @@
   font-weight: 500;
 }
 
+/* chat-status-bar 右侧 action 按钮(返回按钮等)。
+ * 第八轮(2026-07-15)加:ChatView 只有 status pill 不需要,但
+ * SettingsView/WechatAssistantView 进入子视图后需要"返回聊天"按钮,
+ * 跟 title 一起贴 status bar,与整条 drag 区域并存(token 级 no-drag
+ * 自动覆盖 button,不需要单独写)。 */
+.chat-status-bar .chat-status-action {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: var(--r-sm);
+  padding: 5px 11px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.chat-status-bar .chat-status-action:hover {
+  background: var(--paper-soft);
+}
+
+.chat-status-bar .chat-status-action:active {
+  transform: scale(0.97);
+}
+
+.nexus-desktop[data-theme="dark"] .chat-status-bar .chat-status-action {
+  background: var(--paper-soft);
+  border-color: var(--line);
+}
+
+.nexus-desktop[data-theme="dark"] .chat-status-bar .chat-status-action:hover {
+  background: var(--paper-tint);
+}
+
 .chat-status-bar .status-pill {
   flex: 0 0 auto;
   padding: 4px 10px;
