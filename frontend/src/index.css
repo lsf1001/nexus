@@ -22,6 +22,8 @@
 html, body {
   height: 100%;
   overflow: hidden;
+  background: #f5f7f2;
+  color: #1a1a1a;
 }
 @media (prefers-color-scheme: dark) {
   html, body {
@@ -29,11 +31,18 @@ html, body {
     color: #f5efe2;
   }
 }
-@media (prefers-color-scheme: light) {
-  html, body {
-    background: #f5f7f2;
-    color: #1a1a1a;
-  }
+/* 第六轮(2026-07-15):JS 设的主题(在 <html data-theme="dark">)优先级高于
+   prefers-color-scheme,避免 preview 在 light scheme 下暗色模式只染 .nexus-desktop
+   而 body 仍白。Claude Desktop 风格的暗色铺满整窗必须 body 也跟随。 */
+:root[data-theme="dark"],
+:root[data-theme="dark"] body {
+  background: #1a3328;
+  color: #f5efe2;
+}
+:root[data-theme="light"],
+:root[data-theme="light"] body {
+  background: #f5f7f2;
+  color: #1a1a1a;
 }
 
 /* 滚动条样式 - 加强可见性 */
