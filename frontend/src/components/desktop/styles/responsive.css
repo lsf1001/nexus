@@ -1,24 +1,15 @@
-/* ===== 响应式 ===== */
+/* ===== 响应式 =====
+ * 整窗不再嵌套 .window(commit 73f0956),所以 1180px 断点没有 .window 规则可改。
+ * 这里只剩两个职责:
+ *   - 1280 以下 prompt grid 仍可保留 2 列(只在 ≤900 才塌 1 列)
+ *   - ≤900 移动端:sidebar 改横向紧凑布局,隐藏长列表 */
 
 @media (max-width: 1180px) {
-  .window {
-    grid-template-columns: 230px minmax(0, 1fr);
-    width: calc(100vw - 24px);
-  }
-
   /* prompt grid 在更窄的断点(<=900px)才变 1 列 —— 1180 仍保留 2x2,
-     因为 1180-230(sidebar) ≈ 950px main 足够 2 列卡片。 */
+     因为 1180-264(sidebar) ≈ 916px main 足够 2 列卡片。 */
 }
 
 @media (max-width: 900px) {
-  .window {
-    width: 100vw;
-    height: 100vh;
-    margin: 0;
-    border-radius: 0;
-    border: 0;
-    grid-template-columns: 1fr;
-  }
 
   /* 移动端 sidebar 改成横向紧凑布局(brand + 对话列表 + 微信入口 一行)。
      关键:sidebar 高度要 < 90px,不能挤占 main 区空间。 */
