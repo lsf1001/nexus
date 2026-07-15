@@ -441,66 +441,75 @@
 }
 
 /* ===== 主区 ===== */
+/* Claude Desktop 极简风(2026-07-15 重构):
+ *   1fr auto —— 上方 chat-scroll 占满 + 下方 composer 钉底
+ *   背景纯 --paper,不叠 radial gradient 浮雕(用户反馈"分层"的根因之一)
+ *   顶部让给 macOS traffic lights 的 38px 由父 .nexus-desktop padding 控制 */
 .main {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: 66px minmax(0, 1fr);
-  background:
-    radial-gradient(circle at 95% 12%, rgba(132, 154, 114, 0.16), transparent 25%),
-    linear-gradient(180deg, rgba(255, 248, 236, 0.96), rgba(255, 248, 236, 0.88));
+  grid-template-rows: 1fr auto;
+  background: var(--paper);
   position: relative;
+  overflow: hidden;
 }
 
 .nexus-desktop[data-theme="dark"] .main {
-  background:
-    radial-gradient(circle at 95% 12%, rgba(70, 100, 80, 0.16), transparent 25%),
-    linear-gradient(180deg, rgba(37, 34, 28, 0.96), rgba(37, 34, 28, 0.88));
+  background: var(--paper);
 }
 
-/* ===== Topbar ===== */
-.topbar {
+/* ===== ChatArea 外层 wrapper(2026-07-15 第六轮新增)=====
+ * 包住 chat-status-bar(36px 顶部状态条) + ChatArea(内部 flex column)
+ * 用 flex column 让 chat-area 自然占满剩余空间 */
+.chat-area-wrap {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 顶部状态条 —— Claude Desktop 风格:左侧当前标题 + 右侧状态 pill,
+ * 36px 高,左侧 drag-region 让 macOS chrome 整窗可拖 */
+.chat-status-bar {
+  height: 36px;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 0 30px;
-  border-bottom: 1px solid rgba(184, 157, 114, 0.34);
-}
-
-.nexus-desktop[data-theme="dark"] .topbar {
-  border-bottom-color: var(--line);
-}
-
-.topbar-topic {
-  /* flex 子项默认 min-width:auto,长标题会撑破 topbar 把状态 pill 顶出视口
-   * (e2e 截图证据:用 write_file 工具在 ~/.nexus/AGEN... 被截断)。
-   * 显式 min-width:0 + max-width + overflow:hidden + ellipsis,
-   * 配合 title 属性鼠标悬停看完整标题。 */
-  min-width: 0;
-  max-width: 60%;
-  flex: 1 1 auto;
-  overflow: hidden;
-}
-
-.topbar-topic strong,
-.topbar-topic span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.topbar-topic strong {
-  font-size: 17px;
-  line-height: 1.2;
-}
-
-.topbar-topic span {
-  margin-top: 4px;
+  gap: 16px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
   color: var(--muted);
   font-size: 13px;
 }
+
+.chat-status-topic {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.chat-status-channel {
+  margin-left: 6px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.chat-status-bar .status-pill {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* ===== Topbar 已删(2026-07-15 第六轮)=====
+ * 原 topbar 66px 顶部条承载"当前会话标题 + 模型名 + 状态 pill"。
+ * Claude Desktop 没有这层 —— 当前会话标题并入 sidebar 当前 task-item 的 is-current 标记,
+ * 模型名 + 状态 pill 改为 inline 在主区顶部右侧的一行 32px 高细条。
+ * 删后主区从 66+1fr 变 1fr+auto,chat-scroll 直接吃满上方空间。
+ */
 
 /* 状态 pill：原型的核心反馈元素，颜色必须生效 */
 .status-pill {

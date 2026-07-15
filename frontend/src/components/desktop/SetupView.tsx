@@ -69,29 +69,11 @@ export function SetupView({ onDone }: SetupViewProps) {
 
   return (
     <section className="setup-view">
-      <div
-        className="setup-copy"
-        onContextMenu={(e) =>
-          openContextMenuAt(
-            e,
-            '把日常想法交给一个更安静的助手。\nNexus 会在本机管理后端、数据库和会话。你只需要配置模型，然后开始对话。',
-            '介绍'
-          )
-        }
-      >
-        <span className="kicker">本地运行已就绪</span>
-        <h1>把日常想法交给一个更安静的助手。</h1>
-        <p>
-          Nexus 会在本机管理后端、数据库和会话。你只需要配置模型，然后开始对话；
-          需要移动入口时，再把微信绑定成 IM 通道。
-        </p>
-      </div>
-
       <div className="setup-card">
         <div className="card-heading">
           <div>
             <h2>连接你的模型</h2>
-            <p>首版只保留必要配置，高级选项放在设置页。</p>
+            <p>首次使用请填写一次,后续可在设置页修改。</p>
           </div>
           <span className="step-tag">1 / 1</span>
         </div>

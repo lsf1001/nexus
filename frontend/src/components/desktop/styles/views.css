@@ -1,25 +1,35 @@
 /* ===== Setup / Wechat / Settings 视图通用布局 ===== */
+/* 第六轮(2026-07-15)重构 — Claude Desktop 极简风:
+ *   setup-view 改成单列左对齐,左 60px padding 起步,max-width: 560px
+ *   不再有 setup-copy 左文案栏 —— 标题文案并入 setup-card heading 一行 */
+.setup-view {
+  height: 100%;
+  min-height: 0;
+  display: block;
+  padding: 60px 0 0 60px;
+}
 
-.setup-view,
-.wechat-view,
+.nexus-desktop[data-theme="dark"] .setup-view {
+  /* dark 模式沿用父 --canvas 底,不再叠 hero 浮雕 */
+}
+
+/* Settings 视图特例:居中单列全宽 */
 .settings-view {
   height: 100%;
   min-height: 0;
+  padding: 60px 0 0 60px;
+  display: block;
+}
+
+/* Wechat 视图:保留双栏(左窄右宽,因为 bind-card 内容多) */
+.wechat-view {
+  height: 100%;
+  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(360px, 0.92fr) minmax(420px, 1.08fr);
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
 }
 
-/* Settings 视图特例：单列全宽（左侧文案已删除） */
-.settings-view {
-  grid-template-columns: minmax(0, 1fr);
-  /* 关键：覆盖 .main grid item 默认 align-self: stretch 在某些 Chrome 版本下
-     推算失败的 bug。直接 absolute 填满父容器 1fr cell。 */
-  position: absolute;
-  inset: 0;
-}
-
-/* 左侧文案区 */
-.setup-copy,
+/* Wechat / Settings 保留的左侧文案区(setup-view 不再用) */
 .wechat-copy,
 .settings-copy {
   border-right: 1px solid var(--line);
@@ -30,13 +40,11 @@
   gap: 18px;
 }
 
-.nexus-desktop[data-theme="dark"] .setup-copy,
 .nexus-desktop[data-theme="dark"] .wechat-copy,
 .nexus-desktop[data-theme="dark"] .settings-copy {
   border-right-color: var(--line);
 }
 
-.setup-copy h1,
 .wechat-copy h1,
 .settings-copy h1 {
   margin: 0;
@@ -48,14 +56,12 @@
   font-weight: 800;
 }
 
-/* Wechat 视图的标题字号略小，避免在 360-480 窄列里过度折行 */
 .wechat-copy h1 {
   font-size: 28px;
   line-height: 1.26;
   letter-spacing: -0.006em;
 }
 
-.setup-copy p,
 .wechat-copy p,
 .settings-copy p {
   max-width: 500px;
@@ -84,43 +90,45 @@
   border-color: rgba(120, 160, 110, 0.30);
 }
 
-/* ===== Setup 表单卡 ===== */
+/* ===== Setup 表单卡(第六轮 2026-07-15 — Claude Desktop inline 表单)=====
+ * 不再是浮起的"中央卡片",改成左对齐 inline 表单:
+ *   max-width: 560px(列宽可控),不设 align-self/justify-self 居中
+ *   无圆角背景阴影(Claude Desktop 表单无 box)
+ *   仅靠 input border + label 区分字段 */
 .setup-card,
 .wechat-bind-card {
-  align-self: center;
-  justify-self: center;
-  width: min(100%, 520px);
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  background: var(--paper);
-  box-shadow: var(--shadow-md);
-  padding: 26px;
+  width: min(100%, 560px);
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  padding: 0;
 }
 
-/* Wechat 视图特殊：左窄右宽，容纳完整绑定卡 */
 .wechat-view {
   grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
 }
 
 .nexus-desktop[data-theme="dark"] .setup-card,
 .nexus-desktop[data-theme="dark"] .wechat-bind-card {
-  background: var(--paper-soft);
-  border-color: var(--line);
+  background: transparent;
+  border-color: transparent;
 }
 
 .card-heading {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 20px;
-  align-items: flex-start;
+  margin-bottom: 24px;
+  align-items: flex-end;
 }
 
 .card-heading h2,
 .wechat-bind-card h2 {
   margin: 0 0 6px;
-  font-size: 24px;
+  font-size: 28px;
+  letter-spacing: -0.012em;
   color: var(--ink);
+  font-weight: 800;
 }
 
 .card-heading p,
@@ -133,11 +141,16 @@
 .card-heading .step-tag {
   height: fit-content;
   border-radius: 999px;
-  background: var(--forest);
-  color: var(--paper-tint);
-  padding: 8px 11px;
+  background: var(--forest-soft);
+  color: var(--forest);
+  padding: 6px 11px;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
+}
+
+.nexus-desktop[data-theme="dark"] .card-heading .step-tag {
+  background: var(--forest-soft);
+  color: #b6cfac;
 }
 
 .setup-card label {
@@ -153,7 +166,7 @@
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  background: var(--paper-soft);
+  background: var(--paper);
   padding: 13px 14px;
   outline: none;
   color: var(--ink);
@@ -161,7 +174,7 @@
 }
 
 .nexus-desktop[data-theme="dark"] .setup-card input {
-  background: var(--paper);
+  background: var(--paper-soft);
 }
 
 .setup-card input:focus {
@@ -243,11 +256,13 @@
 .actions {
   display: flex;
   gap: 10px;
+  margin-top: 8px;
 }
 
 .actions .btn-primary,
 .actions .btn-secondary {
-  flex: 1;
+  /* 不再 flex:1 —— Claude Desktop 按钮按内容自适应,主要操作在右 */
+  flex: 0 0 auto;
 }
 
 /* ===== Wechat 视图 ===== */

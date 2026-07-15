@@ -116,8 +116,12 @@
  *   拖拽区由 data-tauri-drag-region 标记
  * - 整窗背景 `--paper`,与浅一档 `--canvas` 形成层次
  */
+/* 第六轮(2026-07-15):用 height 而不是 min-height。
+ * Claude Desktop 形态要求整窗被 viewport 强约束,content 在内部 .chat-scroll
+ * 处滚动。如果用 min-height,任何溢出都会把整窗推高(实测 3178px),
+ * sidebar + main 一起被拉高,1fr auto grid 失效,composer 不再钉底。 */
 .nexus-desktop {
-  min-height: 100vh;
+  height: 100vh;
   min-width: 100vw;
   overflow: hidden;
   color: var(--ink);
@@ -128,7 +132,7 @@
 }
 
 .nexus-desktop[data-theme="dark"] {
-  background: var(--paper);
+  background: var(--canvas);
 }
 
 /* 拖拽区 — Tauri 2 macOS chrome 需要给"标题栏区域"打 drag,其它 UI 自动 no-drag。
