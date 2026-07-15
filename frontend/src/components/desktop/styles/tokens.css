@@ -54,6 +54,24 @@
   --r-lg: 16px;
   --r-xl: 20px;
   --r-2xl: 28px;
+
+  /* 第九轮(2026-07-16):间距 + 字号 token — 渐进替换 shell.css / chat.css
+   * 散落的硬编码 px。spacing 单调 4..48,font 单调 12..36。 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --font-xs: 12px;
+  --font-sm: 13px;
+  --font-base: 14px;
+  --font-md: 16px;
+  --font-lg: 20px;
+  --font-xl: 28px;
+  --font-2xl: 36px;
 }
 
 /* dark mode 覆盖（由 documentElement data-theme="dark" 触发）
