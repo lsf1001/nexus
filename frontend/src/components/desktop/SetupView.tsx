@@ -67,70 +67,83 @@ export function SetupView({ onDone }: SetupViewProps) {
     }
   };
 
+  // 第八轮(2026-07-15):Claude Desktop 单层化 — 跟 ChatView / SettingsView / Wechat 同源
+  //   chat-area-wrap(flex column) + 36px chat-status-bar(左标题)
+  //   替代过去的 .setup-view 块级padding布局。
+  //   .setup-card 仍保留作为 setup-form 容器(让 setup-card input 等选择器继续生效),
+  //   而 setup-card 自身是 transparent + 无 box-shadow + 无 border,跟其它表单一致走 inline 形态。
   return (
-    <section className="setup-view">
-      <div className="setup-card">
-        <div className="card-heading">
-          <div>
-            <h2>连接你的模型</h2>
-            <p>首次使用请填写一次,后续可在设置页修改。</p>
+    <div className="chat-area-wrap">
+      <header className="chat-status-bar" data-tauri-drag-region>
+        <span className="chat-status-topic" title="连接你的模型">
+          连接你的模型
+        </span>
+      </header>
+
+      <div className="setup-view">
+        <div className="setup-card">
+          <div className="card-heading">
+            <div>
+              <h2>连接你的模型</h2>
+              <p>首次使用请填写一次,后续可在设置页修改。</p>
+            </div>
+            <span className="step-tag">1 / 1</span>
           </div>
-          <span className="step-tag">1 / 1</span>
-        </div>
 
-        <label>
-          模型
-          <input
-            value={modelName}
-            onChange={(event) => setModelName(event.target.value)}
-            onContextMenu={(e) => openContextMenuAt(e, modelName, '模型名')}
-          />
-        </label>
-        <label>
-          API 地址
-          <input
-            value={apiBase}
-            onChange={(event) => setApiBase(event.target.value)}
-            onContextMenu={(e) => openContextMenuAt(e, apiBase, 'API 地址')}
-          />
-        </label>
-        <label>
-          API 密钥
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            onContextMenu={(e) => openContextMenuAt(e, apiKeyContextLabel, 'API 密钥')}
-          />
-        </label>
-        <label>
-          温度参数
-          <input
-            value={temperature}
-            onChange={(event) => setTemperature(event.target.value)}
-            onContextMenu={(e) => openContextMenuAt(e, temperature, '温度参数')}
-          />
-        </label>
+          <label>
+            模型
+            <input
+              value={modelName}
+              onChange={(event) => setModelName(event.target.value)}
+              onContextMenu={(e) => openContextMenuAt(e, modelName, '模型名')}
+            />
+          </label>
+          <label>
+            API 地址
+            <input
+              value={apiBase}
+              onChange={(event) => setApiBase(event.target.value)}
+              onContextMenu={(e) => openContextMenuAt(e, apiBase, 'API 地址')}
+            />
+          </label>
+          <label>
+            API 密钥
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              onContextMenu={(e) => openContextMenuAt(e, apiKeyContextLabel, 'API 密钥')}
+            />
+          </label>
+          <label>
+            温度参数
+            <input
+              value={temperature}
+              onChange={(event) => setTemperature(event.target.value)}
+              onContextMenu={(e) => openContextMenuAt(e, temperature, '温度参数')}
+            />
+          </label>
 
-        <div className={`hint ${status.includes('失败') ? 'is-error' : ''}`}>{status}</div>
-        <div className="actions">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => setStatus('连接测试将在后续版本显示详细诊断')}
-          >
-            测试连接
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={isSaving || !apiKey.trim()}
-            onClick={saveModel}
-          >
-            开始使用
-          </button>
+          <div className={`hint ${status.includes('失败') ? 'is-error' : ''}`}>{status}</div>
+          <div className="actions">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setStatus('连接测试将在后续版本显示详细诊断')}
+            >
+              测试连接
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={isSaving || !apiKey.trim()}
+              onClick={saveModel}
+            >
+              开始使用
+            </button>
+          </div>
         </div>
       </div>
-    </section>
+    </div>
   );
 }

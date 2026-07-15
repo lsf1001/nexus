@@ -58,13 +58,21 @@ export function SettingsView({ onBack }: SettingsViewProps = {}) {
     '设置项'
   );
 
+  // 第八轮(2026-07-15):Claude Desktop 单层化 — 跟 ChatView 同源结构
+  //   chat-area-wrap(flex column) + 36px chat-status-bar(左标题/右返回)
+  //   替代过去的 .settings-view 双层 + .settings-header 绝对定位左上角的 back-btn 浮层。
+  //   整窗跟 .nexus-desktop grid(264px sidebar + 主区)平铺,
+  //   主区直接是 chat-area-wrap,settings-list 在主区里用 60px 左 padding 起步。
   return (
-    <section className="settings-view">
-      <div className="settings-header">
+    <div className="chat-area-wrap">
+      <header className="chat-status-bar" data-tauri-drag-region>
+        <span className="chat-status-topic" title="设置">
+          设置
+        </span>
         {onBack && (
           <button
             type="button"
-            className="back-btn"
+            className="chat-status-action"
             onClick={onBack}
             aria-label="返回聊天"
             title="返回聊天"
@@ -72,7 +80,8 @@ export function SettingsView({ onBack }: SettingsViewProps = {}) {
             ← 返回聊天
           </button>
         )}
-      </div>
+      </header>
+
       <div className="settings-list">
         <div className="setting-row" onContextMenu={copyModel}>
           <div>
@@ -134,6 +143,6 @@ export function SettingsView({ onBack }: SettingsViewProps = {}) {
       </div>
 
       <ModelConfigModal isOpen={showModelConfig} onClose={() => setShowModelConfig(false)} />
-    </section>
+    </div>
   );
 }
