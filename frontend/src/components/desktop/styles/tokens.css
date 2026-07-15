@@ -17,9 +17,10 @@
   --line: #e4e9f1;
   --line-strong: #c7d2e1;
 
-  --forest: #0f6e87;
-  --forest-2: #075b72;
-  --forest-soft: #e4f5f8;
+  --forest: #2d6a4f;        /* 深森林绿 — 与品牌"宫崎骏森林绿"对齐;
+                             * light/dark 双模同色族,避免一深一浅脱钩。 */
+  --forest-2: #1b4332;      /* 浅一档:hover/active 反向 → 深一档渐变止 */
+  --forest-soft: #d8e2dc;   /* 浅一档 chip 底,与白底对比柔和 */
 
   /* 鼠尾草、茶叶 */
   --sage: #5e8f9e;
@@ -29,9 +30,9 @@
   --wechat: #07c160;
 
   /* 阴影 */
-  --shadow-lg: 0 28px 70px rgba(24, 39, 75, 0.16);
-  --shadow-md: 0 14px 34px rgba(24, 39, 75, 0.10);
-  --shadow-sm: 0 7px 18px rgba(24, 39, 75, 0.07);
+  --shadow-lg: 0 28px 70px rgba(91, 65, 34, 0.16);  /* 暖棕阴影,非冷蓝紫 */
+  --shadow-md: 0 14px 34px rgba(91, 65, 34, 0.10);
+  --shadow-sm: 0 7px 18px rgba(91, 65, 34, 0.07);
 
   /* 字体 stack：原型指定的人文衬线 + 系统 fallback */
   --font-sans: "SF Pro Display", "PingFang SC", "Avenir Next",

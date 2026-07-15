@@ -33,6 +33,13 @@ const STYLES_DIR = join(__dirname, '..', '..', 'components', 'desktop', 'styles'
 
 // 第二轮回归黑名单:这些色值出现在组件 CSS 里会让侧边栏/按钮/hover 仍是
 // teal 蓝绿,与森林绿品牌脱钩。锁死,出现即失败。
+//
+// 第三轮新增(2026-07-15):用户反馈"用户气泡还是青蓝色"。根因:
+//   1. tokens.css light --forest = #0f6e87 (teal 蓝绿,不是森林绿)
+//   2. chat.css .message-user 硬编码 linear-gradient(#12849a, #0d6e87)
+//   3. tokens.css light --shadow-* 基色 rgba(24, 39, 75) 冷蓝紫
+//   4. shell.css .window light border rgba(18, 33, 56) 冷蓝
+// 全部已替换为森林绿 / 暖棕,锁死防回退。
 const FORBIDDEN_HEX = [
   '#28a9c0', // 旧 plus-mark teal
   '#32bdd1', // 旧 task-item is-current 左边框 teal
@@ -46,6 +53,12 @@ const FORBIDDEN_HEX = [
   '#172a38', // 旧 dark prompt-card hover 深蓝
   '#32778a', // 旧 dark prompt-card hover 边框 teal
   '#1f251f', // 旧 dark textarea focus 蓝绿底
+  '#55b8c8', // 旧 composer focus-within teal 边框 (light 用,但 dark 没覆盖会透出)
+  '#cfdae5', // 旧 composer 默认蓝灰边框 (light 用,防误迁移到 dark)
+  '#0f6e87', // 旧 tokens light --forest (teal 蓝绿,非森林绿)
+  '#075b72', // 旧 tokens light --forest-2 (深 teal,非深森林)
+  '#12849a', // 旧 chat .message-user 渐变起 (teal)
+  '#0d6e87', // 旧 chat .message-user 渐变止 (teal)
 ];
 
 function readTokens(): string {

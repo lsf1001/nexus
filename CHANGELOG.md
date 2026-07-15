@@ -87,6 +87,45 @@ DMG **需要重打** 让新色进 bundle。
 (forest B/R 比 < 2.0 / canvas 非冷黑 / ink R-B ≥ 5),共 59 vitest 全过。
 DMG **需要重打** 一次才能让新色进 bundle。
 
+#### Fixed — 第三轮:user bubble / light forest token 根因级 teal 清扫 (2026-07-15)
+
+第二轮/第三轮都修了深色模式 teal,但 **light 模式用户气泡还是青蓝
+(`#12849a → #0d6e87`)**,用户截图复现。**真正的元凶在 token 与最根
+上的硬编码**:
+
+| 文件 | 旧硬编码 | 角色 |
+|---|---|---|
+| `tokens.css:20` | `--forest: #0f6e87` | **light 主品牌色就是 teal,所有 light 模式 `var(--forest)` 都变成蓝绿** |
+| `tokens.css:21` | `--forest-2: #075b72` | 同上(渐变止色) |
+| `chat.css:736` | `linear-gradient(145deg, #12849a, #0d6e87)` | **user 消息气泡**:硬编码 teal 渐变,无视 token |
+| `chat.css:737` | `rgba(24, 39, 75, 0.05)` | assistant 气泡阴影冷蓝紫 |
+| `tokens.css:32-34` | `rgba(24, 39, 75, ...)` | light `--shadow-*` 基色冷蓝紫,所有 elevation 都受影响 |
+| `shell.css:768` | `rgba(18, 33, 56, 0.10)` | light `.window` 边框冷蓝 |
+| `chat.css:744` | `rgba(24, 39, 75, 0.10)` | light composer 阴影冷蓝紫 |
+
+WHY 前几轮没暴露:**dark 模式 forest token 改对了,但 light 模式 forest
+本身定义就是 teal,导致所有"dark 修对了,light 还是有 teal"**。第三轮
+修复让 light/dark 双模同色族:
+
+- `tokens.css` light `--forest`: `#0f6e87` → `#2d6a4f`(深森林绿 — 与品牌"宫崎骏森林绿"对齐)
+- `tokens.css` light `--forest-2`: `#075b72` → `#1b4332`(渐变止:深一档)
+- `tokens.css` light `--forest-soft`: `#e4f5f8` → `#d8e2dc`(柔一档浅底)
+- `tokens.css` light 三个 shadow 基色 `rgba(24, 39, 75)` → `rgba(91, 65, 34, ...)`(暖棕阴影)
+- `chat.css:736-737` `.message-user` 硬编码 teal 渐变 → `var(--forest) → var(--forest-2)` token 化
+- `chat.css:744-747` composer 阴影补 `data-theme="dark"` 暖黑阴影覆盖
+- `shell.css:768` `.window` 边框 → `rgba(91, 65, 34, 0.16)`
+
+锁测试升级到 **22 个禁色 + 3 个色族断言**(`tokens-dark.test.ts`),
+新增对 `#0f6e87`、`#075b72`、`#12849a`、`#0d6e87` 四条 teal 根色的
+扫描,token 一旦回退到 teal 即挂测试。
+
+DMG bundle 验证:`dist/assets/index-DlL9OApD.css` grep 上述 4 色 = **0 行**,
+`#2d6a4f / #1b4332 / #5fa37f / #7fbf9b` 4 个森林绿 token 都存在。
+
+**DMG 必须重打** 一次,新 token 才进 bundle(老 bundle 是 `index-CQpmyqoP` 旧色版)。
+
+测试:`npm run test:vitest` 78/78 PASS(锁色 22 + 色族 3 + 其他模块 53)。
+
 #### Changed — 窗口启动时最大化 (2026-07-15)
 
 `desktop/src-tauri/tauri.conf.json` 主窗口加 `"maximized": true`。

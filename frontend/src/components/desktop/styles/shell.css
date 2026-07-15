@@ -765,7 +765,7 @@
   height: calc(100vh - 32px);
   margin: 16px auto;
   grid-template-columns: 264px minmax(0, 1fr);
-  border: 1px solid rgba(18, 33, 56, 0.10);
+  border: 1px solid rgba(91, 65, 34, 0.16);
   border-radius: 22px;
   background: var(--paper);
   backdrop-filter: none;
@@ -773,7 +773,7 @@
 
 .nexus-desktop[data-theme="dark"] .window {
   background: var(--paper);
-  border-color: rgba(142, 172, 210, 0.14);
+  border-color: rgba(95, 163, 127, 0.18);
 }
 
 .sidebar {
@@ -825,7 +825,7 @@
 }
 .nexus-desktop[data-theme="dark"] .main { background: var(--canvas); }
 .topbar { padding: 0 34px; border-bottom-color: var(--line); background: rgba(255, 255, 255, 0.78); }
-.nexus-desktop[data-theme="dark"] .topbar { background: rgba(17, 26, 39, 0.86); }
+.nexus-desktop[data-theme="dark"] .topbar { background: rgba(26, 51, 40, 0.86); }
 .topbar-topic strong { font-size: 15px; letter-spacing: -0.01em; }
 .topbar-topic span { margin-top: 3px; font-size: 12px; }
 .status-pill { padding: 7px 10px; color: #08758b; background: #e8f8fa; border-color: #c8edf1; font-size: 12px; }
