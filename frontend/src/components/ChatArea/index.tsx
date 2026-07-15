@@ -216,6 +216,7 @@ export function ChatArea({
             activeConversationTitle={activeConversationTitle}
             conversationCount={conversationCount}
             onInsertPrompt={insertPrompt}
+            onSubmit={send}
           />
         ) : (
           <MessageList
