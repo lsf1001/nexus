@@ -18,13 +18,15 @@
  * 即使 jsdom 跑得动,字符串 grep 也跑得动。
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = resolve(HERE, "../WechatPluginModal.tsx");
+const VITE_CONFIG = resolve(HERE, "../../../vite.config.ts");
 const source = readFileSync(SOURCE, "utf8");
+const viteConfig = readFileSync(VITE_CONFIG, "utf8");
 
 describe("WechatPluginModal QR 渲染契约(qrcode 必须静态 import,避免 DMG webview dynamic chunk 加载失败)", () => {
   it("源码**不**包含动态 import('qrcode')(asset:// 下 dynamic chunk 路径不稳定 → canvas 空白)", () => {
@@ -58,5 +60,30 @@ describe("WechatPluginModal QR 渲染契约(qrcode 必须静态 import,避免 DM
     expect(block).toMatch(/QRCode\.toCanvas|toCanvas\s*\(/i);
     // 反向:不允许 import 表达式遗留
     expect(block).not.toMatch(/import\s*\(/);
+  });
+
+  it("vite.config 必须 alias qrcode → qrcode/lib/browser.js(绕开 server 入口拉 dijkstrajs/pngjs/Node 内置)", () => {
+    // WHY:qrcode 1.5.4 package.json 的 main 字段指向 ./lib/index.js,
+    //     index.js 一上来 `module.exports = require('./server')`,server.js
+    //     require('dijkstrajs') + pngjs + Node fs/path/stream。
+    //     webview 里 require 失败 → toCanvas 内部 throw → catch 静默 → canvas 空白。
+    //     必须显式 alias 到 ./lib/browser.js(纯 CJS,只 require 自身 core+renderer)。
+    const aliasBlock = viteConfig.match(/resolve:\s*\{[\s\S]*?\}/);
+    expect(aliasBlock, "vite.config 必须有 resolve.alias 块").not.toBeNull();
+    const block = aliasBlock![0];
+    expect(block, "alias 必须包含 qrcode → qrcode/lib/browser.js").toMatch(
+      /qrcode\s*:\s*resolve\(__dirname,\s*['"]node_modules\/qrcode\/lib\/browser\.js['"]\)/,
+    );
+  });
+
+  it("qrcode/lib/browser.js 必须存在且是干净浏览器版(不 require dijkstrajs/pngjs)", () => {
+    // 物理文件检查 — 万一 npm 升级 qrcode 包结构变了立刻报警
+    const browserPath = resolve(HERE, "../../../node_modules/qrcode/lib/browser.js");
+    expect(existsSync(browserPath), `缺失: ${browserPath}`).toBe(true);
+    const browserSrc = readFileSync(browserPath, "utf8");
+    expect(browserSrc).not.toMatch(/require\(['"]dijkstrajs['"]\)/);
+    expect(browserSrc).not.toMatch(/require\(['"]pngjs['"]\)/);
+    expect(browserSrc).not.toMatch(/require\(['"]fs['"]\)/);
+    expect(browserSrc).not.toMatch(/require\(['"]path['"]\)/);
   });
 });
