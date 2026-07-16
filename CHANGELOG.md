@@ -7,6 +7,44 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ### [Unreleased] — Pre-release hardening (2026-07-14)
 
+#### Added — Sidebar Claude Desktop 双色 + Stop 按钮红色 hover (第十轮 2026-07-16)
+
+按用户反馈"浅色用白色、深色用 Claude Desktop 的黑色" + "消息窗口添加可以停止
+功能"两条主题,做三件交付:
+
+1. **Sidebar 双色**(Claude Desktop 形态):
+   - 浅色 sidebar = `#f7f5ef` 浅米白 + 深石墨字,logo box 白底深 N
+   - 深色 sidebar = `#1f1f1f` 近黑 + 暖灰字,logo box 黑底白 N
+   - 新增 6 × 2 = 12 个 sidebar 专用 token(`--sidebar-bg/-2/-fg/-fg-secondary/
+     -fg-tertiary/-divider/-hover-bg`),与 forest 主区配色解耦,避免
+     sidebar 反白文字把 forest 强调色污染
+   - `--paper-tint` 语义解耦(浅色退回 `#f8fbff` 纯 bg tint 不再当 sidebar 文字)
+   - shell.css 删整段 `.nexus-desktop[data-theme="dark"]` sidebar override(35
+     条),改用 token 自动适配浅深二色
+
+2. **Stop 按钮**:Composer 右下角 `.send-button` 在 `isLoading=true` 时挂
+   `.stop-button` 双 class,显示 Claude Desktop 暖红 `#d97757`,hover 加深一档
+   `#c2563b` + `scale(1.05)`,active `scale(0.97)`。逻辑层 0 改动(Composer.tsx
+   / useChatStream / wsHandlers / store / ref / handleFinal gate 全部沿用
+   上一轮已有实现)。
+3. **Logo box 隐形 bug 根治**:前两轮 `rgba(255,248,236,0.08)` 透明奶白在森林
+   绿 sidebar 下完全看不出 box,只剩"N"字符。第十轮改用实色:浅色 `#ffffff`、
+   深色 `#000000`,token 走 `--sidebar-bg`,不再用低 alpha 透明色。
+
+- **`frontend/src/components/desktop/styles/tokens.css`**:新增 sidebar 6 + 6 token,
+  `--paper-tint` 解耦
+- **`frontend/src/components/desktop/styles/shell.css`**:sidebar 全部规则改写为
+  token-driven,删除整段 dark override,sidebar-brand-mark 用实色白/黑
+- **`frontend/src/components/desktop/styles/chat.css`**:新增 `.send-button.stop-button`
+  + `:hover` + `:active` 暖红规则(656-665)
+- **`frontend/src/components/desktop/styles/__tests__/shell-sidebar-brand.test.ts`**:
+  6-test 锁 sidebar 双色契约 — 低 alpha 透明奶白禁用、浅色必须白、深色必须黑
+- **DMG**:重打 1.2.0 (`release/Nexus-1.2.0-arm64.dmg`,86MB),browser preview
+  实测:`document.documentElement[data-theme="dark"]` + `.nexus-desktop[data-theme="dark"]`
+  同时挂载,`.sidebar-brand-mark` 浅色 `rgb(255, 255, 255)`,深色
+  `rgb(0, 0, 0)` + 字色 `rgb(255, 255, 255)`,`.send-button.stop-button` 计算
+  background = `rgb(217, 119, 87)` = `#d97757`。
+
 #### Fixed — WechatPluginModal 二维码 DMG 不渲染 (2026-07-16)
 
 系统性测微信通道所有交互时发现:vite dev 模式 modal 点"绑定微信" → canvas
