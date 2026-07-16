@@ -72,7 +72,7 @@ describe("sidebar-brand-mark logo (Claude Desktop 双色,浅白深黑)", () => {
     // 提取 background: 行(可能是 shorthand,只看 background: 后第一行)
     const bgMatch = block!.match(/background:\s*([^;]+);/);
     expect(bgMatch, "缺 background: 声明").not.toBeNull();
-    const bgValue = bgMatch![1].trim();
+    const bgValue = (bgMatch?.[1] ?? "").trim();
     // 白底匹配:字面白色 / white / var(--sidebar-bg) / 浅米白系 #f7f5ef 等
     const isWhiteish =
       /^(?:#fff(?:fff)?|white|rgba?\(\s*255\s*,\s*255\s*,\s*255\b|var\(--sidebar-bg(?:-2)?\))/i.test(
@@ -99,7 +99,7 @@ describe("sidebar-brand-mark logo (Claude Desktop 双色,浅白深黑)", () => {
     expect(darkBlock, "深色 override 块抽不出").not.toBeNull();
     const bgMatch = darkBlock!.match(/background:\s*([^;]+);/);
     expect(bgMatch, "dark 块缺 background: 声明").not.toBeNull();
-    const bgValue = bgMatch![1].trim();
+    const bgValue = (bgMatch?.[1] ?? "").trim();
     // 黑底匹配:字面黑 / black / var(--sidebar-bg) 等(深色模式 --sidebar-bg=#1f1f1f)
     const isBlackish =
       /^(?:#0{3,6}|black|rgba?\(\s*0\s*,\s*0\s*,\s*0\b|var\(--sidebar-bg(?:-2)?\))/i.test(
