@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import { useBootstrap } from './hooks/useBootstrap';
 import { useDarkModeRoot } from './hooks/useDarkModeRoot';
+import { useGlobalShortcuts, focusElement, closeTopModal } from './hooks/useGlobalShortcuts';
 import { useChannelStatusPolling } from '../../hooks/useChannelStatusPolling';
 import { useConversationCrud } from './hooks/useConversationCrud';
 import { ShellLayout } from './ShellLayout';
@@ -72,6 +73,19 @@ export function DesktopShell() {
     onNewTask();
     setView('chat');
   };
+
+  // 第十一轮(2026-07-16)产品级打磨:全局键盘快捷键
+  // 主流 agent 产品标配 — Claude Desktop / ChatGPT / Cursor 都用
+  //   - Cmd+N 新建对话 → 复用 handleNewTask
+  //   - Cmd+K 聚焦 sidebar 搜索框
+  //   - Cmd+/ 聚焦 composer textarea
+  //   - Esc 关闭最上层 modal
+  useGlobalShortcuts({
+    onNewTask: handleNewTask,
+    onFocusSearch: () => focusElement('.sidebar-search input[type=search]'),
+    onFocusComposer: () => focusElement('.composer-textarea'),
+    onCloseModal: () => closeTopModal(),
+  });
 
   if (isBootstrapping) {
     return (
