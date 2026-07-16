@@ -84,6 +84,13 @@
   --sidebar-fg-tertiary: #98a2b3;    /* 三级 .32 灰:divider / disabled */
   --sidebar-divider: rgba(31, 41, 55, 0.10);
   --sidebar-hover-bg: rgba(31, 41, 55, 0.06);
+
+  /* ===== 焦点环 (第十一轮 2026-07-16 产品级打磨) =====
+   * 用户决定走极简硬边:浅色用纯黑 2px outline,深色用纯白 2px outline。
+   * offset 2px 让焦点框"浮"在元素外缘,不挤压布局。
+   * 锁测试:src/components/desktop/styles/__tests__/focus-ring.test.ts */
+  --focus-ring: #000000;
+  --focus-ring-offset: #ffffff;
 }
 
 /* dark mode 覆盖（由 documentElement data-theme="dark" 触发）
@@ -131,6 +138,10 @@
   --sidebar-fg-tertiary: #6f6f6f;
   --sidebar-divider: rgba(236, 236, 236, 0.10);
   --sidebar-hover-bg: rgba(236, 236, 236, 0.06);
+
+  /* ===== 焦点环 (深色) ===== */
+  --focus-ring: #ffffff;
+  --focus-ring-offset: #1f1f1f;
 }
 
 /* ===== 顶层容器:全屏 single-layer grid(SHiTCH from ".window" wrapper)

@@ -37,6 +37,25 @@
   app-region: drag;
 }
 
+/* ===== 全局焦点环 (第十一轮 2026-07-16 产品级打磨) =====
+ * 极简硬边:2px outline + offset 2px。
+ *   - 浅色模式 = 纯黑边 (在浅米白 sidebar / 白纸面上都清晰可见)
+ *   - 深色模式 = 纯白边 (在近黑 sidebar / 苔藓纸面上都清晰可见)
+ * 排除装饰元素:aria-hidden 的 SVG / .sketch-line 等不该显示焦点框。
+ * 锁测试:src/components/desktop/styles/__tests__/focus-ring.test.ts */
+.nexus-desktop *:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+.nexus-desktop *:focus:not(:focus-visible) {
+  outline: none;
+}
+.nexus-desktop [aria-hidden="true"]:focus-visible,
+.nexus-desktop .sketch-line:focus-visible {
+  outline: none;
+}
+
 .sidebar-brand-mark {
   width: 36px;
   height: 36px;
