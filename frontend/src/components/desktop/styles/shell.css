@@ -40,8 +40,11 @@
   border-radius: 12px;
   display: grid;
   place-items: center;
+  /* 实色森林绿 box,不要再用低 alpha 奶白 —— 之前 rgba(255,248,236,0.08)
+   * 在深森林绿 sidebar 背景下完全隐形,只露 "N" 字符。锁测试:
+   * src/components/desktop/styles/__tests__/shell-sidebar-brand.test.ts */
+  background: var(--forest);
   border: 1px solid rgba(255, 248, 236, 0.58);
-  background: rgba(255, 248, 236, 0.08);
   font-weight: 850;
   color: var(--paper-tint);
   font-size: 16px;
@@ -94,6 +97,14 @@
 }
 
 .nexus-desktop[data-theme="dark"] .sidebar-brand-text strong {
+  color: var(--ink);
+}
+
+/* dark 模式 logo:森林绿实色 box(与 light 模式统一),反白 N 字换成暖米白。
+ * 锁测试: src/components/desktop/styles/__tests__/shell-sidebar-brand.test.ts */
+.nexus-desktop[data-theme="dark"] .sidebar-brand-mark {
+  background: var(--forest);
+  border-color: rgba(244, 234, 216, 0.32);
   color: var(--ink);
 }
 
