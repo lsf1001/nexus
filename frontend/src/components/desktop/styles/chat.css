@@ -645,6 +645,25 @@
   cursor: not-allowed;
 }
 
+/* Claude Desktop 风格停止按钮:hover 变红(2026-07-16 第十轮新增)。
+ * 逻辑层:Composer.tsx 在 isLoading=true 时给同 button 加 .stop-button
+ * className(.send-button.stop-button 命中),类名约定锁测试见
+ * src/components/ChatArea/__tests__/Composer.test.tsx。
+ *
+ * 不覆盖基础 .send-button —— 用户没在流式响应期,按钮仍是森林绿发 send。
+ * 仅当双 class 同时挂载时(流式响应)才显示红色,避免误判 send 阶段。 */
+.send-button.stop-button {
+  background: #d97757;
+  color: #ffffff;
+}
+.send-button.stop-button:hover {
+  background: #c2563b;
+  transform: scale(1.05);
+}
+.send-button.stop-button:active {
+  transform: scale(0.97);
+}
+
 /* ===== 澄清表单（LLM 主动追问）===== */
 .clarify-card {
   margin: 12px 24px 0;

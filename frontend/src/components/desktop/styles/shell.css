@@ -2,7 +2,12 @@
 /* 整窗网格已合进 tokens.css 的 .nexus-desktop(顶 264px sidebar + 余 main)
  * ——参考 Claude Desktop 全屏 native chrome,不再嵌套 .window 卡片。 */
 
-/* ===== 侧边栏（森林绿）===== */
+/* ===== 侧边栏(Claude Desktop 双色,2026-07-16 第十轮)=====
+ * 浅色:浅米白底(--sidebar-bg → --sidebar-bg-2)+ 深石墨字;
+ * 深色:近黑底 + 暖灰字。配色 token 化(--sidebar-*),跟 forest 主区配色
+ * 解耦 — 第九轮 sidebar 硬编码 cream rgba 假设 forest 是永远底色,
+ * 第十轮按 Claude Desktop 改成双主题,token 自动适配浅深。
+ * 锁测试:src/components/desktop/styles/__tests__/shell-sidebar-brand.test.ts */
 .sidebar {
   min-height: 0;
   display: grid;
@@ -12,11 +17,9 @@
    * 是 Tauri 2 保留给原生三圆点 + 拖拽手柄的空间,sidebar 不该在这 38px
    * 内放任何会拦截点击的 UI。改用 `padding-top: 38px` 留位。 */
   padding: 38px 14px 20px;
-  color: var(--paper-tint);
-  background:
-    linear-gradient(180deg, rgba(49, 79, 56, 0.98), rgba(39, 65, 45, 0.98)),
-    var(--forest);
-  border-right: 1px solid rgba(91, 65, 34, 0.28);
+  color: var(--sidebar-fg);
+  background: linear-gradient(180deg, var(--sidebar-bg), var(--sidebar-bg-2));
+  border-right: 1px solid var(--sidebar-divider);
 }
 
 /* 顶部拖拽区 —— 让 macOS traffic light 范围(整窗左上 ~80x38)
@@ -40,13 +43,14 @@
   border-radius: 12px;
   display: grid;
   place-items: center;
-  /* 实色森林绿 box,不要再用低 alpha 奶白 —— 之前 rgba(255,248,236,0.08)
-   * 在深森林绿 sidebar 背景下完全隐形,只露 "N" 字符。锁测试:
-   * src/components/desktop/styles/__tests__/shell-sidebar-brand.test.ts */
-  background: var(--forest);
-  border: 1px solid rgba(255, 248, 236, 0.58);
+  /* Claude Desktop 浅色 logo:白底 + 深字(反色 box)。不再用 var(--forest)
+   * —— 第九轮森林绿 box 跟主区按钮撞色,sidebar 视觉独立才像 Claude Desktop。
+   * 锁测试:src/components/desktop/styles/__tests__/shell-sidebar-brand.test.ts
+   * 浅色必须是白底,dark override 必须是黑底,二者硬约束。 */
+  background: #ffffff;
+  border: 1px solid var(--sidebar-divider);
   font-weight: 850;
-  color: var(--paper-tint);
+  color: var(--sidebar-fg);
   font-size: 16px;
   flex-shrink: 0;
 }
@@ -64,11 +68,13 @@
 .sidebar-brand-text strong {
   font-size: 16px;
   line-height: 1;
+  /* 浅色:深石墨主标题(token),dark 自动接管 */
+  color: var(--sidebar-fg);
 }
 
 .sidebar-brand-text span {
   margin-top: 4px;
-  color: rgba(251, 245, 232, 0.62);
+  color: var(--sidebar-fg-secondary);
   font-size: 11px;
   letter-spacing: 0.02em;
 }
@@ -79,7 +85,7 @@
   border: 0;
   border-radius: 10px;
   background: transparent;
-  color: rgba(251, 245, 232, 0.62);
+  color: var(--sidebar-fg-secondary);
   cursor: pointer;
   display: grid;
   place-items: center;
@@ -88,36 +94,26 @@
 }
 
 .sidebar-settings-btn:hover {
-  background: rgba(255, 248, 236, 0.12);
-  color: var(--paper-tint);
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-fg);
 }
 
-.nexus-desktop[data-theme="dark"] .sidebar-brand-text span {
-  color: rgba(244, 234, 216, 0.72);
-}
-
-.nexus-desktop[data-theme="dark"] .sidebar-brand-text strong {
-  color: var(--ink);
-}
-
-/* dark 模式 logo:森林绿实色 box(与 light 模式统一),反白 N 字换成暖米白。
- * 锁测试: src/components/desktop/styles/__tests__/shell-sidebar-brand.test.ts */
+/* Claude Desktop 深色 logo:黑底 + 白字 — 跟浅色白底深字反色对称。
+ * 双选择器并列:SettingsView 把 data-theme 同时挂在 <html> 和 .nexus-desktop,
+ * 任一父元素是 dark 状态都生效。锁测试见 shell-sidebar-brand.test.ts */
+:root[data-theme="dark"] .sidebar-brand-mark,
 .nexus-desktop[data-theme="dark"] .sidebar-brand-mark {
-  background: var(--forest);
-  border-color: rgba(244, 234, 216, 0.32);
-  color: var(--ink);
+  background: #000000;
+  border-color: var(--sidebar-divider);
+  color: #ffffff;
 }
 
-.nexus-desktop[data-theme="dark"] .sidebar-settings-btn {
-  color: rgba(244, 234, 216, 0.55);
-}
-
-/* "新对话"主按钮 */
+/* "新对话"主按钮 —— Claude Desktop 浅边框 + hover 中性灰 */
 .btn-new-task {
-  border: 1px solid rgba(255, 248, 236, 0.20);
+  border: 1px solid var(--sidebar-divider);
   border-radius: var(--r-md);
-  background: rgba(255, 248, 236, 0.14);
-  color: #fff8ec;
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-fg);
   min-height: 42px;
   font-weight: 700;
   display: flex;
@@ -128,8 +124,8 @@
 }
 
 .btn-new-task:hover {
-  background: rgba(255, 248, 236, 0.20);
-  border-color: rgba(255, 248, 236, 0.32);
+  background: var(--sidebar-hover-bg);
+  border-color: var(--sidebar-fg-tertiary);
 }
 
 .btn-new-task .plus-mark {
@@ -138,7 +134,8 @@
   width: 18px;
   height: 18px;
   border-radius: 999px;
-  background: rgba(255, 248, 236, 0.22);
+  background: var(--sidebar-fg-secondary);
+  color: var(--sidebar-bg);
   font-size: 13px;
   font-weight: 800;
   line-height: 1;
@@ -153,7 +150,7 @@
 
 .sidebar-section-title {
   margin: 2px 0 6px 4px;
-  color: rgba(251, 245, 232, 0.48);
+  color: var(--sidebar-fg-tertiary);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -164,34 +161,12 @@
 }
 
 .sidebar-section-title .conversation-count {
-  color: rgba(251, 245, 232, 0.32);
+  color: var(--sidebar-fg-tertiary);
   font-weight: 700;
   font-size: 11px;
   font-style: normal;
   letter-spacing: 0;
   text-transform: none;
-}
-
-.nexus-desktop[data-theme="dark"] .btn-new-task,
-.nexus-desktop[data-theme="dark"] .task-item {
-  color: rgba(244, 234, 216, 0.85);
-}
-
-.nexus-desktop[data-theme="dark"] .sidebar-section-title {
-  color: rgba(244, 234, 216, 0.42);
-}
-
-.nexus-desktop[data-theme="dark"] .empty-tasks {
-  border-color: rgba(244, 234, 216, 0.20);
-  color: rgba(244, 234, 216, 0.85);
-}
-
-.nexus-desktop[data-theme="dark"] .footer-link {
-  color: rgba(244, 234, 216, 0.85);
-}
-
-.nexus-desktop[data-theme="dark"] .footer-link-status {
-  color: rgba(244, 234, 216, 0.50);
 }
 
 /* 对话列表滚动区 */
@@ -205,12 +180,12 @@
 }
 
 .empty-tasks {
-  border: 1px dashed rgba(255, 248, 236, 0.20);
+  border: 1px dashed var(--sidebar-divider);
   border-radius: var(--r-md);
   padding: 14px;
   display: grid;
   gap: 6px;
-  color: rgba(251, 245, 232, 0.84);
+  color: var(--sidebar-fg);
   margin-top: 4px;
 }
 
@@ -220,16 +195,16 @@
 }
 
 .empty-tasks span {
-  color: rgba(251, 245, 232, 0.62);
+  color: var(--sidebar-fg-secondary);
   font-size: 12px;
   line-height: 1.6;
 }
 
 .empty-tasks-cta {
   margin-top: 8px;
-  border: 1px solid rgba(255, 248, 236, 0.34);
-  background: rgba(255, 248, 236, 0.10);
-  color: rgba(255, 248, 236, 0.92);
+  border: 1px solid var(--sidebar-divider);
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-fg);
   border-radius: var(--r-sm);
   padding: 7px 10px;
   font-weight: 700;
@@ -240,15 +215,15 @@
 }
 
 .empty-tasks-cta:hover {
-  background: rgba(255, 248, 236, 0.18);
-  border-color: rgba(255, 248, 236, 0.5);
+  background: var(--sidebar-hover-bg);
+  border-color: var(--sidebar-fg-tertiary);
 }
 
 .task-item {
   border-radius: var(--r-md);
   padding: 9px 10px;
   margin-bottom: 0;
-  color: rgba(251, 245, 232, 0.74);
+  color: var(--sidebar-fg);
   cursor: pointer;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -258,8 +233,8 @@
 
 .task-item:hover,
 .task-item.is-current {
-  background: rgba(255, 248, 236, 0.14);
-  color: var(--paper-tint);
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-fg);
 }
 
 .task-item-body {
@@ -282,7 +257,7 @@
 
 .task-item-body span {
   margin-top: 3px;
-  color: rgba(251, 245, 232, 0.48);
+  color: var(--sidebar-fg-tertiary);
   font-size: 11px;
   display: flex;
   align-items: center;
@@ -294,7 +269,7 @@
   align-items: center;
   border-radius: 999px;
   background: rgba(7, 193, 96, 0.20);
-  color: #bff0cf;
+  color: #07a651;
   font-size: 10px;
   font-style: normal;
   font-weight: 700;
@@ -315,7 +290,7 @@
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: rgba(251, 245, 232, 0.32);
+  color: var(--sidebar-fg-tertiary);
   cursor: pointer;
   transition: background-color 140ms ease, color 140ms ease;
   display: grid;
@@ -326,16 +301,16 @@
 }
 
 .task-actions .delete-btn:hover {
-  background: rgba(255, 248, 236, 0.14);
-  color: rgba(251, 245, 232, 0.9);
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-fg);
 }
 
-/* 微信通道卡：圆角 + 状态点 */
+/* 微信通道卡：圆角 + 状态点 —— token 化的边框/底色,微信绿状态点保留 */
 .channel-card {
-  border: 1px solid rgba(181, 229, 196, 0.34);
+  border: 1px solid var(--sidebar-divider);
   border-radius: var(--r-lg);
-  background: rgba(255, 248, 236, 0.12);
-  color: var(--paper-tint);
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-fg);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -346,8 +321,8 @@
 }
 
 .channel-card:hover {
-  background: rgba(255, 248, 236, 0.16);
-  border-color: rgba(181, 229, 196, 0.5);
+  background: var(--sidebar-hover-bg);
+  border-color: var(--sidebar-fg-tertiary);
 }
 
 .channel-card strong,
@@ -356,7 +331,7 @@
 }
 
 .channel-card span {
-  color: rgba(251, 245, 232, 0.66);
+  color: var(--sidebar-fg-secondary);
   font-size: 12px;
   line-height: 1.55;
   margin-top: 4px;
@@ -366,7 +341,7 @@
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  background: rgba(255, 248, 236, 0.42);
+  background: var(--sidebar-fg-tertiary);
   flex: 0 0 auto;
   transition: background-color 140ms ease, box-shadow 140ms ease;
 }
@@ -381,14 +356,14 @@
   display: grid;
   gap: 5px;
   padding-top: 12px;
-  border-top: 1px solid rgba(255, 248, 236, 0.18);
+  border-top: 1px solid var(--sidebar-divider);
 }
 
 .sidebar-footer .footer-link {
   border: 0;
   border-radius: var(--r-md);
   background: transparent;
-  color: rgba(251, 245, 232, 0.88);
+  color: var(--sidebar-fg);
   min-height: 38px;
   padding: 0 10px;
   display: flex;
@@ -400,7 +375,7 @@
 }
 
 .sidebar-footer .footer-link:hover {
-  background: rgba(255, 248, 236, 0.12);
+  background: var(--sidebar-hover-bg);
 }
 
 .sidebar-footer .footer-link-icon {
@@ -408,7 +383,7 @@
   place-items: center;
   width: 18px;
   height: 18px;
-  color: rgba(251, 245, 232, 0.65);
+  color: var(--sidebar-fg-secondary);
   flex-shrink: 0;
 }
 
@@ -418,7 +393,7 @@
 }
 
 .sidebar-footer .footer-link-status {
-  color: rgba(251, 245, 232, 0.52);
+  color: var(--sidebar-fg-tertiary);
   font-size: 11px;
   font-weight: 600;
   display: inline-flex;
@@ -427,11 +402,11 @@
 }
 
 .sidebar-footer .footer-link--wechat.is-connected .footer-link-icon {
-  color: #bff0cf;
+  color: var(--wechat);
 }
 
 .sidebar-footer .footer-link--wechat.is-connected .footer-link-status {
-  color: #bff0cf;
+  color: var(--wechat);
 }
 
 /* 微信收件箱未读数小徽标 */
