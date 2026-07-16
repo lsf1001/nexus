@@ -137,6 +137,20 @@
 .setup-card input:focus {
   border-color: var(--forest);
   background: var(--paper);
+  box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.18);
+}
+
+/* 第十一轮(2026-07-16)产品级打磨:form input focus-visible 视觉统一
+ * - forest 边框 + 微弱光晕,跟 .btn-primary forest 主色一致
+ * - 跟全局 :focus-visible 硬边共存(focus-visible 已经被全局 outline 接管,
+ *   这里是 input 内部的 border + box-shadow 双重提示) */
+.setup-card input:focus-visible,
+.settings-list input:focus-visible,
+.setting-row input:focus-visible,
+.wechat-bind-card input:focus-visible {
+  outline: none;
+  border-color: var(--forest);
+  box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.20);
 }
 
 .hint {
@@ -159,6 +173,9 @@
   background: rgba(192, 84, 67, 0.10);
   color: #a83a25;
   border: 1px solid rgba(192, 84, 67, 0.30);
+  /* 第十一轮:错误 hint 左侧 forest 边条 + padding 留位,跟全局 focus-visible 风格一致 */
+  border-left: 3px solid #c05443;
+  padding-left: 13px;
 }
 
 .nexus-desktop[data-theme="dark"] .hint.is-error {
