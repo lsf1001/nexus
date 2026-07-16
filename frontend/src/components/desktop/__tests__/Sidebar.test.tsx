@@ -22,7 +22,7 @@ function makeConv(id: string, title: string, updatedAt = '2026-07-16T00:00:00Z')
   return {
     id,
     title,
-    createdAt: updatedAt,
+    createdAt: new Date(updatedAt),
     updatedAt,
     messages: [],
     channel: undefined,

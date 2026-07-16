@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { fireEvent, render } from '@testing-library/react';
 import { ToolCallCard } from '../ToolCallCard';
-import type { ToolCall } from '../../types';
+import type { ToolCall } from '../../../types';
 
 function makeCall(overrides: Partial<ToolCall> = {}): ToolCall {
   return {

@@ -65,8 +65,8 @@ describe('ModelSwitcher (第九轮)', () => {
     expect(dd).not.toBeNull();
     const items = container.querySelectorAll('.model-switcher-item');
     expect(items.length).toBe(2);
-    expect(items[0].textContent).toContain('GPT-4o');
-    expect(items[1].textContent).toContain('Claude-Sonnet');
+    expect(items[0]?.textContent).toContain('GPT-4o');
+    expect(items[1]?.textContent).toContain('Claude-Sonnet');
   });
 
   it('当前激活项加 .is-active 类', () => {
@@ -77,8 +77,8 @@ describe('ModelSwitcher (第九轮)', () => {
     const { container } = render(<ModelSwitcher />);
     fireEvent.click(container.querySelector('.model-switcher-chip') as HTMLElement);
     const items = container.querySelectorAll('.model-switcher-item');
-    expect(items[0].classList.contains('is-active')).toBe(true);
-    expect(items[1].classList.contains('is-active')).toBe(false);
+    expect(items[0]?.classList.contains('is-active')).toBe(true);
+    expect(items[1]?.classList.contains('is-active')).toBe(false);
     // 激活项有绿点
     expect(container.querySelector('.model-switcher-item.is-active .model-switcher-dot')).not.toBeNull();
   });
