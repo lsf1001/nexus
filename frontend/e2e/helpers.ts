@@ -59,9 +59,14 @@ export function messageInput(page: Page): Locator {
   return page.getByPlaceholder('告诉 Nexus 你想完成什么');
 }
 
-/** 定位发送按钮（textarea 后面那个 SVG 按钮，aria-label 没设，用父 div 定位）。 */
+/** 定位发送按钮（textarea 后面那个 SVG 按钮，aria-label 没设，用父 div 定位）。
+ *
+ *  空态(EmptyState)有自己的发送按钮 `.empty-state-send`;对话中则是 `.send-button`。
+ *  两者 SVG path 完全相同,strict mode 会同时匹配两个。返回 `.or()`,调用方在 click
+ *  前显式 .first() 取唯一的 visible 节点即可。
+ */
 export function sendButton(page: Page): Locator {
-  return page.locator('button').filter({ has: page.locator('svg path[d^="M12 19"]') });
+  return page.locator('button.empty-state-send, button.send-button');
 }
 
 /**
@@ -88,7 +93,9 @@ export async function sendMessageAndWaitForReply(
 
   await expect(messageInput(page)).toBeEnabled({ timeout: 30_000 });
   await messageInput(page).fill(content);
-  await sendButton(page).click();
+  // .first(): 空态下可能同时有 .empty-state-send + .send-button(side-effect),
+  // strict mode 拒收多匹配 — 取第一个匹配的(visible 那个)。
+  await sendButton(page).first().click();
 
   // 等 user 气泡出现且数量增加 1
   await expect
