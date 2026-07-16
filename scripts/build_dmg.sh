@@ -22,7 +22,7 @@ if [ -f "$HOME/.cargo/env" ]; then
   . "$HOME/.cargo/env"
 fi
 
-VERSION="${VERSION:-1.1.0}"
+VERSION="${VERSION:-1.2.0}"
 ARCH="${ARCH:-$(uname -m)}"  # arm64 或 x86_64
 APP_NAME="Nexus"
 DMG_NAME="${APP_NAME}-${VERSION}-${ARCH}"
