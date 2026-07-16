@@ -42,7 +42,7 @@ describe("WechatPluginModal QR 渲染契约(qrcode 必须静态 import,避免 DM
   it("源码**包含**静态 import qrcode(toCanvas 必须能拿到)", () => {
     // 静态 import 必须以 from 'qrcode' / from "qrcode" 形式出现
     const staticImportPatterns = [
-      /import\s+[\w*\{\},\s]+\s+from\s+['"]qrcode['"]/,
+      /import\s+[\w*{},\s]+\s+from\s+['"]qrcode['"]/,
       /import\s+['"]qrcode['"]/,
     ];
     const hasStatic = staticImportPatterns.some((re) => re.test(source));

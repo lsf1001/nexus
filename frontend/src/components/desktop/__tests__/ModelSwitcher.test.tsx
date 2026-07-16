@@ -14,7 +14,7 @@
  *   - 外部 click → 收起(dropdown 自动 close)
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { ModelSwitcher } from '../ModelSwitcher';
 import { useStore } from '../../../store';
 

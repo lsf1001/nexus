@@ -37,7 +37,7 @@
  *       .wechat-card / .wechat-plugin-modal — 微信弹窗
  */
 import { test, expect, type Page } from '@playwright/test';
-import { journeyOpenHome, sendSequence } from './helpers';
+import { journeyOpenHome } from './helpers';
 import {
   sendMessageAndWaitForReply,
   lastAssistantBubbleText,

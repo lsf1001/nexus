@@ -14,7 +14,7 @@
  *   5. 空查询 + 无会话 → 显示 empty state
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { Sidebar } from '../Sidebar';
 import type { Conversation } from '../../../types';
 
