@@ -152,7 +152,12 @@ export function Sidebar({
         </button>
       </div>
 
-      <button className="btn-new-task" onClick={onNewTask} onContextMenu={copyNewTask}>
+      <button
+        className="btn-new-task"
+        onClick={onNewTask}
+        onContextMenu={copyNewTask}
+        aria-label="新建对话 (快捷键 Cmd+N / Ctrl+N)"
+      >
         <span className="plus-mark" aria-hidden="true">+</span>
         <span>新对话</span>
       </button>
@@ -176,7 +181,7 @@ export function Sidebar({
             </span>
           )}
         </div>
-        <div className="recent-panel">
+        <div className="recent-panel" aria-live="polite" aria-relevant="additions text">
           {sortedConversations.length === 0 ? (
             <div className="empty-tasks" onContextMenu={copyEmptyTasks}>
               <strong>还没有对话</strong>

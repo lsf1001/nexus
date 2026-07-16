@@ -255,11 +255,13 @@ export function ChatArea({
       </div>
 
       {lastError && (
-        <ErrorBanner
-          lastError={lastError}
-          onRetry={handleRetry}
-          onClose={() => setLastError(null)}
-        />
+        <div role="status" aria-live="assertive">
+          <ErrorBanner
+            lastError={lastError}
+            onRetry={handleRetry}
+            onClose={() => setLastError(null)}
+          />
+        </div>
       )}
 
       <Composer

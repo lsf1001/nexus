@@ -114,6 +114,8 @@ export function SettingsView({ onBack }: SettingsViewProps = {}) {
             type="button"
             className={`toggle ${showThinking ? 'is-on' : ''}`}
             onClick={() => setShowThinking(!showThinking)}
+            aria-pressed={showThinking}
+            aria-label={`显示思考过程: ${showThinking ? '已开启' : '已关闭'}`}
           >
             {showThinking ? '已开启' : '已关闭'}
           </button>
@@ -128,6 +130,8 @@ export function SettingsView({ onBack }: SettingsViewProps = {}) {
             type="button"
             className={`toggle ${darkMode ? 'is-on' : ''}`}
             onClick={handleToggleDarkMode}
+            aria-pressed={darkMode}
+            aria-label={`深色模式: ${darkMode ? '已开启' : '已关闭'}`}
           >
             {darkMode ? '已开启' : '已关闭'}
           </button>
