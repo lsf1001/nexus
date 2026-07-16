@@ -61,7 +61,7 @@ function extractVar(body: string, varName: string): string | null {
       }
     }
     const m = l.match(new RegExp(`${varName}\\s*:\\s*([^;]+);`));
-    if (m) return m[1].trim();
+    if (m && m[1]) return m[1].trim();
   }
   return null;
 }
