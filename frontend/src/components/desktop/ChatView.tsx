@@ -1,4 +1,6 @@
 import ChatArea from '../ChatArea';
+import { ModelSwitcher } from './ModelSwitcher';
+import { ThemeToggle } from './ThemeToggle';
 import type { DesktopShellContext } from './DesktopShell';
 
 interface ChatViewProps {
@@ -50,10 +52,14 @@ export function ChatView({
             {currentConv?.title || '新任务'}
             {currentConv?.channel === 'wechat' && <span className="chat-status-channel">· 微信通道</span>}
           </span>
-          <span className={pillClass} role="status" aria-live="polite">
-            <span className="dot" />
-            <PillLabel state={connectionState} />
-          </span>
+          <div className="chat-status-actions">
+            <span className={pillClass} role="status" aria-live="polite">
+              <span className="dot" />
+              <PillLabel state={connectionState} />
+            </span>
+            <ModelSwitcher />
+            <ThemeToggle />
+          </div>
         </header>
 
         <ChatArea
