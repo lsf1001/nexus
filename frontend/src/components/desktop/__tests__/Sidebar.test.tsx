@@ -31,6 +31,7 @@ function makeConv(id: string, title: string, updatedAt = '2026-07-16T00:00:00Z')
 
 const baseProps = {
   onViewChange: vi.fn(),
+  onOpenPreferences: vi.fn(),
   currentConversationId: null,
   wechatConnected: false,
   wechatInboxCount: 0,

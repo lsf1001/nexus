@@ -2,10 +2,11 @@
 /* 第六轮(2026-07-15)重构 — Claude Desktop 极简风:
  *   setup-view 改成单列左对齐,左 60px padding 起步,max-width: 560px
  *   不再有 setup-copy 左文案栏 —— 标题文案并入 setup-card heading 一行。
- * 第八轮(2026-07-15):跟 ChatView/SettingsView/Wechat 一致改用 .chat-area-wrap
- *   落地(flex column + 顶部 chat-status-bar 占 macOS chrome drag 区域),
- *   .setup-view 这层是 chat-area-wrap 内部的内层 padding-left 60px 容器,
- *   跟 settings-list / wechat-copy-inline 保持同一组 60px 起始位。 */
+ * 第十三轮(2026-07-17):原 SettingsView / WechatAssistantView 已被合并为
+ *   PreferencesDrawer 右侧抽屉,主区不再各自定义顶层 view。
+ *   .settings-list / .setting-row 仍由 PreferencesDrawer 内部 GeneralPanel 使用
+ *   .wechat-copy-inline 仍由 PreferencesDrawer 内部 WechatPanel 使用
+ *   因此这些规则保留,只是服务对象从主区切到了抽屉内部。 */
 .setup-view {
   min-height: 0;
   flex: 1 1 auto;
@@ -21,10 +22,10 @@
   /* dark 模式沿用父 --canvas 底,不再叠 hero 浮雕 */
 }
 
-/* settings / wechat 现在复用 .chat-area-wrap(在 shell.css 定义),
- * 不再各自定义顶层 .settings-view / .wechat-view grid。
- * 各自所需的"主区内 inline padding"由 .settings-list / .wechat-copy-inline
- * 控制,见下方。 */
+/* settings / wechat 现在进入 PreferencesDrawer 右侧抽屉(第十三轮 2026-07-17),
+ * 抽屉里有自己的 .preferences-drawer-body > section 间距(见 preferences-drawer.css)。
+ * 通用 tab 复用 .settings-list;.wechat-copy-inline 仍在 WechatPanel 用,
+ * 但容器外层从 main .chat-area-wrap 换成 .preferences-drawer-body。 */
 
 /* Kicker：暖色调，浅森林色背景 */
 .kicker {
@@ -741,7 +742,6 @@
   flex-direction: column;
 }
 
-.channel-children > .wechat-view,
 .channel-children > .feishu-view,
 .channel-children > .telegram-view {
   flex: 1 1 auto;

@@ -5,10 +5,16 @@ import { useDarkModeRoot } from './hooks/useDarkModeRoot';
 import { useGlobalShortcuts, focusElement, closeTopModal } from './hooks/useGlobalShortcuts';
 import { useChannelStatusPolling } from '../../hooks/useChannelStatusPolling';
 import { useConversationCrud } from './hooks/useConversationCrud';
+import { PreferencesDrawer, type PreferencesTab } from './PreferencesDrawer';
 import { ShellLayout } from './ShellLayout';
 import type { Conversation } from '../../types';
 
-export type DesktopView = 'setup' | 'chat' | 'wechat' | 'settings';
+/**
+ * 第十三轮(2026-07-17):`view` 收窄为 'setup' | 'chat'。
+ * 原 'settings' / 'wechat' 已被右侧抽屉替代(Claude Desktop / Linear / Cursor 主流做法)
+ * — 抽屉浮在主区之上,ChatArea 不卸载。Esc / 点蒙层 / 点 ✕ 三种关闭路径。
+ */
+export type DesktopView = 'setup' | 'chat';
 
 export interface DesktopShellContext {
   // session 状态
@@ -50,6 +56,8 @@ export function DesktopShell() {
   } = useConversationCrud();
 
   const [view, setView] = useState<DesktopView>(initialView);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [preferencesTab, setPreferencesTab] = useState<PreferencesTab>('general');
   const [wsConnected, setWsConnected] = useState(false);
 
   // 关键:useBootstrap 是 async 的,首次 render 时 initialView='setup',
@@ -74,12 +82,22 @@ export function DesktopShell() {
     setView('chat');
   };
 
+  /**
+   * 第十三轮(2026-07-17):打开偏好抽屉。
+   * 侧栏顶齿轮 → 不传 tab,默认 general
+   * 侧栏底微信按钮 → 传 'wechat',落点在微信通道 tab
+   */
+  const handleOpenPreferences = (tab: PreferencesTab = 'general'): void => {
+    setPreferencesTab(tab);
+    setPreferencesOpen(true);
+  };
+
   // 第十一轮(2026-07-16)产品级打磨:全局键盘快捷键
   // 主流 agent 产品标配 — Claude Desktop / ChatGPT / Cursor 都用
   //   - Cmd+N 新建对话 → 复用 handleNewTask
   //   - Cmd+K 聚焦 sidebar 搜索框
   //   - Cmd+/ 聚焦 composer textarea
-  //   - Esc 关闭最上层 modal
+  //   - Esc 关闭最上层 modal(优先关偏好抽屉,其次其他 modal)
   useGlobalShortcuts({
     onNewTask: handleNewTask,
     onFocusSearch: () => focusElement('.sidebar-search input[type=search]'),
@@ -112,19 +130,27 @@ export function DesktopShell() {
   };
 
   return (
-    <ShellLayout
-      view={view}
-      onViewChange={setView}
-      conversations={conversations}
-      currentConversationId={currentConversationId}
-      wechatConnected={wechatConnected}
-      onSelectConversation={onSelectConversation}
-      onDeleteConversation={onDeleteConversation}
-      onNewTask={handleNewTask}
-      context={context}
-      onConnectedChange={setWsConnected}
-      onSessionCreated={onSessionCreated}
-      resetCounter={resetCounter}
-    />
+    <>
+      <ShellLayout
+        view={view}
+        onViewChange={setView}
+        conversations={conversations}
+        currentConversationId={currentConversationId}
+        wechatConnected={wechatConnected}
+        onSelectConversation={onSelectConversation}
+        onDeleteConversation={onDeleteConversation}
+        onNewTask={handleNewTask}
+        onOpenPreferences={handleOpenPreferences}
+        context={context}
+        onConnectedChange={setWsConnected}
+        onSessionCreated={onSessionCreated}
+        resetCounter={resetCounter}
+      />
+      <PreferencesDrawer
+        open={preferencesOpen}
+        initialTab={preferencesTab}
+        onClose={() => setPreferencesOpen(false)}
+      />
+    </>
   );
 }

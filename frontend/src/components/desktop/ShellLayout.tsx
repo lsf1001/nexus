@@ -1,13 +1,12 @@
 import { ChatView } from './ChatView';
 import { ContextMenuHost } from './ContextMenuHost';
-import { SettingsView } from './SettingsView';
 import { SetupView } from './SetupView';
 import { Sidebar } from './Sidebar';
 import { ToastHost } from '../ToastHost';
-import { WechatAssistantView } from './WechatAssistantView';
 import { useStore } from '../../store';
 import type { Conversation } from '../../types';
 import type { DesktopShellContext, DesktopView } from './DesktopShell';
+import type { PreferencesTab } from './PreferencesDrawer';
 
 export interface ShellLayoutProps {
   view: DesktopView;
@@ -18,6 +17,11 @@ export interface ShellLayoutProps {
   onSelectConversation: (conv: Conversation) => void;
   onDeleteConversation: (id: string) => void;
   onNewTask: () => void;
+  /**
+   * 第十三轮(2026-07-17):打开偏好抽屉。
+   * 不传 tab → 通用(齿轮入口);传 'wechat' → 落点在微信通道(底栏入口)。
+   */
+  onOpenPreferences: (tab?: PreferencesTab) => void;
   context: DesktopShellContext;
   onConnectedChange: (connected: boolean) => void;
   onSessionCreated: (sessionId: string, title: string) => void;
@@ -33,6 +37,7 @@ export function ShellLayout({
   onSelectConversation,
   onDeleteConversation,
   onNewTask,
+  onOpenPreferences,
   context,
   onConnectedChange,
   onSessionCreated,
@@ -48,6 +53,7 @@ export function ShellLayout({
        * sidebar 透到 traffic light 下方而不挡点。 */}
       <Sidebar
         onViewChange={onViewChange}
+        onOpenPreferences={onOpenPreferences}
         conversations={conversations}
         currentConversationId={currentConversationId}
         wechatConnected={wechatConnected}
@@ -67,8 +73,6 @@ export function ShellLayout({
             resetCounter={resetCounter}
           />
         )}
-        {view === 'wechat' && <WechatAssistantView onBack={() => onViewChange('chat')} />}
-        {view === 'settings' && <SettingsView onBack={() => onViewChange('chat')} />}
       </main>
 
       {/* 全局右键菜单浮层(挂在最外层,避免被父级 overflow 切掉) */}

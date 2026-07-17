@@ -7,7 +7,7 @@ export interface UseGlobalShortcutsOptions {
   onFocusSearch?: () => void;
   /** Cmd+/ / Ctrl+/ 聚焦 composer textarea */
   onFocusComposer?: () => void;
-  /** Esc 关闭最上层 modal(找 .model-config-modal-overlay / .wechat-plugin-modal-overlay / .setup-overlay) */
+  /** Esc 关闭最上层 modal(优先 .preferences-drawer-overlay,其次 .model-config-modal-overlay / .wechat-plugin-modal-overlay / .setup-overlay) */
   onCloseModal?: () => void;
 }
 
@@ -72,9 +72,11 @@ export function focusElement(selector: string): boolean {
   return true;
 }
 
-/** 实用工具:关闭最上层 modal(按 DOM 出现顺序倒序找第一个可见的 overlay)。 */
+/** 实用工具:关闭最上层 modal(按 DOM 出现顺序倒序找第一个可见的 overlay)。
+ *  顺序原则:层级高 / 打开晚的排前面,保证 Esc 优先关最外层。 */
 export function closeTopModal(): boolean {
   const candidates = [
+    '.preferences-drawer-overlay',
     '.model-config-modal-overlay',
     '.wechat-plugin-modal-overlay',
     '.setup-overlay',

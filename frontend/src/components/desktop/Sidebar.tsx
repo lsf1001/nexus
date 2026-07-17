@@ -2,9 +2,15 @@ import { useState } from 'react';
 import { useContextMenuTrigger, openContextMenuAt } from '../../lib/useContextMenuTrigger';
 import type { Conversation } from '../../types';
 import type { DesktopView } from './DesktopShell';
+import type { PreferencesTab } from './PreferencesDrawer';
 
 export interface SidebarProps {
   onViewChange: (view: DesktopView) => void;
+  /**
+   * 第十三轮(2026-07-17):打开偏好抽屉。
+   * 不传 → 通用 tab(齿轮入口);传 'wechat' → 微信通道 tab(底栏入口)。
+   */
+  onOpenPreferences: (tab?: PreferencesTab) => void;
   conversations: Conversation[];
   currentConversationId: string | null;
   wechatConnected: boolean;
@@ -16,10 +22,13 @@ export interface SidebarProps {
 
 /**
  * 左侧栏 — 扁平、符合直觉:
- *   顶部: 品牌 + 设置入口(常驻,不藏底部)
- *   主操作: + 新任务
+ *   顶部: 品牌 + 设置入口(齿轮 → 偏好抽屉通用 tab)
+ *   主操作: + 新对话
  *   中部: 会话列表(扁平,微信任务用 channel-tag 标记)
- *   底部: 微信通道一行
+ *   底部: 微信通道状态行(点开落偏好抽屉微信通道 tab)
+ *
+ * 第十三轮(2026-07-17):原 'settings' / 'wechat' 独立视图取消,统一进
+ * PreferencesDrawer 右侧抽屉。齿轮 / 微信按钮都走 onOpenPreferences。
  *
  * 设计原则:
  *   - 不显示未实现功能的占位(移除"今天"/"已完成"soon 占位)
@@ -28,6 +37,7 @@ export interface SidebarProps {
  */
 export function Sidebar({
   onViewChange,
+  onOpenPreferences,
   conversations,
   currentConversationId,
   wechatConnected,
@@ -82,18 +92,27 @@ export function Sidebar({
       openContextMenuAt(e, text, '任务');
     };
 
+    // 第十三轮(2026-07-17)Bug fix:用户当前在 settings / wechat 视图时点 sidebar
+    // 会话项,onSelectConversation 只更新 currentConversationId + 拉历史,view
+    // 没切回 chat → main 区还显示旧视图,用户感知"点了会话什么都没发生"。
+    // 修复:onClick 先切回 chat 再选会话,键盘 Enter/Space 同步处理。
+    const handleSelect = (): void => {
+      onViewChange('chat');
+      onSelectConversation(conv);
+    };
+
     return (
       <div
         key={conv.id}
         role="button"
         tabIndex={0}
         className={`task-item ${active ? 'is-current' : ''}`}
-        onClick={() => onSelectConversation(conv)}
+        onClick={handleSelect}
         onContextMenu={onCopy}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            onSelectConversation(conv);
+            handleSelect();
           }
         }}
         aria-current={active ? 'true' : undefined}
@@ -140,7 +159,7 @@ export function Sidebar({
           className="sidebar-settings-btn"
           aria-label="设置"
           title="设置"
-          onClick={() => onViewChange('settings')}
+          onClick={() => onOpenPreferences()}
           onContextMenu={copySettingsLink}
         >
           {/* 齿轮图标 — inline SVG,避免额外依赖 */}
@@ -204,7 +223,7 @@ export function Sidebar({
         <button
           className={`footer-link footer-link--wechat ${wechatConnected ? 'is-connected' : ''}`}
           type="button"
-          onClick={() => onViewChange('wechat')}
+          onClick={() => onOpenPreferences('wechat')}
           onContextMenu={copyWechatLink}
           aria-label={`微信通道 ${wechatConnected ? '已连接' : '未绑定'}`}
         >

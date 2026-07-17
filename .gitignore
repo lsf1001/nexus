@@ -44,6 +44,7 @@ frontend/node_modules/
 
 # Local config
 .claude/settings.local.json
+.claude/
 .pytest_cache/
 
 # Vite 缓存（不应入 git；历史误建在 nexus/.vite/）

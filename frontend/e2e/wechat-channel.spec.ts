@@ -1,20 +1,20 @@
 /**
  * 微信通道 UI E2E(不依赖真实微信扫码)。
  *
- * 用户旅程:
+ * 第十三轮(2026-07-17):原 WechatAssistantView 全屏视图取消,统一为 PreferencesDrawer 右侧抽屉。
  *   1. 打开 ChatView
- *   2. 侧栏点 "微信通道" → WechatAssistantView
+ *   2. 侧栏点 "微信通道" → 抽屉打开 + 自动落"微信通道" tab
  *   3. 看到绑定状态卡("未绑定"文案) + "扫码绑定"按钮
  *   4. 点"扫码绑定" → WechatPluginModal 打开
  *   5. modal 内点 "绑定微信" → 触发 /api/channels/wechat/qr 拿到 QR
- *   6. 关闭 modal,返回 WechatAssistantView
+ *   6. 关闭 modal,关闭抽屉 → ChatArea 一直在背后
  *
  * 真实扫码依赖外部微信 server(无本地环境),此 spec 只覆盖 UI 入口 + API 集成 + 弹窗渲染。
  */
 import { test, expect } from '@playwright/test';
 import { openHome } from './helpers';
 
-test('微信通道：侧栏入口 → 绑定弹窗 → QR 请求', async ({ page }) => {
+test('微信通道：侧栏入口 → 绑定弹窗 → QR 请求 → 关抽屉', async ({ page }) => {
   test.setTimeout(60_000);
 
   await openHome(page);
@@ -25,15 +25,16 @@ test('微信通道：侧栏入口 → 绑定弹窗 → QR 请求', async ({ page
   const linkText = (await wechatLink.innerText()).trim();
   expect(linkText).toContain('微信通道');
 
-  // 2. 点击进入 WechatAssistantView
+  // 2. 点击 → PreferencesDrawer 打开并自动落微信通道 tab
   await wechatLink.click();
-  // 关键 UI 文案出现 → view 已切到 wechat
-  await expect(page.getByText('微信通道是 Nexus 的随身入口。')).toBeVisible({
-    timeout: 10_000,
-  });
+  const overlay = page.locator('.preferences-drawer-overlay');
+  await expect(overlay).toBeVisible({ timeout: 10_000 });
+  const wechatTab = overlay.locator('.preferences-tab', { hasText: '微信通道' });
+  await expect(wechatTab).toHaveAttribute('aria-selected', 'true');
+  await expect(overlay.getByText('微信通道是 Nexus 的随身入口。')).toBeVisible();
 
-  // 3. 看到 "扫码绑定 / 重新绑定" 按钮(.wechat-extra-actions 是 wechat-view 子树内)
-  const bindBtn = page
+  // 3. 看到 "扫码绑定 / 重新绑定" 按钮(.wechat-extra-actions 是 drawer 内子树)
+  const bindBtn = overlay
     .locator('.wechat-extra-actions button.btn-primary', { hasText: '扫码绑定' })
     .first();
   await expect(bindBtn).toBeVisible({ timeout: 5_000 });
@@ -72,11 +73,11 @@ test('微信通道：侧栏入口 → 绑定弹窗 → QR 请求', async ({ page
   await closeBtn.click();
   await expect(modal).toBeHidden({ timeout: 5_000 });
 
-  // 7. 返回 chat 入口还在(第八轮 2026-07-15:返回按钮现在是
-  //   chat-status-bar 内的 .chat-status-action,不再是绝对定位的 .back-btn)
-  const backBtn = page.locator('button.chat-status-action', { hasText: '返回聊天' });
-  if (await backBtn.count()) {
-    await backBtn.click();
-    await expect(wechatLink).toBeVisible({ timeout: 5_000 });
-  }
+  // 7. 关闭抽屉 — ✕ 在 .preferences-drawer-close
+  const drawerCloseBtn = page.locator('.preferences-drawer-close');
+  await drawerCloseBtn.click();
+  await expect(overlay).toBeHidden({ timeout: 5_000 });
+
+  // 8. 侧栏微信链接仍可见(主区不卸载,ChatArea 一直在背后)
+  await expect(wechatLink).toBeVisible({ timeout: 5_000 });
 });

@@ -2,7 +2,8 @@
  * journey-wechat-bound-receive — 微信通道"绑定状态切换"降级版 E2E。
  *
  * 覆盖范围(plan 2026-07-12-e2e-journey-suite.md Task 15 降级版):
- *  - ChatView → sidebar 微信通道入口 → WechatAssistantView
+ *  - ChatView → sidebar 微信通道入口 → PreferencesDrawer 微信通道 tab
+ *    (第十三轮 2026-07-17:从原 WechatAssistantView 全屏视图改为右侧抽屉)
  *  - ChannelViewBase 初始显示"未绑定" + "扫码绑定 wechat" 按钮
  *  - mock `/api/channels/wechat/bind` GET 返回 {bound: true, account_id}
  *    → ChannelViewBase 轮询拿到新状态 → "已绑定: xxx" + 解绑按钮出现
@@ -40,15 +41,17 @@ test.describe('journey: 微信通道绑定状态切换', () => {
       });
     });
 
-    // 2. sidebar 微信入口 → wechat 视图
+    // 2. sidebar 微信入口 → PreferencesDrawer 自动落微信通道 tab
     const wechatEntry = page.locator('.footer-link--wechat');
     await expect(wechatEntry, 'sidebar 微信通道入口应存在').toBeVisible();
     await wechatEntry.click();
 
-    // 3. WechatAssistantView + ChannelViewBase 渲染
-    // 绑定卡片有初始轮询状态(即使真实后端返 unbound 也无所谓,
-    // route 接管后第二次轮询就会切到 mock 的 bound=true)。
-    const bindCard = page.locator('.channel-bind-card');
+    // 3. PreferencesDrawer 渲染,ChannelViewBase 在微信通道 tab 内
+    const overlay = page.locator('.preferences-drawer-overlay');
+    await expect(overlay, '偏好抽屉应打开').toBeVisible({ timeout: 10_000 });
+    const wechatTab = overlay.locator('.preferences-tab', { hasText: '微信通道' });
+    await expect(wechatTab, '微信通道 tab 应自动激活').toHaveAttribute('aria-selected', 'true');
+    const bindCard = overlay.locator('.channel-bind-card');
     await expect(bindCard, '绑定卡片应可见').toBeVisible({ timeout: 10_000 });
 
     // 4. 等轮询触发 mock,绑定卡切换到"已绑定: e2e-mock-wx-user"

@@ -1,0 +1,180 @@
+/* ===== 偏好抽屉(设置 + 微信通道合并) 第十三轮 2026-07-17 =====
+ * 复盘:Claude Desktop / Linear / Cursor 主流做法 — 抽屉浮在主区之上,
+ * 420px 宽,右对齐滑入。ChatArea 不卸载,关闭即恢复。
+ *
+ * 沿用灰阶 token(--ink/paper/line/accent-*),零彩色,与第十三轮灰阶主题一致。
+ *
+ * 锁测试:本文件无硬编码 hex,token 化校验走 tokens-dark.test.ts
+ * (饱和度 ≤ 0.10);视觉契约走 PreferencesDrawer 集成测试。 */
+
+/* 蒙层:flex 右对齐,点蒙层自身关闭(子元素不冒泡) */
+.modal-overlay.preferences-drawer-overlay {
+  background: rgba(0, 0, 0, 0.30);
+  display: flex;
+  justify-content: flex-end;
+  /* 蒙层不进 drag-region(Tauri 全局规则覆盖) */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.nexus-desktop[data-theme="dark"] .modal-overlay.preferences-drawer-overlay {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+/* 抽屉本体 */
+.preferences-drawer {
+  width: min(420px, 92vw);
+  height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  animation: preferences-slide-in 220ms ease-out;
+}
+@keyframes preferences-slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .preferences-drawer {
+    animation: none;
+  }
+}
+
+/* 顶部:tab 切换 + ✕ 关闭 */
+.preferences-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 0;
+  gap: 12px;
+  /* Tauri 拖拽区排除在按钮外 — tab/✕ 子元素自动 no-drag(tokens.css 全局规则) */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.preferences-drawer-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--paper-2);
+  padding: 3px;
+  border-radius: var(--r-md);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.preferences-tab {
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.preferences-tab:hover {
+  color: var(--ink);
+}
+.preferences-tab.is-active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+.preferences-drawer-close {
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.preferences-drawer-close:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+/* 主体:垂直滚动,flex 1 撑满 */
+.preferences-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.preferences-drawer-body > section {
+  padding: 20px 24px;
+}
+
+/* 通用 tab 内:复用原 .settings-list(views.css 已有样式) */
+.preferences-drawer-body .settings-list {
+  padding: 0;
+}
+
+/* 微信通道 tab 内:复用原 .wechat-* 样式 */
+.preferences-drawer-body .wechat-copy-inline {
+  background: var(--paper-2);
+  border-radius: var(--r-lg);
+  padding: 20px 22px;
+  margin-bottom: 16px;
+}
+.preferences-drawer-body .wechat-mark {
+  /* 沿用 views.css 的样式兜底 — 此处只补 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 700;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+}
+.preferences-drawer-body .wechat-copy-inline h1 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--ink);
+}
+.preferences-drawer-body .wechat-copy-inline p {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  margin: 0 0 14px;
+}
+.preferences-drawer-body .wechat-benefits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.preferences-drawer-body .wechat-benefits span {
+  font-size: 12px;
+  color: var(--ink-2);
+  padding-left: 14px;
+  position: relative;
+}
+.preferences-drawer-body .wechat-benefits span::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+.preferences-drawer-body .wechat-extra-actions {
+  display: flex;
+}
+.preferences-drawer-body .wechat-extra-actions .btn-primary {
+  width: 100%;
+}
