@@ -62,10 +62,9 @@
   border-radius: 12px;
   display: grid;
   place-items: center;
-  /* Claude Desktop 浅色 logo:白底 + 深字(反色 box)。不再用 var(--forest)
-   * —— 第九轮森林绿 box 跟主区按钮撞色,sidebar 视觉独立才像 Claude Desktop。
-   * 锁测试:src/components/desktop/styles/__tests__/shell-sidebar-brand.test.ts
-   * 浅色必须是白底,dark override 必须是黑底,二者硬约束。 */
+  /* Claude Desktop 浅色 logo:白底 + 深字(反色 box)。不再用森林绿 box(第九轮)。
+   * 浅色必须是白底,dark override 必须是黑底,二者硬约束。
+   * 锁测试:src/components/desktop/styles/__tests__/shell-sidebar-brand.test.ts */
   background: #ffffff;
   border: 1px solid var(--sidebar-divider);
   font-weight: 850;
