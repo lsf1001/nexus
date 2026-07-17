@@ -7,7 +7,6 @@ export interface SidebarProps {
   onSelectConversation: (conv: Conversation) => void;
   onDeleteConversation: (id: string) => void;
   onNewTask: () => void;
-  onOpenPreferences: () => void;
 }
 
 /**

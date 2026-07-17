@@ -41,7 +41,6 @@ export function ShellLayout({
         onSelectConversation={onSelectConversation}
         onDeleteConversation={onDeleteConversation}
         onNewTask={onNewTask}
-        onOpenPreferences={() => onViewChange('chat')}
       />
 
       <main className="main">

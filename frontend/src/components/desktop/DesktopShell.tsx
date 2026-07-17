@@ -68,13 +68,10 @@ export function DesktopShell() {
     setView('chat');
   };
 
-  const handleOpenPreferences = (): void => {
-    setPreferencesOpen(true);
-  };
-
   useGlobalShortcuts({
     onNewTask: handleNewTask,
-    onFocusSearch: () => focusElement('.sidebar-search input[type=search]'),
+    // 第十四轮:搜索 input 已删,快捷键暂 noop,待后续 Task 5 整合或重新设计
+    onFocusSearch: () => {},
     onFocusComposer: () => focusElement('.composer-textarea'),
     onCloseModal: () => closeTopModal(),
   });
