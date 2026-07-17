@@ -10,53 +10,46 @@
  *
  * 这里为了简洁统一:light 也走 :root,token 全局可继承 */
 :root {
-  /* 深石墨工作台：高对比文本 + 单一青蓝强调色 */
-  --ink: #17202f;
-  --muted: #667085;
-  --faint: #98a2b3;
+  /* 文字三档 */
+  --ink:      #1f1f1f;
+  --ink-2:    #4a4a4a;
+  --ink-3:    #8a8a8a;
 
-  /* 纸面与画布 */
-  --canvas: #edf1f7;
-  --paper: #ffffff;
-  --paper-soft: #f7f9fc;
-  --paper-tint: #f8fbff;
+  /* 纸面三档 */
+  --paper:    #ffffff;
+  --paper-2:  #f7f7f7;
+  --paper-3:  #ededed;
 
-  /* 描边 */
-  --line: #e4e9f1;
-  --line-strong: #c7d2e1;
+  /* 描边两档 */
+  --line:     #e5e5e5;
+  --line-2:   #d0d0d0;
 
-  --forest: #2d6a4f;        /* 深森林绿 — 与品牌"宫崎骏森林绿"对齐;
-                             * light/dark 双模同色族,避免一深一浅脱钩。 */
-  --forest-2: #1b4332;      /* 浅一档:hover/active 反向 → 深一档渐变止 */
-  --forest-soft: #d8e2dc;   /* 浅一档 chip 底,与白底对比柔和 */
+  /* 强调 */
+  --accent:        #1f1f1f;
+  --accent-soft:   #ededed;
 
-  /* 鼠尾草、茶叶 */
-  --sage: #5e8f9e;
-  --tea: #d6923b;
-
-  /* 微信绿 */
-  --wechat: #07c160;
+  /* 通道识别色(灰阶化) */
+  --wechat:        #4a4a4a;
 
   /* 阴影 */
-  --shadow-lg: 0 28px 70px rgba(91, 65, 34, 0.16);  /* 暖棕阴影,非冷蓝紫 */
-  --shadow-md: 0 14px 34px rgba(91, 65, 34, 0.10);
-  --shadow-sm: 0 7px 18px rgba(91, 65, 34, 0.07);
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.10);
+  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0  7px 18px rgba(0, 0, 0, 0.04);
 
-  /* 字体 stack：原型指定的人文衬线 + 系统 fallback */
+  /* 字体 stack:保持原值不动 */
   --font-sans: "SF Pro Display", "PingFang SC", "Avenir Next",
     ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* 圆角 */
+  /* 圆角:保持原值不动 */
   --r-sm: 9px;
   --r-md: 12px;
   --r-lg: 16px;
   --r-xl: 20px;
   --r-2xl: 28px;
 
-  /* 第九轮(2026-07-16):间距 + 字号 token — 渐进替换 shell.css / chat.css
-   * 散落的硬编码 px。spacing 单调 4..48,font 单调 12..36。 */
+  /* 间距 + 字号:保持原值不动 */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -73,23 +66,17 @@
   --font-xl: 28px;
   --font-2xl: 36px;
 
-  /* ===== Sidebar 配色 (Claude Desktop 双色) =====
-   * 浅色:浅米白底 + 深石墨字;深色:近黑底 + 暖灰字。
-   * 跟 forest 主区配色解耦,避免 sidebar 反白文字把 forest 强调色污染。
-   * 锁测试:src/components/desktop/styles/__tests__/shell-sidebar-brand.test.ts */
-  --sidebar-bg: #f7f5ef;             /* 浅米白,Claude Desktop 浅 sidebar */
-  --sidebar-bg-2: #efebe0;           /* 渐变止,稍深一档 */
-  --sidebar-fg: #1f2937;             /* 主文字:深石墨 */
-  --sidebar-fg-secondary: #57606a;   /* 次文字 .62 灰 */
-  --sidebar-fg-tertiary: #98a2b3;    /* 三级 .32 灰:divider / disabled */
-  --sidebar-divider: rgba(31, 41, 55, 0.10);
-  --sidebar-hover-bg: rgba(31, 41, 55, 0.06);
+  /* Sidebar(Claude Desktop 浅) */
+  --sidebar-bg:        #fafafa;
+  --sidebar-bg-2:      #f0f0f0;
+  --sidebar-fg:        #1f1f1f;
+  --sidebar-fg-2:      #5a5a5a;
+  --sidebar-fg-3:      #9a9a9a;
+  --sidebar-divider:   rgba(0, 0, 0, 0.08);
+  --sidebar-hover-bg:  rgba(0, 0, 0, 0.04);
 
-  /* ===== 焦点环 (第十一轮 2026-07-16 产品级打磨) =====
-   * 用户决定走极简硬边:浅色用纯黑 2px outline,深色用纯白 2px outline。
-   * offset 2px 让焦点框"浮"在元素外缘,不挤压布局。
-   * 锁测试:src/components/desktop/styles/__tests__/focus-ring.test.ts */
-  --focus-ring: #000000;
+  /* 焦点环 */
+  --focus-ring:        #000000;
   --focus-ring-offset: #ffffff;
 }
 
@@ -100,48 +87,36 @@
    选择器:`:root[data-theme="dark"]` 命中 `<html>`(SettingsView 真挂的位置),
    specificity 与 light `:root` 相同,但源码顺序在后,自动覆盖。 */
 :root[data-theme="dark"] {
-  --ink: #f5efe2;          /* 暖米白,与 light --cream 呼应 */
-  --muted: #c5d2b6;
-  --faint: #869980;
+  --ink:      #ededed;
+  --ink-2:    #a8a8a8;
+  --ink-3:    #6e6e6e;
 
-  --canvas: #214a35;       /* HSL(148,38%,22%) 森林底,提亮 7% + 饱和 +5%
-                             * WHY 用户反馈"深色无绿色":原 #1a3328 饱和 33% 太冷,
-                             * 在 DCI-P3 屏上读起来发青/发黑。这里 H=148 hue 不变,
-                             * L 从 15→22 提亮 7 个百分点,S 从 33→38 加 5 个百分点,
-                             * 让"宫崎骏森林绿"终于读成绿色而不是冷墨色 */
-  --paper: #2a5240;        /* HSL(148,35%,27%) 苔藓纸面,比 canvas 浅一档
-                             * 主背景 + sidebar 渐变都用它,务必读成绿 */
-  --paper-soft: #356349;
-  --paper-tint: #2f5944;
+  --paper:    #1a1a1a;
+  --paper-2:  #232323;
+  --paper-3:  #2c2c2c;
 
-  --line: #3a5640;
-  --line-strong: #4d6f54;
+  --line:     #2e2e2e;
+  --line-2:   #404040;
 
-  --forest: #5fa37f;       /* 宫崎骏森林绿,亮一档在深底上醒目 */
-  --forest-2: #7fbf9b;     /* 浅一档:hover/active */
-  --forest-soft: #23442f;  /* 深底 chip 背景 */
+  --accent:       #ededed;
+  --accent-soft:  #2c2c2c;
 
-  --sage: #9bb9aa;
-  --tea: #e0a45a;
+  --wechat:       #b5b5b5;
 
-  --wechat: #07c160;
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.40);
+  --shadow-sm: 0  7px 18px rgba(0, 0, 0, 0.25);
 
-  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.45);
-  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.30);
-  --shadow-sm: 0 7px 18px rgba(0, 0, 0, 0.18);
+  --sidebar-bg:        #161616;
+  --sidebar-bg-2:      #1f1f1f;
+  --sidebar-fg:        #ededed;
+  --sidebar-fg-2:      #a8a8a8;
+  --sidebar-fg-3:      #6e6e6e;
+  --sidebar-divider:   rgba(255, 255, 255, 0.08);
+  --sidebar-hover-bg:  rgba(255, 255, 255, 0.05);
 
-  /* ===== Sidebar 配色 (Claude Desktop 近黑) ===== */
-  --sidebar-bg: #1f1f1f;             /* 近黑,Claude Desktop 深 sidebar */
-  --sidebar-bg-2: #161616;           /* 渐变止,更深一档 */
-  --sidebar-fg: #ececec;             /* 主文字:暖灰 */
-  --sidebar-fg-secondary: #b5b5b5;
-  --sidebar-fg-tertiary: #6f6f6f;
-  --sidebar-divider: rgba(236, 236, 236, 0.10);
-  --sidebar-hover-bg: rgba(236, 236, 236, 0.06);
-
-  /* ===== 焦点环 (深色) ===== */
-  --focus-ring: #ffffff;
-  --focus-ring-offset: #1f1f1f;
+  --focus-ring:        #ffffff;
+  --focus-ring-offset: #1a1a1a;
 }
 
 /* ===== 顶层容器:全屏 single-layer grid(SHiTCH from ".window" wrapper)
@@ -236,8 +211,4 @@
 /* dark 主题下手绘装饰用更柔的笔触,避免在深色背景上像黑洞/疤痕 */
 .nexus-desktop[data-theme="dark"] .sketch-line ellipse[fill="none"] {
   stroke-opacity: 0.18;
-}
-.nexus-desktop[data-theme="dark"] .sketch-line ellipse[fill="var(--sage)"],
-.nexus-desktop[data-theme="dark"] .sketch-line ellipse[fill="var(--tea)"] {
-  fill-opacity: 0.06;
 }
