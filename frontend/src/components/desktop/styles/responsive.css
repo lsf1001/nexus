@@ -31,6 +31,9 @@
     overflow-x: auto;
   }
 
+  /* 移动端隐藏桌面端顶部 38px traffic-light 拖拽区,避免挤占 3 区网格 */
+  .sidebar-drag { display: none; }
+
   .sidebar-brand { grid-area: brand; }
   .sidebar .sidebar-section { grid-area: section; flex-direction: row; align-items: center; }
   .sidebar .sidebar-section-title { display: none; }

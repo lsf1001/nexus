@@ -97,7 +97,9 @@ export function DesktopShell() {
     currentConversationId,
     onSelectConversation,
     onDeleteConversation,
-    onNewTask,
+    // 新建对话:既重置会话又导航到 /chat(handleNewTask 内含 navigate)。
+    // Sidebar 单测在无 Router 环境渲染,故导航放外壳层而非 Sidebar 内部。
+    onNewTask: handleNewTask,
     modelName,
     wsConnected,
     wechatConnected,

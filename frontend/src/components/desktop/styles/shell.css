@@ -802,9 +802,115 @@
   padding: 8px 0;
 }
 
-.sidebar-footer-version {
-  padding: 10px 18px 12px;
-  font-size: 11px;
-  color: var(--ink-3);
+.sidebar-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 12px;
   border-top: 1px solid var(--line);
+}
+
+.sidebar-version {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+/* ===== Task 2.2:Claude 风格左 rail 分区(品牌 / 新对话 / 搜索 / Recents / Starred)=====
+ * `.sidebar-section` 占满中间可滚动区;`.recent-panel` 单独 overflow 滚动,
+ * 让搜索框 / 新对话按钮钉在上方。锁测试见 a11y-polish.test.ts(recent-panel
+ * 必须带 aria-live)与 Sidebar.test.tsx(搜索过滤)。 */
+.sidebar-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 4px;
+}
+
+/* 新对话主按钮 —— 全宽、左对齐、浅边框(Claude Desktop 风格)。
+ * 用 .sidebar 作用域提升特异性,压过 shadcn Button outline 变体的默认底色。 */
+.sidebar .btn-new-task {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+  border: 1px solid var(--sidebar-divider);
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-fg);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.sidebar .btn-new-task:hover {
+  background: var(--sidebar-fg-tertiary);
+  color: var(--sidebar-fg);
+}
+.plus-mark {
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.sidebar-search {
+  width: 100%;
+  border: 1px solid var(--sidebar-divider);
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-fg);
+  border-radius: var(--r-md);
+  padding: 7px 12px;
+  font-size: 13px;
+  outline: none;
+}
+.sidebar-search::placeholder {
+  color: var(--sidebar-fg-tertiary);
+}
+.sidebar-search:focus-visible {
+  border-color: var(--sidebar-fg-tertiary);
+}
+
+.sidebar-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--sidebar-fg-tertiary);
+  padding: 4px 4px 0;
+}
+
+.recent-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.no-match {
+  padding: 12px 14px;
+  color: var(--sidebar-fg-tertiary);
+  font-size: 12px;
+}
+
+.sidebar-starred {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.account-trigger {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 12px;
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-fg);
+  border: 1px solid var(--sidebar-divider);
 }
