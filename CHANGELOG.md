@@ -7,6 +7,47 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ### [Unreleased] — Pre-release hardening (2026-07-14)
 
+#### Fixed — Sidebar 响应式断点误触发 (第十三轮 2026-07-17)
+
+引入 `PreferencesDrawer` 后用户反馈"侧栏塌了,微信通道四个字被竖排成
+微|信|通|道"。根因:`responsive.css` 旧断点 `@media (max-width: 900px)`
+在 800-900px 视口误入移动端布局 — sidebar 被切成横向 3 列
+(`brand section footer`),`.btn-new-task` / `.recent-panel` 整段
+`display: none`,`.footer-link` 压缩到 32px 宽 → flex 把"微信通道"挤成
+每字一行。
+
+修复:`responsive.css:18` 断点从 `900px` 改 `760px`(真移动端尺寸)。
+800-900 保持桌面纵向 5 段布局。Drawer 配套 CSS(`preferences-drawer.css`)
+未受影响 — 抽屉走 `width: min(420px, 92vw)` 自适应。
+
+#### Changed — 偏好 + 微信通道合并为右侧抽屉 (第十三轮 2026-07-17)
+
+按用户反馈"设置 / 微信通道独立子视图不一致,点侧栏会话列表不能跳转",
+参考 Claude Desktop / Linear / Cursor 主流做法,把两个入口合并为右侧抽屉:
+
+- 新增 `PreferencesDrawer` 组件:420px 右对齐滑入,内部 tab 切「通用」/「微信通道」,
+  浮在主区之上,ChatArea 不卸载
+- 删除 `SettingsView` + `WechatAssistantView` 两个全屏子视图,删除对应 e2e
+  入口路由(锁测试文件 `WechatAssistantView.test.tsx` 同步删除)
+- `DesktopView` 类型收窄为 `'setup' | 'chat'`(移除 `'settings' | 'wechat'`)
+- 侧栏顶齿轮 → 抽屉通用 tab;侧栏底微信通道按钮 → 抽屉微信通道 tab
+- 全局 Esc 关闭路径在 `closeTopModal` 列表里把 `.preferences-drawer-overlay`
+  放最前,优先关抽屉
+- e2e `settings.spec.ts` + `wechat-channel.spec.ts` + `journey-wechat-bound-receive`
+  全部改写,验证抽屉 + 关闭后主区不卸载
+- a11y 锁测试 `a11y-polish.test.ts` 由引用 `SettingsView.tsx` 改为 `PreferencesDrawer.tsx`,
+  锁深色模式 / 思考过程 toggle aria-pressed 契约
+- 8 个 commit 提交
+
+#### Fixed — Sidebar 会话点击无法跳转 (第十三轮 2026-07-17)
+
+Bug #26:用户在 `SettingsView` / `WechatAssistantView` 子视图时点侧栏会话列表,
+`onSelectConversation` 只更新 `currentConversationId`,view 没切回 chat,
+主区还显示旧视图,用户感知"点了会话什么都没发生"。
+
+修复:`Sidebar` task-item `handleSelect` 先 `onViewChange('chat')` 再
+`onSelectConversation(conv)`,鼠标点击和键盘 Enter/Space 同步处理。
+
 #### Added — 灰阶主题重构 (第十二轮 2026-07-17)
 
 按用户反馈"主题太彩色、要 Claude Desktop 双色灰阶",整轮重构品牌色:

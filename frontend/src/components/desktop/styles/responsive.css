@@ -1,15 +1,21 @@
 /* ===== 响应式 =====
  * 整窗不再嵌套 .window(commit 73f0956),所以 1180px 断点没有 .window 规则可改。
  * 这里只剩两个职责:
- *   - 1280 以下 prompt grid 仍可保留 2 列(只在 ≤900 才塌 1 列)
- *   - ≤900 移动端:sidebar 改横向紧凑布局,隐藏长列表 */
+ *   - 1280 以下 prompt grid 仍可保留 2 列(只在 ≤760 才塌 1 列)
+ *   - ≤760 移动端:sidebar 改横向紧凑布局,隐藏长列表
+ *
+ * 第十三轮(2026-07-17)Bug 修复:阈值从 900px 改 760px。
+ * 旧阈值 900 让 800-900px 区间(常见窗口尺寸)误入移动端布局 — sidebar 被切
+ * 成横向 3 列("brand section footer"),`.btn-new-task` / `.recent-panel`
+ * display:none,`.footer-link` 压缩到 32px 宽 → 文字"微信通道"被 flex 排成竖排。
+ * 760 是真移动端尺寸,800-900 保持桌面纵向布局。 */
 
 @media (max-width: 1180px) {
-  /* prompt grid 在更窄的断点(<=900px)才变 1 列 —— 1180 仍保留 2x2,
+  /* prompt grid 在更窄的断点(<=760px)才变 1 列 —— 1180 仍保留 2x2,
      因为 1180-264(sidebar) ≈ 916px main 足够 2 列卡片。 */
 }
 
-@media (max-width: 900px) {
+@media (max-width: 760px) {
 
   /* 移动端 sidebar 改成横向紧凑布局(brand + 对话列表 + 微信入口 一行)。
      关键:sidebar 高度要 < 90px,不能挤占 main 区空间。 */
