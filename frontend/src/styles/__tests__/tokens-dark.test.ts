@@ -95,6 +95,15 @@ function extractDarkBlock(css: string): string {
   throw new Error('未找到 dark 模式 token 块');
 }
 
+// light 模式 token 挂在纯 `:root { ... }`(非 `:root[data-theme="dark"]`)。
+// `:root\s*\{` 只命中 `:root {`,`:root[...]` 因为紧跟 `[` 不满足 `\s*\{`,
+// 所以不会误抓 dark 块。
+function extractLightBlock(css: string): string {
+  const m = css.match(/:root\s*\{[\s\S]*?\n\}/);
+  if (!m) throw new Error('未找到 light 模式 :root token 块');
+  return m[0];
+}
+
 function getToken(block: string, name: string): string {
   const re = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{3,8})\\s*;`);
   const m = block.match(re);
@@ -118,35 +127,46 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   };
 }
 
+// 第十二轮(2026-07-17)灰阶重构:整个主题去除彩色,所有 token 收敛为
+// 中性灰阶。锁"无彩色"——每个 token 的 HSV 饱和度必须 ≤ 0.10。这比
+// 之前"锁森林绿族"更强:任何色相(teal / 森林绿 / 暖棕)都不允许回归。
+// forest/canvas 等旧品牌 token 已删除,不再断言。
+const GRAY_TOKENS = [
+  'ink', 'ink-2', 'ink-3',
+  'paper', 'paper-2', 'paper-3',
+  'line', 'line-2',
+  'accent', 'accent-soft',
+  'wechat',
+  'sidebar-bg', 'sidebar-bg-2',
+  'sidebar-fg', 'sidebar-fg-2', 'sidebar-fg-3',
+];
+
+function saturation(hex: string): number {
+  const { r, g, b } = hexToRgb(hex);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  return max === 0 ? 0 : (max - min) / max;
+}
+
 describe('tokens.css dark 模式调色', () => {
   const block = extractDarkBlock(readTokens());
 
-  it('--forest 在 dark 模式必须为森林绿族(非 teal 蓝绿)', () => {
-    const forest = getToken(block, 'forest');
-    const { r, g, b } = hexToRgb(forest);
-    // 森林绿特征:G 通道是主色(最大);且不能是 teal/cyan 蓝绿
-    expect(g, `forest=${forest} G 通道太低,可能偏灰`).toBeGreaterThanOrEqual(80);
-    expect(g, `forest=${forest} G 应该是最大通道`).toBeGreaterThan(r);
-    // teal 蓝绿典型值:#25a4be (b=190/r=37=5.1) 或 #43b8cf (b=207/r=67=3.1)
-    // 森林绿族 b/r 应在 1.0~1.6 之间。> 2.0 视作 teal。
-    const tealRatio = r === 0 ? Infinity : b / r;
-    expect(tealRatio, `forest=${forest} B/R 比 ${tealRatio.toFixed(2)} 太大 → teal 蓝绿`).toBeLessThan(2.0);
+  it('dark 模式所有 token 饱和度 ≤ 0.10(锁防彩色回归)', () => {
+    for (const name of GRAY_TOKENS) {
+      const sat = saturation(getToken(block, name));
+      expect(sat, `dark --${name} 饱和度 ${sat.toFixed(2)} 过高(> 0.10)`).toBeLessThanOrEqual(0.10);
+    }
   });
+});
 
-  it('--canvas 不能是纯黑或冷黑(避免与森林绿脱钩)', () => {
-    const canvas = getToken(block, 'canvas');
-    expect(canvas.toLowerCase()).not.toBe('#000000');
-    expect(canvas.toLowerCase()).not.toBe('#080d15'); // 旧冷黑
-    const { g, b } = hexToRgb(canvas);
-    // 森林底:G 通道应该明显大于 B(避免 #0b111b 那种蓝黑)
-    expect(g, `canvas=${canvas} G 太低,可能偏冷`).toBeGreaterThan(b - 20);
-  });
+describe('tokens.css light 模式调色', () => {
+  const block = extractLightBlock(readTokens());
 
-  it('--ink 在 dark 模式应该是暖米白(非冷蓝白)', () => {
-    const ink = getToken(block, 'ink');
-    const { r, b } = hexToRgb(ink);
-    // 暖白:R ≥ B 至少 5
-    expect(r - b, `ink=${ink} R-B 差太小,可能偏冷`).toBeGreaterThanOrEqual(5);
+  it('light 模式所有 token 饱和度 ≤ 0.10(锁防彩色回归)', () => {
+    for (const name of GRAY_TOKENS) {
+      const sat = saturation(getToken(block, name));
+      expect(sat, `light --${name} 饱和度 ${sat.toFixed(2)} 过高(> 0.10)`).toBeLessThanOrEqual(0.10);
+    }
   });
 });
 
