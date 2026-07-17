@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useContextMenuTrigger, openContextMenuAt } from '../../lib/useContextMenuTrigger';
 import type { Conversation } from '../../types';
 import type { DesktopView } from './DesktopShell';
-import type { PreferencesTab } from './PreferencesDrawer';
+import type { PreferencesTab } from './PreferencesModal';
 
 export interface SidebarProps {
   onViewChange: (view: DesktopView) => void;
@@ -223,7 +223,7 @@ export function Sidebar({
         <button
           className={`footer-link footer-link--wechat ${wechatConnected ? 'is-connected' : ''}`}
           type="button"
-          onClick={() => onOpenPreferences('wechat')}
+          onClick={() => onOpenPreferences()}
           onContextMenu={copyWechatLink}
           aria-label={`微信通道 ${wechatConnected ? '已连接' : '未绑定'}`}
         >

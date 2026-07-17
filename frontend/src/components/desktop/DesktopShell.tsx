@@ -57,7 +57,6 @@ export function DesktopShell() {
 
   const [view, setView] = useState<DesktopView>(initialView);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
-  const [preferencesTab, setPreferencesTab] = useState<PreferencesTab>('general');
   const [wsConnected, setWsConnected] = useState(false);
 
   // 关键:useBootstrap 是 async 的,首次 render 时 initialView='setup',
@@ -83,12 +82,12 @@ export function DesktopShell() {
   };
 
   /**
-   * 第十三轮(2026-07-17):打开偏好抽屉。
-   * 侧栏顶齿轮 → 不传 tab,默认 general
-   * 侧栏底微信按钮 → 传 'wechat',落点在微信通道 tab
+   * 第十三轮(2026-07-17):打开偏好模态。
+   * PreferencesModal 不吃 tab 参数,齿轮 / 微信按钮统一入口。
+   * 签名兼容 ShellLayout 的 `(tab?: PreferencesTab) => void`,多余的 tab 由
+   * React/TS 静默忽略 — Task 5 会彻底清理 PreferencesTab 类型。
    */
-  const handleOpenPreferences = (tab: PreferencesTab = 'general'): void => {
-    setPreferencesTab(tab);
+  const handleOpenPreferences = (_tab?: PreferencesTab): void => {
     setPreferencesOpen(true);
   };
 

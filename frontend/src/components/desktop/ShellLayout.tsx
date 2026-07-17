@@ -6,7 +6,7 @@ import { ToastHost } from '../ToastHost';
 import { useStore } from '../../store';
 import type { Conversation } from '../../types';
 import type { DesktopShellContext, DesktopView } from './DesktopShell';
-import type { PreferencesTab } from './PreferencesDrawer';
+import type { PreferencesTab } from './PreferencesModal';
 
 export interface ShellLayoutProps {
   view: DesktopView;
