@@ -31,8 +31,8 @@
   width: fit-content;
   border: 1px solid rgba(49, 79, 56, 0.22);
   border-radius: 999px;
-  background: var(--forest-soft);
-  color: var(--forest);
+  background: var(--accent-soft);
+  color: var(--ink);
   padding: 8px 12px;
   font-size: 12px;
   font-weight: 800;
@@ -40,7 +40,7 @@
 }
 
 .nexus-desktop[data-theme="dark"] .kicker {
-  background: var(--forest-soft);
+  background: var(--accent-soft);
   color: #b6cfac;
   border-color: rgba(120, 160, 110, 0.30);
 }
@@ -92,21 +92,21 @@
 .wechat-bind-card p {
   margin: 0;
   line-height: 1.6;
-  color: var(--muted);
+  color: var(--ink-2);
 }
 
 .card-heading .step-tag {
   height: fit-content;
   border-radius: 999px;
-  background: var(--forest-soft);
-  color: var(--forest);
+  background: var(--accent-soft);
+  color: var(--ink);
   padding: 6px 11px;
   font-size: 12px;
   font-weight: 700;
 }
 
 .nexus-desktop[data-theme="dark"] .card-heading .step-tag {
-  background: var(--forest-soft);
+  background: var(--accent-soft);
   color: #b6cfac;
 }
 
@@ -131,11 +131,11 @@
 }
 
 .nexus-desktop[data-theme="dark"] .setup-card input {
-  background: var(--paper-soft);
+  background: var(--paper-2);
 }
 
 .setup-card input:focus {
-  border-color: var(--forest);
+  border-color: var(--ink);
   background: var(--paper);
   box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.18);
 }
@@ -149,14 +149,14 @@
 .setting-row input:focus-visible,
 .wechat-bind-card input:focus-visible {
   outline: none;
-  border-color: var(--forest);
+  border-color: var(--ink);
   box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.20);
 }
 
 .hint {
   border-radius: var(--r-md);
-  background: var(--forest-soft);
-  color: var(--forest);
+  background: var(--accent-soft);
+  color: var(--ink);
   padding: 12px 13px;
   font-size: 13px;
   font-weight: 600;
@@ -165,7 +165,7 @@
 }
 
 .nexus-desktop[data-theme="dark"] .hint {
-  background: var(--forest-soft);
+  background: var(--accent-soft);
   color: #b6cfac;
 }
 
@@ -196,19 +196,28 @@
 }
 
 .btn-primary {
-  background: var(--forest);
-  color: var(--paper-tint);
-  box-shadow: 0 6px 16px rgba(49, 79, 56, 0.20);
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.20);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--forest-2);
+  background: var(--ink-2);
   transform: translateY(-1px);
 }
 
 .btn-primary:disabled {
   opacity: 0.48;
   cursor: not-allowed;
+}
+
+.nexus-desktop[data-theme="dark"] .btn-primary {
+  background: var(--accent);
+  color: var(--paper);
+}
+
+.nexus-desktop[data-theme="dark"] .btn-primary:hover:not(:disabled) {
+  background: var(--paper-3);
 }
 
 .btn-secondary {
@@ -218,13 +227,13 @@
 }
 
 .nexus-desktop[data-theme="dark"] .btn-secondary {
-  background: var(--paper-soft);
+  background: var(--paper-2);
   border-color: var(--line);
 }
 
 .btn-secondary:hover {
-  background: var(--paper-soft);
-  border-color: var(--line-strong);
+  background: var(--paper-2);
+  border-color: var(--line-2);
 }
 
 .actions {
@@ -268,7 +277,7 @@
 }
 
 .nexus-desktop[data-theme="dark"] .wechat-benefits span {
-  background: var(--paper-soft);
+  background: var(--paper-2);
 }
 
 .wechat-status-chip {
@@ -289,8 +298,8 @@
 }
 
 .wechat-status-chip.connected {
-  background: var(--forest-soft);
-  color: var(--forest);
+  background: var(--accent-soft);
+  color: var(--ink);
 }
 
 .nexus-desktop[data-theme="dark"] .wechat-status-chip.connected {
@@ -311,7 +320,7 @@
 }
 
 .nexus-desktop[data-theme="dark"] .wechat-status-list > div {
-  background: var(--paper-soft);
+  background: var(--paper-2);
 }
 
 /* 微信收件箱：列出最近 wechat_message 事件的内容 */
@@ -371,7 +380,7 @@
 }
 
 .inbox-time {
-  color: var(--muted);
+  color: var(--ink-2);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -395,7 +404,7 @@
 }
 
 .wechat-status-list span {
-  color: var(--muted);
+  color: var(--ink-2);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -457,7 +466,7 @@
 }
 
 .setting-row span {
-  color: var(--muted);
+  color: var(--ink-2);
   margin-top: 4px;
   font-size: 13px;
   line-height: 1.5;
@@ -487,14 +496,14 @@
 }
 
 .nexus-desktop[data-theme="dark"] .setting-row .toggle {
-  background: var(--paper-soft);
+  background: var(--paper-2);
   border-color: var(--line);
 }
 
 .setting-row .toggle.is-on {
-  background: var(--forest);
+  background: var(--ink);
   color: var(--paper);
-  border-color: var(--forest);
+  border-color: var(--ink);
 }
 
 /* 不可点击的 toggle（如 "稍后开放"）：调暗 + 灰背景 + cursor: not-allowed。
@@ -504,7 +513,7 @@
 .nexus-desktop .setting-row .toggle.is-disabled {
   background: rgba(184, 157, 114, 0.10);
   border-color: rgba(184, 157, 114, 0.20);
-  color: var(--muted);
+  color: var(--ink-2);
   cursor: not-allowed;
   font-weight: 600;
   font-style: italic;
@@ -517,14 +526,14 @@
 }
 
 .nexus-desktop[data-theme="dark"] .setting-row .toggle.is-on {
-  background: var(--forest-2);
+  background: var(--ink-2);
   color: var(--paper);
-  border-color: var(--forest-2);
+  border-color: var(--ink-2);
 }
 
 .nexus-desktop[data-theme="dark"] .setting-row .toggle {
-  background: var(--paper-soft);
-  color: var(--muted);
+  background: var(--paper-2);
+  color: var(--ink-2);
   border-color: var(--line);
 }
 
@@ -555,7 +564,7 @@
   margin: 0;
   max-width: 520px;
   line-height: 1.78;
-  color: var(--muted);
+  color: var(--ink-2);
   font-size: 15px;
 }
 
@@ -588,7 +597,7 @@
 }
 
 .nexus-desktop[data-theme="dark"] .context-menu-floating {
-  background: var(--paper-soft);
+  background: var(--paper-2);
   border-color: var(--line);
   box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
 }
@@ -624,7 +633,7 @@
 .context-menu-floating .kbd-hint {
   margin-left: auto;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--ink-2);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   opacity: 0.7;
 }
@@ -655,7 +664,7 @@
   padding: 18px 20px;
   border: 1px solid var(--line);
   border-radius: 16px;
-  background: var(--paper-soft);
+  background: var(--paper-2);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -663,9 +672,9 @@
 }
 
 .channel-bind-card > button {
-  border: 1px solid var(--forest);
-  background: var(--forest);
-  color: var(--paper-tint);
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
   border-radius: 12px;
   padding: 8px 14px;
   font-size: 13px;
@@ -674,7 +683,7 @@
 }
 
 .channel-bind-card > button:hover {
-  background: var(--forest-strong, #2a4a30);
+  background: var(--ink);
 }
 
 .channel-inbox,
@@ -684,7 +693,7 @@
   padding: 14px 16px;
   border: 1px dashed var(--line);
   border-radius: 12px;
-  color: var(--muted);
+  color: var(--ink-2);
   font-size: 13px;
 }
 
@@ -692,7 +701,7 @@
   margin-bottom: 8px;
   background: transparent;
   border: 1px solid var(--line);
-  color: var(--muted);
+  color: var(--ink-2);
   border-radius: 8px;
   padding: 4px 10px;
   font-size: 12px;
@@ -716,7 +725,7 @@
 
 .channel-inbox-user {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--ink-2);
   margin-bottom: 4px;
 }
 
