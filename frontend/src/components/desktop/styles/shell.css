@@ -366,8 +366,8 @@
 }
 
 .channel-card .status-dot.is-online {
-  background: var(--wechat);
-  box-shadow: 0 0 0 5px rgba(7, 193, 96, 0.12);
+  background: var(--ink-2);
+  box-shadow: 0 0 0 5px rgba(0, 0, 0, 0.12);
 }
 
 /* 侧边栏底部 — 现在只放微信通道一行(设置已移到顶部 brand 区) */
@@ -437,7 +437,7 @@
   padding: 0 6px;
   margin-left: 8px;
   border-radius: 999px;
-  background: var(--wechat);
+  background: var(--ink-2);
   color: #fff;
   font-size: 11px;
   font-weight: 800;
@@ -628,7 +628,7 @@
 .model-switcher-item.is-active {
   font-weight: 700;
   background: var(--paper-soft, rgba(7, 193, 96, 0.06));
-  color: var(--forest, #2a4a30);
+  color: var(--ink);
 }
 
 .model-switcher-dot {
@@ -705,8 +705,8 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--wechat);
-  box-shadow: 0 0 0 3px rgba(7, 193, 96, 0.15);
+  background: var(--ink-2);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.15);
   animation: pulse 2.4s ease-in-out infinite;
 }
 
@@ -721,7 +721,7 @@
 }
 
 .status-pill.is-connecting .dot {
-  background: var(--tea);
+  background: var(--ink-3);
   box-shadow: 0 0 0 3px rgba(215, 167, 102, 0.15);
   animation: none;
 }
