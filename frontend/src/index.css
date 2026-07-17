@@ -46,7 +46,7 @@ html, body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(74, 124, 89, 0.45);
+  background: rgba(0, 0, 0, 0.45);
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -54,7 +54,7 @@ html, body {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(74, 124, 89, 0.75);
+  background: rgba(0, 0, 0, 0.75);
   background-clip: padding-box;
   border: 2px solid transparent;
 }
@@ -62,7 +62,7 @@ html, body {
 /* 聊天滚动容器专用：Firefox 兼容 + 稳定 gutter */
 .chat-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(74, 124, 89, 0.45) rgba(0, 0, 0, 0.04);
+  scrollbar-color: rgba(0, 0, 0, 0.45) rgba(0, 0, 0, 0.04);
   scrollbar-gutter: stable;
 }
 
@@ -73,15 +73,15 @@ html, body {
 }
 
 .prose code {
-  background: rgba(74, 124, 89, 0.1);
+  background: rgba(0, 0, 0, 0.08);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
 }
 
 .prose pre {
-  background: #2d4a3a;
-  color: #e5e5e5;
+  background: #1a1a1a;
+  color: #f5f5f5;
   padding: 16px 20px;
   border-radius: 8px;
   overflow-x: auto;
@@ -120,7 +120,7 @@ html, body {
   position: relative;
   width: 40px;
   height: 20px;
-  background: #4a7c59;
+  background: #1f1f1f;
   border-radius: 10px;
   cursor: pointer;
   transition: background 0.3s ease;
@@ -139,7 +139,7 @@ html, body {
 }
 
 .toggle-switch.off {
-  background: #9CA3AF;
+  background: #b5b5b5;
 }
 
 .toggle-switch.off::after {
