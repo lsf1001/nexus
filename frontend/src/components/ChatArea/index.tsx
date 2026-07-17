@@ -224,6 +224,7 @@ export function ChatArea({
             showThinking={showThinking}
             isLoading={isLoading}
             onCopy={handleCopyMessage}
+            onRetry={handleRetry}
           />
         )}
         {pendingClarification && (

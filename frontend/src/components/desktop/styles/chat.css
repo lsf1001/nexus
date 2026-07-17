@@ -84,7 +84,7 @@
 }
 
 .message-row.is-user {
-  align-items: flex-end;
+  align-items: flex-start;
 }
 
 .message-row.is-assistant {
@@ -109,7 +109,7 @@
   user-select: none;
 }
 .message-row.is-user .message-timestamp {
-  text-align: right;
+  text-align: left;
 }
 .message-row.is-assistant .message-timestamp {
   text-align: left;
@@ -118,67 +118,123 @@
   color: rgba(255, 255, 255, 0.45);
 }
 
-/* 用户气泡：森林绿，呼应主色 */
+/* 用户块(Claude 三层结构 · 第一层):无边框、加粗、左侧 1px 浅竖线建立身份。
+ * 文本用前景色(不再用反白绿底),与页面自然融合。 */
 .message-user {
-  background: var(--ink);
-  color: var(--paper);
-  border-top-right-radius: 9px;
-  box-shadow: 0 14px 30px rgba(49, 79, 56, 0.18);
+  background: transparent;
+  color: var(--foreground);
+  border: 0;
+  border-left: 2px solid var(--muted-foreground);
+  border-radius: 0;
+  box-shadow: none;
+  padding-left: 16px;
 }
 
 .nexus-desktop[data-theme="dark"] .message-user {
-  background: var(--accent);
-  color: var(--paper);
+  background: transparent;
+  color: var(--foreground);
+  border-color: var(--muted-foreground);
 }
 
 .message-user .message-markdown {
-  color: var(--paper);
+  color: var(--foreground);
+  font-weight: 600;
 }
 
-/* 助手气泡：米色卡 */
+/* 助手块(Claude 三层结构 · 第二层):极浅背景(≈#FAFAFA,用 --muted token),
+ * 与无边框的用户块形成层级差, gently 区分。 */
 .message-assistant {
-  background: rgba(255, 252, 246, 0.94);
-  border: 1px solid var(--line);
-  color: var(--ink);
-  border-top-left-radius: 9px;
-  box-shadow: 0 16px 36px rgba(71, 52, 25, 0.06);
+  background: var(--muted);
+  border: 0;
+  color: var(--foreground);
+  border-radius: var(--r-lg);
+  box-shadow: none;
 }
 
 .nexus-desktop[data-theme="dark"] .message-assistant {
-  background: var(--paper-2);
-  border-color: var(--line);
+  background: var(--muted);
+  border-color: transparent;
+  color: var(--foreground);
 }
 
 .message-assistant .message-markdown {
-  color: var(--ink);
+  color: var(--foreground);
 }
 
-/* 复制按钮：hover 出现 */
-.copy-button {
+/* 悬停工具栏(Claude 三层结构 · 第三层):紧贴内容右上角,group-hover 从右侧滑入。
+ * Copy / Quote / Retry 三个 icon 按钮,标签由 shadcn Tooltip 提供。 */
+.hover-toolbar {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--popover) 88%, transparent);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  opacity: 0;
+  transform: translateX(8px);
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.nexus-desktop[data-theme="dark"] .hover-toolbar {
+  background: color-mix(in srgb, var(--popover) 82%, transparent);
+}
+
+.message-bubble:hover .hover-toolbar,
+.message-bubble:focus-within .hover-toolbar {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.toolbar-btn {
   width: 28px;
   height: 28px;
-  border: 0;
-  border-radius: 10px;
-  background: rgba(49, 79, 56, 0.08);
-  color: var(--ink-2);
   display: grid;
   place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--foreground);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 140ms ease, background-color 140ms ease, color 140ms ease;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
-.message-bubble:hover .copy-button,
-.copy-button:focus-visible {
-  opacity: 1;
+.toolbar-btn:hover {
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
 }
 
-.copy-button:hover {
-  background: rgba(49, 79, 56, 0.14);
-  color: var(--ink);
+.toolbar-btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* 复制后"已复制"微气泡:紧贴右上角,300ms 后由组件卸载淡出 */
+.copy-flash {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 3;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--foreground);
+  color: var(--background);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  pointer-events: none;
+  animation: copy-flash-in 140ms ease-out;
+}
+
+@keyframes copy-flash-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* 思考过程：暗色卡片配绿叶图标。第九轮改为可折叠,toggle 占顶部
@@ -424,6 +480,94 @@
   border: 1px solid rgba(74, 124, 89, 0.20);
   object-fit: contain;
   background: rgba(0, 0, 0, 0.04);
+}
+
+/* 代码块(Claude 风格):低饱和蓝灰卡 + 右上角复制微气泡。
+ * "syntax-ish" = 蓝灰等宽 + 浅边框观感,不做 token 级高亮。 */
+.code-block {
+  position: relative;
+  margin: 10px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: hsl(215 25% 96%);
+  overflow: hidden;
+}
+
+.nexus-desktop[data-theme="dark"] .code-block {
+  background: hsl(215 18% 16%);
+  border-color: var(--line);
+}
+
+.code-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--popover) 78%, transparent);
+  color: hsl(215 18% 35%);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.nexus-desktop[data-theme="dark"] .code-copy-btn {
+  background: color-mix(in srgb, var(--popover) 40%, transparent);
+  color: hsl(215 18% 78%);
+}
+
+.code-block:hover .code-copy-btn,
+.code-copy-btn:focus-visible {
+  opacity: 1;
+}
+
+.code-copy-btn:hover {
+  background: color-mix(in srgb, var(--popover) 94%, transparent);
+}
+
+.code-flash {
+  position: absolute;
+  top: 8px;
+  right: 40px;
+  z-index: 3;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: hsl(215 18% 30%);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  pointer-events: none;
+  animation: copy-flash-in 140ms ease-out;
+}
+
+.code-pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: hsl(215 20% 32%);
+  background: transparent;
+  white-space: pre;
+  word-break: normal;
+}
+
+.nexus-desktop[data-theme="dark"] .code-pre {
+  color: hsl(215 18% 82%);
+}
+
+.code-block code {
+  font-family: var(--font-mono);
+  background: transparent;
+  padding: 0;
+  color: inherit;
 }
 
 /* Loading 三点跳动 */
@@ -907,10 +1051,10 @@
 
 .message-list { max-width: 790px; gap: 22px; }
 .message-bubble { max-width: 700px; border-radius: 16px; padding: 14px 16px; }
-.message-user { background: linear-gradient(145deg, var(--ink), var(--ink-2)); box-shadow: 0 12px 28px rgba(49, 79, 56, 0.22); border-bottom-right-radius: 5px; }
-.message-assistant { background: var(--paper); border-color: var(--line); box-shadow: 0 8px 22px rgba(91, 65, 34, 0.06); border-bottom-left-radius: 5px; }
+/* Claude 三层结构覆盖:用户块=左侧 1px 浅线 + 加粗;助手块=极浅背景 */
+.message-user { background: transparent; border: 0; border-left: 2px solid var(--muted-foreground); color: var(--foreground); box-shadow: none; border-radius: 0; }
+.message-assistant { background: var(--muted); border: 0; color: var(--foreground); box-shadow: none; border-radius: var(--r-lg); }
 .message-markdown { font-size: 15px; line-height: 1.8; }
-.copy-button { background: #edf7f8; color: #377989; }
 
 /* 第六轮(2026-07-15):composer-shell 在 dark 模式下用 paper-soft 替代 paper,
  * 因为 paper (#2a5240) === 整窗 canvas 色,composer 浮不出来;paper-soft

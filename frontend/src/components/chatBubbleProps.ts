@@ -22,6 +22,10 @@ export interface ChatBubbleProps {
   message: Message;
   showThinking?: boolean;
   onCopy?: (content: string) => void;
+  /** 悬停工具栏"引用":把消息文本交给父级(未接时回落为剪贴板引用块)。 */
+  onQuote?: (content: string) => void;
+  /** 悬停工具栏"重试":重发最后一条用户消息。 */
+  onRetry?: () => void;
 }
 
 export function chatBubblePropsAreEqual(

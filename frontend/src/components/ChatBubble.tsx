@@ -1,6 +1,15 @@
-import { memo, useEffect, useState } from 'react';
+import {
+  memo,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  isValidElement,
+} from 'react';
+import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Copy, Quote, RotateCw } from 'lucide-react';
 import { useContextMenuTrigger } from '../lib/useContextMenuTrigger';
 import { remarkPathLinkify } from '../lib/remarkPathLinkify';
 import { ToolCallCard } from './ChatArea/ToolCallCard';
@@ -8,6 +17,7 @@ import {
   chatBubblePropsAreEqual,
   type ChatBubbleProps,
 } from './chatBubbleProps';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 
 /** 第九轮(2026-07-16):思考块折叠偏好 — localStorage key,
  * 用户上次展开/折叠决定下次默认状态。
@@ -36,8 +46,80 @@ function formatTimestamp(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
 }
 
+/** 递归提取 React 子树的纯文本(fenced code block 复制用)。 */
+function extractText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractText).join('');
+  if (isValidElement(node)) {
+    return extractText((node.props as { children?: ReactNode }).children);
+  }
+  return '';
+}
+
+/**
+ * 代码块:低饱和蓝灰卡 + 右上角"已复制"微气泡(复制后 300ms 淡出)。
+ * 不引入语法高亮依赖 —— "syntax-ish" 指蓝灰等宽 + 浅边框的观感,
+ * 真正 token 着色留给后续任务。
+ */
+function CodeBlock({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  const onCopy = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(code).catch(() => {});
+    }
+    setCopied(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(false), 300);
+  };
+
+  return (
+    <div className="code-block">
+      <button
+        type="button"
+        className="code-copy-btn"
+        onClick={onCopy}
+        aria-label="复制代码"
+        title="复制代码"
+      >
+        <Copy size={13} aria-hidden="true" />
+      </button>
+      {copied && <span className="code-flash" aria-hidden="true">已复制</span>}
+      <pre className="code-pre"><code>{code}</code></pre>
+    </div>
+  );
+}
+
+/** 悬停工具栏单按钮:shadcn Tooltip 包裹 icon 标签。 */
+function ToolbarButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" className="toolbar-btn" onClick={onClick} aria-label={label}>
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** 内部函数组件 — 默认 export 用 React.memo 包装后导出。 */
-function ChatBubbleInner({ message, showThinking = true, onCopy }: ChatBubbleProps) {
+function ChatBubbleInner({ message, showThinking = true, onCopy, onQuote, onRetry }: ChatBubbleProps) {
   const isUser = message.role === 'user';
   const roleClass = isUser ? 'is-user' : 'is-assistant';
 
@@ -51,54 +133,84 @@ function ChatBubbleInner({ message, showThinking = true, onCopy }: ChatBubblePro
     }
   }, [thinkingExpanded]);
 
-  const handleCopy = () => {
-    const text = message.content || message.thinking || '';
-    onCopy?.(text);
-  };
+  // 复制"已复制"微气泡状态(消息级,300ms 淡出)
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+  }, []);
+
+  const flashCopy = useCallback(() => {
+    setCopied(true);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(false), 300);
+  }, []);
+
+  /** 构造复制/引用文本:思考 + 正文。 */
+  const buildCopyText = useCallback(() => {
+    const parts: string[] = [];
+    if (message.thinking) parts.push(`[思考] ${message.thinking}`);
+    if (message.content) parts.push(message.content);
+    return parts.join('\n\n');
+  }, [message.thinking, message.content]);
+
+  const handleCopy = useCallback(() => {
+    const text = buildCopyText();
+    if (onCopy) onCopy(text);
+    else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    flashCopy();
+  }, [onCopy, buildCopyText, flashCopy]);
+
+  const handleQuote = useCallback(() => {
+    const text = buildCopyText();
+    if (onQuote) {
+      onQuote(text);
+      flashCopy();
+      return;
+    }
+    // 自包含回退:把消息引用(> 前缀)写入剪贴板,无需父级接线
+    const quoted = text.split('\n').map((l) => `> ${l}`).join('\n');
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(quoted).catch(() => {});
+    }
+    flashCopy();
+  }, [onQuote, buildCopyText, flashCopy]);
+
+  const handleRetry = useCallback(() => {
+    onRetry?.();
+  }, [onRetry]);
 
   const timestamp = message.createdAt ? formatTimestamp(message.createdAt) : '';
 
-  // 右击消息任意位置 → 弹"复制 消息"菜单（user / assistant 都支持）
-  const handleContextMenu = useContextMenuTrigger(
-    () => {
-      const parts: string[] = [];
-      if (message.thinking) parts.push(`[思考] ${message.thinking}`);
-      if (message.content) parts.push(message.content);
-      return parts.join('\n\n');
-    },
-    { label: isUser ? '消息' : '回复' }
-  );
+  // 右击消息任意位置 → 弹"复制 消息"菜单(user / assistant 都支持)
+  const handleContextMenu = useContextMenuTrigger(buildCopyText, {
+    label: isUser ? '消息' : '回复',
+  });
 
   return (
-    <div className={`message-row ${roleClass}`}>
+    <div className={`message-row ${roleClass}`} data-role={message.role}>
       <div
-        className={`message-bubble ${isUser ? 'message-user' : 'message-assistant'}`}
+        className={`message-bubble group ${isUser ? 'message-user' : 'message-assistant'}`}
         onContextMenu={handleContextMenu}
       >
-        {!isUser && onCopy && (
-          <button
-            onClick={handleCopy}
-            className="copy-button"
-            type="button"
-            title="复制内容"
-            aria-label="复制消息"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-            </svg>
-          </button>
-        )}
+        {/* 悬停工具栏:Copy / Quote / Retry,从右侧滑入,group-hover 显隐 */}
+        <div className="hover-toolbar" role="toolbar" aria-label="消息操作">
+          <TooltipProvider delayDuration={300}>
+            <ToolbarButton label="复制" onClick={handleCopy}>
+              <Copy size={14} aria-hidden="true" />
+            </ToolbarButton>
+            <ToolbarButton label="引用" onClick={handleQuote}>
+              <Quote size={14} aria-hidden="true" />
+            </ToolbarButton>
+            <ToolbarButton label="重试" onClick={handleRetry}>
+              <RotateCw size={14} aria-hidden="true" />
+            </ToolbarButton>
+          </TooltipProvider>
+        </div>
+        {copied && <span className="copy-flash" aria-hidden="true">已复制</span>}
+
         {showThinking && message.thinking && (
           <div className="thinking-card">
             <button
@@ -144,7 +256,7 @@ function ChatBubbleInner({ message, showThinking = true, onCopy }: ChatBubblePro
             }}
             components={{
               a: (props) => {
-                const { href, children } = props as { href?: string; children?: React.ReactNode };
+                const { href, children } = props as { href?: string; children?: ReactNode };
                 return (
                   <a
                     href={href ?? '#'}
@@ -162,6 +274,8 @@ function ChatBubbleInner({ message, showThinking = true, onCopy }: ChatBubblePro
                 // 设置 loading=lazy 避免长对话 100+ 张图片同时加载。
                 <img src={src} alt={alt} className="file-image" loading="lazy" />
               ),
+              // fenced code block → 蓝灰卡 + 复制微气泡
+              pre: ({ children }) => <CodeBlock code={extractText(children)} />,
             }}
           >{message.content}</ReactMarkdown>
         </div>
@@ -177,8 +291,9 @@ function ChatBubbleInner({ message, showThinking = true, onCopy }: ChatBubblePro
  *   content / thinking 已稳定,memo 直接跳过,ReactMarkdown 不重解析。
  * - 当前活跃 chunk 的 bubble props 变化(content / thinking 增量)→ 走重渲染。
  *
- * 注:`onCopy` 引用变化被刻意忽略 — MessageList 每次 re-render 会传新 closure,
- * 但复制回调的"是否执行"逻辑跟父级 re-render 无关,这个开销换 memo 命中很值。
+ * 注:`onCopy` / `onQuote` / `onRetry` 引用变化被刻意忽略 — MessageList 每次
+ * re-render 会传新 closure,但复制/引用/重试回调的"是否执行"逻辑跟父级
+ * re-render 无关,这个开销换 memo 命中很值。
  */
 const ChatBubble = memo(ChatBubbleInner, chatBubblePropsAreEqual);
 

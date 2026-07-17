@@ -17,6 +17,7 @@ export interface MessageListProps {
   showThinking: boolean;
   isLoading: boolean;
   onCopy?: (content: string) => void;
+  onRetry?: () => void;
 }
 
 export function MessageList({
@@ -24,6 +25,7 @@ export function MessageList({
   showThinking,
   isLoading,
   onCopy,
+  onRetry,
 }: MessageListProps) {
   return (
     <div className="message-list">
@@ -33,6 +35,7 @@ export function MessageList({
           message={msg}
           showThinking={showThinking}
           onCopy={onCopy}
+          onRetry={onRetry}
         />
       ))}
       {isLoading && (
