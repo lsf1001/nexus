@@ -5,7 +5,7 @@ import { useDarkModeRoot } from './hooks/useDarkModeRoot';
 import { useGlobalShortcuts, focusElement, closeTopModal } from './hooks/useGlobalShortcuts';
 import { useChannelStatusPolling } from '../../hooks/useChannelStatusPolling';
 import { useConversationCrud } from './hooks/useConversationCrud';
-import { PreferencesDrawer, type PreferencesTab } from './PreferencesDrawer';
+import { PreferencesModal, type PreferencesTab } from './PreferencesModal';
 import { ShellLayout } from './ShellLayout';
 import type { Conversation } from '../../types';
 
@@ -146,9 +146,8 @@ export function DesktopShell() {
         onSessionCreated={onSessionCreated}
         resetCounter={resetCounter}
       />
-      <PreferencesDrawer
+      <PreferencesModal
         open={preferencesOpen}
-        initialTab={preferencesTab}
         onClose={() => setPreferencesOpen(false)}
       />
     </>

@@ -1,0 +1,99 @@
+/* 第十四轮:从 preferences-drawer(右滑)改为 preferences-modal(居中模态)。
+ * 蒙层复用 .modal-overlay 基础样式,新类名 .preferences-modal-overlay。 */
+
+.modal-overlay.preferences-modal-overlay {
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nexus-desktop[data-theme="dark"] .modal-overlay.preferences-modal-overlay {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.preferences-modal {
+  width: min(480px, 92vw);
+  max-height: 88vh;
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  animation: preferences-modal-in 180ms ease-out;
+  outline: none;
+}
+
+@keyframes preferences-modal-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.preferences-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.preferences-modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.preferences-modal-close {
+  background: none;
+  border: 0;
+  font-size: 16px;
+  color: var(--ink-2);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.preferences-modal-close:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.preferences-modal-body {
+  padding: 8px 24px 24px;
+  overflow-y: auto;
+}
+
+.preferences-modal-body .setting-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.preferences-modal-body .setting-row:last-child {
+  border-bottom: 0;
+}
+
+.preferences-modal-body .setting-row label {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.preferences-modal-body .setting-row-meta {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.preferences-modal-body select,
+.preferences-modal-body input[type="checkbox"] {
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
