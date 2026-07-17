@@ -5,7 +5,7 @@ import { useDarkModeRoot } from './hooks/useDarkModeRoot';
 import { useGlobalShortcuts, focusElement, closeTopModal } from './hooks/useGlobalShortcuts';
 import { useChannelStatusPolling } from '../../hooks/useChannelStatusPolling';
 import { useConversationCrud } from './hooks/useConversationCrud';
-import { PreferencesModal, type PreferencesTab } from './PreferencesModal';
+import { PreferencesModal } from './PreferencesModal';
 import { ShellLayout } from './ShellLayout';
 import type { Conversation } from '../../types';
 
@@ -33,12 +33,6 @@ export interface DesktopShellContext {
 
 /**
  * 桌面端外壳组合层。每个职责拆到独立 hook / 子组件,本组件只负责把它们组装起来。
- * 之前 506 行的 8-职责单文件已拆为:
- *   - useBootstrap(模型配置检查 + 活跃模型名注入,首屏 RTT 减半)
- *   - useDarkModeRoot / useChannelStatusPolling
- *   - useConversationCrud(SELECT/DELETE/NEW race-guard + resetCounter)
- *   - ShellLayout(主结构 + 视图路由)
- *   - Sidebar(右侧栏 + 右键菜单)
  */
 export function DesktopShell() {
   const { isBootstrapping, initialView } = useBootstrap();
@@ -59,16 +53,9 @@ export function DesktopShell() {
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
 
-  // 关键:useBootstrap 是 async 的,首次 render 时 initialView='setup',
-  // 用 useState 同步 init 会导致 reload 后永远停在 setup。
-  // 改用 effect 跟随 initialView 变化同步 view —— **但仅在 bootstrap 期间
-  // 同步一次**,bootstrap 结束后不再覆盖用户手动导航(防 race:
-  // 用户在 bootstrap 期间点 wechat/settings,bootstrap 完成瞬间被抢回去)。
   const hasAppliedInitial = useRef(false);
   useEffect(() => {
     if (hasAppliedInitial.current) return;
-    // bootstrap 期间 'setup' 不会变,等到首次拿到真实 initialView (chat|setup)
-    // 才同步一次,之后用户导航完全自由。
     if (isBootstrapping) return;
     setView(initialView);
     hasAppliedInitial.current = true;
@@ -81,22 +68,10 @@ export function DesktopShell() {
     setView('chat');
   };
 
-  /**
-   * 第十三轮(2026-07-17):打开偏好模态。
-   * PreferencesModal 不吃 tab 参数,齿轮 / 微信按钮统一入口。
-   * 签名兼容 ShellLayout 的 `(tab?: PreferencesTab) => void`,多余的 tab 由
-   * React/TS 静默忽略 — Task 5 会彻底清理 PreferencesTab 类型。
-   */
-  const handleOpenPreferences = (_tab?: PreferencesTab): void => {
+  const handleOpenPreferences = (): void => {
     setPreferencesOpen(true);
   };
 
-  // 第十一轮(2026-07-16)产品级打磨:全局键盘快捷键
-  // 主流 agent 产品标配 — Claude Desktop / ChatGPT / Cursor 都用
-  //   - Cmd+N 新建对话 → 复用 handleNewTask
-  //   - Cmd+K 聚焦 sidebar 搜索框
-  //   - Cmd+/ 聚焦 composer textarea
-  //   - Esc 关闭最上层 modal(优先关偏好抽屉,其次其他 modal)
   useGlobalShortcuts({
     onNewTask: handleNewTask,
     onFocusSearch: () => focusElement('.sidebar-search input[type=search]'),
@@ -135,11 +110,9 @@ export function DesktopShell() {
         onViewChange={setView}
         conversations={conversations}
         currentConversationId={currentConversationId}
-        wechatConnected={wechatConnected}
         onSelectConversation={onSelectConversation}
         onDeleteConversation={onDeleteConversation}
         onNewTask={handleNewTask}
-        onOpenPreferences={handleOpenPreferences}
         context={context}
         onConnectedChange={setWsConnected}
         onSessionCreated={onSessionCreated}
