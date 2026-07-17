@@ -476,6 +476,150 @@
   color: var(--ink);
 }
 
+/* ===== Artifacts 右栏(三区布局第三列,Task 2.3)=====
+ * 默认不渲染(grid 第 3 轨塌缩为 0,`.chat-area` 全宽)。
+ * 有 artifact 时作为 auto 宽列出现(宽 380px),左分隔线 + 独立滚动。 */
+.artifacts-panel {
+  width: 380px;
+  min-width: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.nexus-desktop[data-theme="dark"] .artifacts-panel {
+  background: var(--paper);
+  border-left-color: var(--line);
+}
+
+.artifacts-panel-header {
+  flex: 0 0 auto;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.artifacts-panel-title {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.artifacts-panel-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  background: var(--paper-2);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.artifacts-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.artifact-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.artifact-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-2);
+}
+
+.artifact-card-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.artifact-copy {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink-2);
+  border-radius: var(--r-sm, 8px);
+  padding: 3px 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.artifact-copy:hover {
+  background: var(--paper-3);
+}
+
+.artifact-card-body {
+  padding: 10px;
+  min-width: 0;
+}
+
+.artifact-code {
+  margin: 0;
+  overflow-x: auto;
+  background: var(--paper-2);
+  border-radius: var(--r-sm, 8px);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.artifact-svg {
+  display: grid;
+  place-items: center;
+  background: var(--paper-2);
+  border-radius: var(--r-sm, 8px);
+  padding: 8px;
+}
+
+.artifact-svg svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.artifact-html {
+  width: 100%;
+  height: 320px;
+  border: 0;
+  border-radius: var(--r-sm, 8px);
+  background: #fff;
+}
+
+.artifact-markdown {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ===== Topbar 已删(2026-07-15 第六轮)=====
  * 原 topbar 66px 顶部条承载"当前会话标题 + 模型名 + 状态 pill"。
  * Claude Desktop 没有这层 —— 当前会话标题并入 sidebar 当前 task-item 的 is-current 标记,

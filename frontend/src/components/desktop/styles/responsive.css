@@ -16,6 +16,11 @@
 }
 
 @media (max-width: 760px) {
+  /* 移动端(≤760)不显示 Artifacts 右栏,避免挤占主区;桌面端才是三区体验。 */
+  .artifacts-panel {
+    display: none;
+  }
+
 
   /* 移动端 sidebar 改成横向紧凑布局(brand + 对话列表 + 微信入口 一行)。
      关键:sidebar 高度要 < 90px,不能挤占 main 区空间。 */

@@ -343,7 +343,10 @@ html, body {
   font-family: var(--font-sans);
   background: var(--paper);
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr);
+  /* 三区布局:左 264px Sidebar | 中 1fr(main/ChatArea) | 右 auto ArtifactsPanel。
+   * 右轨 auto:ArtifactsPanel 无 artifact 时返回 null(grid 无 item)→ 塌缩为 0 宽,
+   * 中列 1fr 吃满,`.chat-area` 保持全宽(e2e 契约)。有 artifact 时右轨=面板宽。 */
+  grid-template-columns: 264px minmax(0, 1fr) auto;
 }
 
 .nexus-desktop[data-theme="dark"] {
