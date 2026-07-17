@@ -157,7 +157,7 @@
 }
 
 .nexus-desktop[data-theme="dark"] {
-  background: var(--canvas);
+  background: var(--paper);
 }
 
 /* 拖拽区 — Tauri 2 macOS chrome 需要给"标题栏区域"打 drag,其它 UI 自动 no-drag。
