@@ -7,6 +7,21 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ### [Unreleased] — Pre-release hardening (2026-07-14)
 
+#### Added — 灰阶主题重构 (第十二轮 2026-07-17)
+
+按用户反馈"主题太彩色、要 Claude Desktop 双色灰阶",整轮重构品牌色:
+token 体系 + 微信通道徽标 + 锁测试防彩色回归。
+
+- 主题从"森林绿 + 鼠尾草 + 茶叶 + 微信绿"四色品牌调改为 Claude Desktop
+  双色灰阶(浅色 ink / paper 二色,深色降饱和)
+- 新增 `ink / paper / line / accent` 三档 token 体系,删 `forest / sage /
+  tea / moss / wood / cream / canvas / muted / faint / paper-soft /
+  paper-tint / line-strong / forest-strong` 13 个老 token
+- 微信通道徽标灰阶化(识别色降饱和,保留 hint 用)
+- Toast 状态色(info/success/warn/error)保留(产品状态语义不能丢)
+- 5 个锁测试改断言(锁饱和度 ≤ 0.10,防彩色回归)
+- 13 个 commit 提交
+
 #### Added — Sidebar Claude Desktop 双色 + Stop 按钮红色 hover (第十轮 2026-07-16)
 
 按用户反馈"浅色用白色、深色用 Claude Desktop 的黑色" + "消息窗口添加可以停止
