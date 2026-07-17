@@ -1,15 +1,16 @@
 "use client"
 
-import { useTheme } from "next-themes"
+import { useStore } from "@/store"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+  // Theming is driven by the Zustand uiPrefs.darkMode store, not an external theme hook.
+  const darkMode = useStore((s) => s.darkMode)
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={(darkMode ? "dark" : "light") as ToasterProps["theme"]}
       className="toaster group"
       icons={{
         success: (
