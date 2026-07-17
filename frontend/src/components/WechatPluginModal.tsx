@@ -166,7 +166,7 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={handleClose}>
       <div className="bg-white rounded-2xl w-[400px] max-h-[90vh] overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
         {/* 头部 */}
-        <div className="bg-gradient-to-r from-[#4a7c59] to-[#2d4a3a] px-5 py-4 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-gray-900 to-gray-800 px-5 py-4 flex items-center justify-between">
           <h3 className="text-white font-semibold text-base flex items-center gap-2">
             <span className="text-xl">📱</span> 微信插件
           </h3>
@@ -181,24 +181,24 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
         <div className="p-6">
           {step === 'loading' && (
             <div className="text-center">
-              <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-[#f0f2ed] flex items-center justify-center">
+              <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
                 <span className="text-4xl animate-spin">⏳</span>
               </div>
-              <p className="text-[#5a6b52] text-sm">检查绑定状态...</p>
+              <p className="text-gray-500 text-sm">检查绑定状态...</p>
             </div>
           )}
 
           {step === 'idle' && (
             <div className="text-center">
-              <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-[#f0f2ed] flex items-center justify-center">
+              <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
                 <span className="text-4xl">💬</span>
               </div>
-              <p className="text-[#5a6b52] text-sm mb-6">
+              <p className="text-gray-500 text-sm mb-6">
                 绑定微信后，可以通过微信接收和发送消息
               </p>
               <button
                 onClick={handleGetQR}
-                className="w-full py-3 bg-[#4a7c59] hover:bg-[#3d6a4a] text-white rounded-xl font-medium transition-colors"
+                className="w-full py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium transition-colors"
               >
                 绑定微信
               </button>
@@ -207,12 +207,12 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
 
           {(step === 'qr' || step === 'scanning') && (
             <div className="text-center">
-              <p className="text-[#5a6b52] text-sm mb-4">{statusMessage}</p>
+              <p className="text-gray-500 text-sm mb-4">{statusMessage}</p>
               <div className="w-52 h-52 mx-auto mb-4 bg-white rounded-xl p-2 shadow-inner">
                 <canvas ref={canvasRef} className="w-full h-full" />
               </div>
-              <div className="flex items-center justify-center gap-2 text-sm text-[#8a9a7a]">
-                <div className="w-2 h-2 rounded-full bg-[#4a7c59] animate-pulse" />
+              <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
+                <div className="w-2 h-2 rounded-full bg-gray-900 animate-pulse" />
                 <span>等待扫码...</span>
               </div>
             </div>
@@ -220,28 +220,28 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
 
           {step === 'success' && (
             <div className="text-center">
-              <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-[#e8f5e9] flex items-center justify-center">
+              <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
                 <span className="text-4xl">✅</span>
               </div>
-              <p className="text-[#2d4a3a] font-medium mb-2">已绑定</p>
+              <p className="text-gray-900 font-medium mb-2">已绑定</p>
               {bindStatus?.account_id && (
-                <p className="text-[#8a9a7a] text-xs mb-4">
+                <p className="text-gray-400 text-xs mb-4">
                   账号: {bindStatus.account_id.slice(0, 12)}...
                 </p>
               )}
-              <p className="text-[#5a6b52] text-sm mb-4">
+              <p className="text-gray-500 text-sm mb-4">
                 现在可以通过微信与 Nexus 聊天了
               </p>
               <div className="space-y-2">
                 <button
                   onClick={handleClose}
-                  className="w-full py-3 bg-[#4a7c59] hover:bg-[#3d6a4a] text-white rounded-xl font-medium transition-colors"
+                  className="w-full py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium transition-colors"
                 >
                   完成
                 </button>
                 <button
                   onClick={handleGetQR}
-                  className="w-full py-2 text-[#5a6b52] text-sm hover:text-[#2d4a3a] transition-colors"
+                  className="w-full py-2 text-gray-500 text-sm hover:text-gray-900 transition-colors"
                 >
                   重新绑定新账号
                 </button>
@@ -255,10 +255,10 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
                 <span className="text-4xl">❌</span>
               </div>
               <p className="text-[#c62828] font-medium mb-2">出错了</p>
-              <p className="text-[#666] text-sm mb-6">{error}</p>
+              <p className="text-gray-500 text-sm mb-6">{error}</p>
               <button
                 onClick={handleRetry}
-                className="w-full py-3 bg-[#4a7c59] hover:bg-[#3d6a4a] text-white rounded-xl font-medium transition-colors"
+                className="w-full py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium transition-colors"
               >
                 重试
               </button>
