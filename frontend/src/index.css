@@ -1,20 +1,9 @@
 @import "tailwindcss";
 
 @theme {
-  --color-forest-start: #1a3d2a;
-  --color-forest-end: #0f2618;
-  --color-moss: #4a7c59;
-  --color-moss-dark: #3A6249;
-  --color-moss-light: #8fbc8f;
-  --color-cream: #faf8f5;
-  --color-cream-dark: #f0ebe3;
-  --color-wood: #d4a574;
-  --color-text-dark: #2c3e2d;
-  --color-text-muted: #5a6b52;
-  --color-border: #c8d4c0;
-  --color-toggle-off: #9CA3AF;
-  --color-moss-rgb: 74, 124, 89;
-  --color-thinking-text: #4a5d42;
+  --color-ink:   #1f1f1f;
+  --color-paper: #ffffff;
+  --color-line:  #e5e5e5;
 }
 
 /* 默认背景跟随系统外观,避免 macOS Dark Mode 下标题栏(深)和 body(浅)
@@ -22,13 +11,13 @@
 html, body {
   height: 100%;
   overflow: hidden;
-  background: #f5f7f2;
-  color: #1a1a1a;
+  background: #ffffff;
+  color: #1f1f1f;
 }
 @media (prefers-color-scheme: dark) {
   html, body {
-    background: #1a3328;
-    color: #f5efe2;
+    background: #1a1a1a;
+    color: #ededed;
   }
 }
 /* 第六轮(2026-07-15):JS 设的主题(在 <html data-theme="dark">)优先级高于
@@ -36,13 +25,13 @@ html, body {
    而 body 仍白。Claude Desktop 风格的暗色铺满整窗必须 body 也跟随。 */
 :root[data-theme="dark"],
 :root[data-theme="dark"] body {
-  background: #1a3328;
-  color: #f5efe2;
+  background: #1a1a1a;
+  color: #ededed;
 }
 :root[data-theme="light"],
 :root[data-theme="light"] body {
-  background: #f5f7f2;
-  color: #1a1a1a;
+  background: #ffffff;
+  color: #1f1f1f;
 }
 
 /* 滚动条样式 - 加强可见性 */
