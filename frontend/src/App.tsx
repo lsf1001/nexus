@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { DesktopShell } from './components/desktop/DesktopShell';
+import { RouterProvider } from 'react-router-dom';
+import { router } from './router';
 import { SplashView, type RuntimeStatus } from './components/desktop/SplashView';
 
 /**
@@ -33,7 +34,11 @@ function App() {
 
   if (!runtimeReady) return <SplashView />;
 
-  return <DesktopShell />;
+  // runtime 就绪后渲染路由(react-router HashRouter)。Splash/Setup 门控:
+  //  - Splash 由上面的 runtimeReady 控制;
+  //  - Setup 门控由 router 的 RequireModelConfigured / IndexRedirect 守卫实现,
+  //    未配置模型时重定向到 /setup。
+  return <RouterProvider router={router} />;
 }
 
 export default App;

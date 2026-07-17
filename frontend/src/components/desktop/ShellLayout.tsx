@@ -1,58 +1,32 @@
-import { ChatView } from './ChatView';
+import { Outlet } from 'react-router-dom';
 import { ContextMenuHost } from './ContextMenuHost';
-import { SetupView } from './SetupView';
 import { Sidebar } from './Sidebar';
 import { ToastHost } from '../ToastHost';
-import type { Conversation } from '../../types';
-import type { DesktopShellContext, DesktopView } from './DesktopShell';
+import type { DesktopShellContext } from './DesktopShell';
 
 export interface ShellLayoutProps {
-  view: DesktopView;
-  onViewChange: (view: DesktopView) => void;
-  conversations: Conversation[];
-  currentConversationId: string | null;
-  onSelectConversation: (conv: Conversation) => void;
-  onDeleteConversation: (id: string) => void;
-  onNewTask: () => void;
-  context: DesktopShellContext;
-  onConnectedChange: (connected: boolean) => void;
-  onSessionCreated: (sessionId: string, title: string) => void;
-  resetCounter: number;
+  /** DesktopShell 组装好的外壳上下文,通过 <Outlet context> 下发给子路由。 */
+  shellCtx: DesktopShellContext;
 }
 
-export function ShellLayout({
-  view,
-  onViewChange,
-  conversations,
-  currentConversationId,
-  onSelectConversation,
-  onDeleteConversation,
-  onNewTask,
-  context,
-  onConnectedChange,
-  onSessionCreated,
-  resetCounter,
-}: ShellLayoutProps) {
+/**
+ * 桌面端布局骨架:'.nexus-desktop' 根(含 data-theme,供 e2e / 深色模式选择器)
+ * + Sidebar + <main> 内的路由出口。视图内容由 react-router 子路由渲染,
+ * 不再由本地 view 枚举切换。
+ */
+export function ShellLayout({ shellCtx }: ShellLayoutProps) {
   return (
     <div className="nexus-desktop">
       <Sidebar
-        conversations={conversations}
-        currentConversationId={currentConversationId}
-        onSelectConversation={onSelectConversation}
-        onDeleteConversation={onDeleteConversation}
-        onNewTask={onNewTask}
+        conversations={shellCtx.conversations}
+        currentConversationId={shellCtx.currentConversationId}
+        onSelectConversation={shellCtx.onSelectConversation}
+        onDeleteConversation={shellCtx.onDeleteConversation}
+        onNewTask={shellCtx.onNewTask}
       />
 
       <main className="main">
-        {view === 'setup' && <SetupView onDone={() => onViewChange('chat')} />}
-        {view === 'chat' && (
-          <ChatView
-            context={context}
-            onConnectedChange={onConnectedChange}
-            onSessionCreated={onSessionCreated}
-            resetCounter={resetCounter}
-          />
-        )}
+        <Outlet context={shellCtx} />
       </main>
 
       <ContextMenuHost />
