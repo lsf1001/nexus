@@ -194,11 +194,11 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50" onClick={handleClose}>
       <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-[#2d4a3a]">
+        <div className="flex items-center justify-between px-6 py-4 bg-gray-900">
           <h2 className="text-lg font-semibold text-white">模型配置</h2>
           <button
             onClick={handleClose}
-            className="w-8 h-8 rounded-full bg-[#4a7c59] hover:bg-[#8fbc8f] text-white flex items-center justify-center transition-colors"
+            className="w-8 h-8 rounded-full bg-gray-900 hover:bg-gray-700 text-white flex items-center justify-center transition-colors"
           >
             ✕
           </button>
@@ -214,8 +214,8 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
                   key={model.id}
                   className={`p-4 rounded-2xl border transition-all ${
                     model.is_active
-                      ? 'border-[#4a7c59] bg-[#f0f7f1]'
-                      : 'border-[#e0dcd4] hover:border-[#8fbc8f]'
+                      ? 'border-gray-900 bg-gray-50'
+                      : 'border-gray-200 hover:border-gray-700'
                   }`}
                   onContextMenu={(e) =>
                     openContextMenuAt(
@@ -228,15 +228,15 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
                   <div className="flex items-start justify-between">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-[#2d4a3a]">{model.name}</span>
+                        <span className="font-medium text-gray-900">{model.name}</span>
                         {model.is_active && (
-                          <span className="px-2 py-0.5 bg-[#4a7c59] text-white text-xs rounded-full">
+                          <span className="px-2 py-0.5 bg-gray-900 text-white text-xs rounded-full">
                             使用中
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-[#6b7c6b] mt-1">{model.api_base}</p>
-                      <p className="text-xs text-[#6b7c6b]">
+                      <p className="text-xs text-gray-500 mt-1">{model.api_base}</p>
+                      <p className="text-xs text-gray-500">
                         温度参数：{model.temperature}
                       </p>
                     </div>
@@ -245,7 +245,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
                         <button
                           onClick={() => handleSwitch(model.id)}
                           disabled={loading || !model.api_key}
-                          className="px-3 py-1 text-xs rounded-lg bg-[#4a7c59] text-white hover:bg-[#2d4a3a] disabled:opacity-50"
+                          className="px-3 py-1 text-xs rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50"
                         >
                           切换
                         </button>
@@ -271,7 +271,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
               {/* 添加按钮 */}
               <button
                 onClick={handleCreateNew}
-                className="w-full py-3 rounded-xl border-2 border-dashed border-[#e0dcd4] text-[#6b7c6b] hover:border-[#4a7c59] hover:text-[#4a7c59] transition-colors"
+                className="w-full py-3 rounded-xl border-2 border-dashed border-gray-300 text-gray-500 hover:border-gray-900 hover:text-gray-900 transition-colors"
               >
                 + 添加模型
               </button>
@@ -286,39 +286,39 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
               )}
 
               <div>
-                <label className="block text-sm font-medium text-[#2d4a3a] mb-1">模型名称</label>
+                <label className="block text-sm font-medium text-gray-900 mb-1">模型名称</label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="例如: MiniMax-M3"
-                  className="w-full px-3 py-2 rounded-xl border border-[#e0dcd4] focus:border-[#4a7c59] focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-gray-900 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[#2d4a3a] mb-1">API 地址</label>
+                <label className="block text-sm font-medium text-gray-900 mb-1">API 地址</label>
                 <input
                   type="text"
                   value={formData.api_base}
                   onChange={(e) => setFormData({ ...formData, api_base: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-[#e0dcd4] focus:border-[#4a7c59] focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-gray-900 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[#2d4a3a] mb-1">API 密钥</label>
+                <label className="block text-sm font-medium text-gray-900 mb-1">API 密钥</label>
                 <input
                   type="password"
                   value={formData.api_key}
                   onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
                   placeholder="输入 API 密钥"
-                  className="w-full px-3 py-2 rounded-xl border border-[#e0dcd4] focus:border-[#4a7c59] focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-gray-900 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[#2d4a3a] mb-1">
+                <label className="block text-sm font-medium text-gray-900 mb-1">
                   温度参数：{formData.temperature}
                 </label>
                 <input
@@ -328,9 +328,9 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
                   step="0.1"
                   value={formData.temperature}
                   onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
-                  className="w-full accent-[#4a7c59]"
+                  className="w-full accent-gray-900"
                 />
-                <div className="flex justify-between text-xs text-[#6b7c6b]">
+                <div className="flex justify-between text-xs text-gray-500">
                   <span>精确</span>
                   <span>创意</span>
                 </div>
@@ -340,7 +340,7 @@ function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalPr
                 <button
                   onClick={handleSubmit}
                   disabled={loading}
-                  className="flex-1 py-2 rounded-xl bg-[#4a7c59] text-white hover:bg-[#2d4a3a] disabled:opacity-50 transition-colors"
+                  className="flex-1 py-2 rounded-xl bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 transition-colors"
                 >
                   {loading ? '保存中...' : '保存'}
                 </button>
