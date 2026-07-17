@@ -11,14 +11,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+// Task 1.2:tokens.css 已并入 index.css,测试改读 index.css 的 token 块。
 const TOKENS_PATH = join(
   __dirname,
   '..',
   '..',
-  'components',
-  'desktop',
-  'styles',
-  'tokens.css',
+  'index.css',
 );
 
 function readTokens(): string {

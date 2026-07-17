@@ -5,7 +5,7 @@
  *   - 浅色模式 = 纯黑 outline(在浅米白 sidebar / 白纸面都清晰可见)
  *   - 深色模式 = 纯白 outline(在近黑 sidebar / 苔藓纸面都清晰可见)
  *
- * 实现形式:读 tokens.css / shell.css 源文件,字符串定位 + 简单花括号平衡提取:
+ * 实现形式:读 index.css / shell.css 源文件,字符串定位 + 简单花括号平衡提取:
  *   - 找 `:root {` 起点 → 平衡到 `}` → 抽 `--focus-ring` 值(浅色必须是 #000000)
  *   - 找 `:root[data-theme="dark"] {` 起点 → 平衡到 `}` → 抽 `--focus-ring` 值
  *   - 找 `.nexus-desktop *:focus-visible {` 起点 → 平衡到 `}` → 抽规则体
@@ -17,7 +17,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const TOKENS_CSS = resolve(HERE, "../tokens.css");
+// Task 1.2:tokens.css 已并入 index.css,焦点环 token 改读 index.css。
+const TOKENS_CSS = resolve(HERE, "../../../../index.css");
 const SHELL_CSS = resolve(HERE, "../shell.css");
 const tokens = readFileSync(TOKENS_CSS, "utf8");
 const shell = readFileSync(SHELL_CSS, "utf8");

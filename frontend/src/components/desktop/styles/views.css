@@ -643,7 +643,7 @@
  * settings / wechat 现在跟 ChatView 同源:共用 .chat-status-bar 36px 高顶部条,
  *   左 = 视图标题,右 = .chat-status-action 返回按钮(由 shell.css 定义)。
  *   .chat-status-bar 整条是 data-tauri-drag-region,让 macOS chrome 整窗可拖,
- *   但单个按钮是 no-drag(tokens.css 全局 app-region: no-drag 自动覆盖)。*/
+ *   但单个按钮是 no-drag(index.css 全局 app-region: no-drag 自动覆盖)。*/
 
 /* ===== ChannelViewBase: 多通道共享的 bind 卡 + 收件箱 + children 槽 =====
  *

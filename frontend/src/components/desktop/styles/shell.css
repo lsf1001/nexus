@@ -1,5 +1,5 @@
 /* ===== 整体窗口 + 侧边栏 + 主区 + topbar ===== */
-/* 整窗网格已合进 tokens.css 的 .nexus-desktop(顶 264px sidebar + 余 main)
+/* 整窗网格已合进 index.css 的 .nexus-desktop(顶 264px sidebar + 余 main)
  * ——参考 Claude Desktop 全屏 native chrome,不再嵌套 .window 卡片。 */
 
 /* ===== 侧边栏(Claude Desktop 双色,2026-07-16 第十轮)=====

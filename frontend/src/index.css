@@ -3,40 +3,166 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
-@custom-variant dark (&:is(.dark *));
+/* 深色调由 data-theme="dark" 驱动(useDarkModeRoot 写 <html> 与 .nexus-desktop,
+   不写 .dark 类)。让 Tailwind 的 dark: 工具类响应 data-theme。 */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
-@theme {
-  --color-ink:   #1f1f1f;
-  --color-paper: #ffffff;
-  --color-line:  #e5e5e5;
+/* ===== 设计 Token：Claude 对齐中性色板 + 既有品牌 token 收敛 =====
+ * - shadcn 核心 token 用 Claude 对齐 HSL 三元组,经 @theme inline 暴露为 Tailwind
+ *   工具类(bg-background / text-foreground / border-border ...)。
+ * - 品牌 token(--ink / --paper / --line / --space-* / --font-* / --sidebar-* /
+ *   --focus-ring ...)保留原命名(无 color- 前缀),供 shell/chat/views.css 的
+ *   var() 直接引用,迁移面最小。
+ * - light token 挂 :root;dark 覆盖用 :root[data-theme="dark"](源码顺序在后,
+ *   命中 <html data-theme="dark">,自动覆盖 light)。 */
+
+:root {
+  /* —— shadcn 核心 token（Claude 对齐中性） —— */
+  --background: 0 0% 100%;
+  --foreground: 220 14% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 14% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 14% 11%;
+  --primary: 24 9% 18%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 220 14% 11%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 9% 46%;
+  --accent: 220 14% 96%;
+  --accent-foreground: 220 14% 11%;
+  --destructive: 0 72% 51%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 220 13% 60%;
+  --radius: 0.75rem;
+  --chart-1: 0 0% 87%;
+  --chart-2: 0 0% 56%;
+  --chart-3: 0 0% 44%;
+  --chart-4: 0 0% 37%;
+  --chart-5: 0 0% 27%;
+  --sidebar: 0 0% 98%;
+  --sidebar-foreground: 220 14% 11%;
+  --sidebar-primary: 24 9% 18%;
+  --sidebar-primary-foreground: 0 0% 98%;
+  --sidebar-accent: 220 14% 96%;
+  --sidebar-accent-foreground: 220 14% 11%;
+  --sidebar-border: 220 13% 91%;
+  --sidebar-ring: 220 13% 60%;
+
+  /* —— 品牌 token（既有命名,中性灰阶,供语义 CSS 引用） —— */
+  --ink: #1f1f1f;
+  --ink-2: #4a4a4a;
+  --ink-3: #8a8a8a;
+  --paper: #ffffff;
+  --paper-2: #f7f7f7;
+  --paper-3: #ededed;
+  --line: #e5e5e5;
+  --line-2: #d0d0d0;
+  --accent-soft: #ededed;
+  --wechat: #4a4a4a;
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.10);
+  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0  7px 18px rgba(0, 0, 0, 0.04);
+  --font-sans: "Geist Variable", "SF Pro Display", "PingFang SC", "Avenir Next",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --r-sm: 9px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-2xl: 28px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --font-xs: 12px;
+  --font-sm: 13px;
+  --font-base: 14px;
+  --font-md: 16px;
+  --font-lg: 20px;
+  --font-xl: 28px;
+  --font-2xl: 36px;
+  --sidebar-bg: #fafafa;
+  --sidebar-bg-2: #f0f0f0;
+  --sidebar-fg: #1f1f1f;
+  --sidebar-fg-2: #5a5a5a;
+  --sidebar-fg-3: #9a9a9a;
+  --sidebar-divider: rgba(0, 0, 0, 0.08);
+  --sidebar-hover-bg: rgba(0, 0, 0, 0.04);
+  --focus-ring: #000000;
+  --focus-ring-offset: #ffffff;
 }
 
-/* 默认背景跟随系统外观,避免 macOS Dark Mode 下标题栏(深)和 body(浅)
-   颜色不一致产生"黑色横条"违和感。主题 JS 加载完会按用户偏好切换。 */
+:root[data-theme="dark"] {
+  /* —— shadcn 核心 token（Claude 对齐中性） —— */
+  --background: 0 0% 7%;
+  --foreground: 0 0% 92%;
+  --card: 0 0% 9%;
+  --card-foreground: 0 0% 92%;
+  --popover: 0 0% 9%;
+  --popover-foreground: 0 0% 92%;
+  --primary: 0 0% 92%;
+  --primary-foreground: 0 0% 9%;
+  --secondary: 0 0% 14%;
+  --secondary-foreground: 0 0% 92%;
+  --muted: 0 0% 12%;
+  --muted-foreground: 0 0% 58%;
+  --accent: 0 0% 14%;
+  --accent-foreground: 0 0% 96%;
+  --destructive: 0 70% 45%;
+  --border: 0 0% 16%;
+  --input: 0 0% 16%;
+  --ring: 0 0% 40%;
+  --chart-1: 0 0% 80%;
+  --chart-2: 0 0% 55%;
+  --chart-3: 0 0% 44%;
+  --chart-4: 0 0% 37%;
+  --chart-5: 0 0% 27%;
+  --sidebar: 0 0% 9%;
+  --sidebar-foreground: 0 0% 92%;
+  --sidebar-primary: 0 0% 92%;
+  --sidebar-primary-foreground: 0 0% 9%;
+  --sidebar-accent: 0 0% 14%;
+  --sidebar-accent-foreground: 0 0% 96%;
+  --sidebar-border: 0 0% 16%;
+  --sidebar-ring: 0 0% 40%;
+
+  /* —— 品牌 token（dark） —— */
+  --ink: #ededed;
+  --ink-2: #a8a8a8;
+  --ink-3: #6e6e6e;
+  --paper: #1a1a1a;
+  --paper-2: #232323;
+  --paper-3: #2c2c2c;
+  --line: #2e2e2e;
+  --line-2: #404040;
+  --accent-soft: #2c2c2c;
+  --wechat: #b5b5b5;
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.40);
+  --shadow-sm: 0  7px 18px rgba(0, 0, 0, 0.25);
+  --sidebar-bg: #161616;
+  --sidebar-bg-2: #1f1f1f;
+  --sidebar-fg: #ededed;
+  --sidebar-fg-2: #a8a8a8;
+  --sidebar-fg-3: #6e6e6e;
+  --sidebar-divider: rgba(255, 255, 255, 0.08);
+  --sidebar-hover-bg: rgba(255, 255, 255, 0.05);
+  --focus-ring: #ffffff;
+  --focus-ring-offset: #1a1a1a;
+}
+
+/* 整窗铺满 viewport:禁用 body 滚动,由 .chat-scroll 内部滚动。
+   背景/前景色交给 @layer base 的 token 驱动,随 data-theme 切换。 */
 html, body {
   height: 100%;
   overflow: hidden;
-  background: #ffffff;
-  color: #1f1f1f;
-}
-@media (prefers-color-scheme: dark) {
-  html, body {
-    background: #1a1a1a;
-    color: #ededed;
-  }
-}
-/* 第六轮(2026-07-15):JS 设的主题(在 <html data-theme="dark">)优先级高于
-   prefers-color-scheme,避免 preview 在 light scheme 下暗色模式只染 .nexus-desktop
-   而 body 仍白。Claude Desktop 风格的暗色铺满整窗必须 body 也跟随。 */
-:root[data-theme="dark"],
-:root[data-theme="dark"] body {
-  background: #1a1a1a;
-  color: #ededed;
-}
-:root[data-theme="light"],
-:root[data-theme="light"] body {
-  background: #ffffff;
-  color: #1f1f1f;
 }
 
 /* 滚动条样式 - 加强可见性 */
@@ -98,56 +224,20 @@ html, body {
   padding: 0;
 }
 
-/* 深色模式 */
-.dark {
-  background: #0a0a0a;
-  color: #e5e5e5;
-  --background:   oklch(0.145 0 0);
-  --foreground:   oklch(0.985 0 0);
-  --card:   oklch(0.205 0 0);
-  --card-foreground:   oklch(0.985 0 0);
-  --popover:   oklch(0.205 0 0);
-  --popover-foreground:   oklch(0.985 0 0);
-  --primary:   oklch(0.922 0 0);
-  --primary-foreground:   oklch(0.205 0 0);
-  --secondary:   oklch(0.269 0 0);
-  --secondary-foreground:   oklch(0.985 0 0);
-  --muted:   oklch(0.269 0 0);
-  --muted-foreground:   oklch(0.708 0 0);
-  --accent:   oklch(0.269 0 0);
-  --accent-foreground:   oklch(0.985 0 0);
-  --destructive:   oklch(0.704 0.191 22.216);
-  --border:   oklch(1 0 0 / 10%);
-  --input:   oklch(1 0 0 / 15%);
-  --ring:   oklch(0.556 0 0);
-  --chart-1:   oklch(0.87 0 0);
-  --chart-2:   oklch(0.556 0 0);
-  --chart-3:   oklch(0.439 0 0);
-  --chart-4:   oklch(0.371 0 0);
-  --chart-5:   oklch(0.269 0 0);
-  --sidebar:   oklch(0.205 0 0);
-  --sidebar-foreground:   oklch(0.985 0 0);
-  --sidebar-primary:   oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground:   oklch(0.985 0 0);
-  --sidebar-accent:   oklch(0.269 0 0);
-  --sidebar-accent-foreground:   oklch(0.985 0 0);
-  --sidebar-border:   oklch(1 0 0 / 10%);
-  --sidebar-ring:   oklch(0.556 0 0);
-}
-
-.dark ::-webkit-scrollbar-thumb {
+/* 深色模式滚动条 / prose(由 data-theme 驱动,.dark 类已不再使用) */
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb {
   background: rgba(155, 155, 155, 0.35);
 }
 
-.dark ::-webkit-scrollbar-thumb:hover {
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   background: rgba(155, 155, 155, 0.6);
 }
 
-.dark ::-webkit-scrollbar-track {
+:root[data-theme="dark"] ::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.dark .prose pre {
+:root[data-theme="dark"] .prose pre {
   background: #0f0f0f;
 }
 
@@ -183,81 +273,44 @@ html, body {
 }
 
 @theme inline {
-  --font-heading:   var(--font-sans);
-  --font-sans:   'Geist Variable', sans-serif;
-  --color-sidebar-ring:   var(--sidebar-ring);
-  --color-sidebar-border:   var(--sidebar-border);
-  --color-sidebar-accent-foreground:   var(--sidebar-accent-foreground);
-  --color-sidebar-accent:   var(--sidebar-accent);
-  --color-sidebar-primary-foreground:   var(--sidebar-primary-foreground);
-  --color-sidebar-primary:   var(--sidebar-primary);
-  --color-sidebar-foreground:   var(--sidebar-foreground);
-  --color-sidebar:   var(--sidebar);
-  --color-chart-5:   var(--chart-5);
-  --color-chart-4:   var(--chart-4);
-  --color-chart-3:   var(--chart-3);
-  --color-chart-2:   var(--chart-2);
-  --color-chart-1:   var(--chart-1);
-  --color-ring:   var(--ring);
-  --color-input:   var(--input);
-  --color-border:   var(--border);
-  --color-destructive:   var(--destructive);
-  --color-accent-foreground:   var(--accent-foreground);
-  --color-accent:   var(--accent);
-  --color-muted-foreground:   var(--muted-foreground);
-  --color-muted:   var(--muted);
-  --color-secondary-foreground:   var(--secondary-foreground);
-  --color-secondary:   var(--secondary);
-  --color-primary-foreground:   var(--primary-foreground);
-  --color-primary:   var(--primary);
-  --color-popover-foreground:   var(--popover-foreground);
-  --color-popover:   var(--popover);
-  --color-card-foreground:   var(--card-foreground);
-  --color-card:   var(--card);
-  --color-foreground:   var(--foreground);
-  --color-background:   var(--background);
-  --radius-sm:   calc(var(--radius) * 0.6);
-  --radius-md:   calc(var(--radius) * 0.8);
-  --radius-lg:   var(--radius);
-  --radius-xl:   calc(var(--radius) * 1.4);
-  --radius-2xl:   calc(var(--radius) * 1.8);
-  --radius-3xl:   calc(var(--radius) * 2.2);
-  --radius-4xl:   calc(var(--radius) * 2.6);
-}
-
-:root {
-  --background:   oklch(1 0 0);
-  --foreground:   oklch(0.145 0 0);
-  --card:   oklch(1 0 0);
-  --card-foreground:   oklch(0.145 0 0);
-  --popover:   oklch(1 0 0);
-  --popover-foreground:   oklch(0.145 0 0);
-  --primary:   oklch(0.205 0 0);
-  --primary-foreground:   oklch(0.985 0 0);
-  --secondary:   oklch(0.97 0 0);
-  --secondary-foreground:   oklch(0.205 0 0);
-  --muted:   oklch(0.97 0 0);
-  --muted-foreground:   oklch(0.556 0 0);
-  --accent:   oklch(0.97 0 0);
-  --accent-foreground:   oklch(0.205 0 0);
-  --destructive:   oklch(0.577 0.245 27.325);
-  --border:   oklch(0.922 0 0);
-  --input:   oklch(0.922 0 0);
-  --ring:   oklch(0.708 0 0);
-  --chart-1:   oklch(0.87 0 0);
-  --chart-2:   oklch(0.556 0 0);
-  --chart-3:   oklch(0.439 0 0);
-  --chart-4:   oklch(0.371 0 0);
-  --chart-5:   oklch(0.269 0 0);
-  --radius:   0.625rem;
-  --sidebar:   oklch(0.985 0 0);
-  --sidebar-foreground:   oklch(0.145 0 0);
-  --sidebar-primary:   oklch(0.205 0 0);
-  --sidebar-primary-foreground:   oklch(0.985 0 0);
-  --sidebar-accent:   oklch(0.97 0 0);
-  --sidebar-accent-foreground:   oklch(0.205 0 0);
-  --sidebar-border:   oklch(0.922 0 0);
-  --sidebar-ring:   oklch(0.708 0 0);
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+  --font-sans: "Geist Variable", "SF Pro Display", "PingFang SC", "Avenir Next",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --font-heading: var(--font-sans);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
 }
 
 @layer base {
@@ -270,4 +323,75 @@ html, body {
   html {
     @apply font-sans;
   }
+}
+
+/* ===== 顶层容器布局(由 tokens.css 迁入,Task 1.2 收敛进 index.css) =====
+ * 整窗直铺 grid:264px sidebar + 余下 main(参考 Claude Desktop 全屏
+ * native chrome)。之前 tokens.css 的 .nexus-desktop 布局块在 1.1 重构后
+ * 已不再被 import,这里迁回 index.css 保证布局不丢。 */
+.nexus-desktop *,
+.nexus-desktop *::before,
+.nexus-desktop *::after {
+  box-sizing: border-box;
+}
+
+.nexus-desktop {
+  height: 100vh;
+  min-width: 100vw;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  background: var(--paper);
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
+}
+
+.nexus-desktop[data-theme="dark"] {
+  background: var(--paper);
+}
+
+/* 拖拽区 — Tauri 2 macOS chrome:标题栏区域 drag,其它 UI 自动 no-drag。 */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.nexus-desktop button,
+.nexus-desktop input,
+.nexus-desktop textarea,
+.nexus-desktop select,
+.nexus-desktop [role="button"],
+.nexus-desktop .task-item,
+.nexus-desktop .recent-panel,
+.nexus-desktop .empty-tasks {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* 网格纸纹理 / 噪点叠加(原型同款,当前禁用,保留占位) */
+.nexus-desktop::before { content: none; }
+.nexus-desktop[data-theme="dark"]::before {
+  opacity: 0.10;
+  mix-blend-mode: screen;
+}
+.nexus-desktop::after { content: none; }
+.nexus-desktop[data-theme="dark"]::after {
+  opacity: 0.12;
+}
+
+/* 表单元素继承字体 */
+.nexus-desktop button,
+.nexus-desktop input,
+.nexus-desktop textarea {
+  font: inherit;
+  color: inherit;
+}
+.nexus-desktop button {
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+}
+
+/* 深色模式下手绘装饰用更柔的笔触,避免在深色背景上像黑洞 */
+.nexus-desktop[data-theme="dark"] .sketch-line ellipse[fill="none"] {
+  stroke-opacity: 0.18;
 }
