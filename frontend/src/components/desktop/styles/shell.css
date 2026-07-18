@@ -246,7 +246,7 @@
   box-shadow: 0 0 0 5px rgba(0, 0, 0, 0.12);
 }
 
-/* 侧边栏底部 — 现在只放微信通道一行(设置已移到顶部 brand 区) */
+/* 侧边栏底部 — 直接放置"设置"文字按钮 + 版本号(不再用 N 头像下拉) */
 /* 微信收件箱未读数小徽标 */
 /* ===== 主区 ===== */
 /* Claude Desktop 极简风(2026-07-15 重构):
@@ -1048,13 +1048,25 @@
   padding: 4px 0;
 }
 
-.account-trigger {
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  font-weight: 700;
-  font-size: 12px;
+.settings-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sidebar-fg);
+  background: transparent;
+  border: 1px solid var(--sidebar-divider);
+  border-radius: var(--r-md);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.settings-trigger:hover {
   background: var(--sidebar-hover-bg);
   color: var(--sidebar-fg);
-  border: 1px solid var(--sidebar-divider);
+}
+.settings-trigger svg {
+  flex-shrink: 0;
+  opacity: 0.85;
 }

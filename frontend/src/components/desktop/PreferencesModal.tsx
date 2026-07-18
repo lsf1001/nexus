@@ -172,7 +172,10 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
               <label htmlFor="set-temp">温度参数</label>
               <input
                 id="set-temp"
-                type="text"
+                type="number"
+                min={0}
+                max={2}
+                step={0.1}
                 value={temperature}
                 onChange={(e) => setTemperature(e.target.value)}
                 placeholder="0.0 ~ 1.0"

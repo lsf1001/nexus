@@ -108,7 +108,8 @@
 .preferences-modal-body select,
 .preferences-modal-body input[type="checkbox"],
 .preferences-modal-body input[type="text"],
-.preferences-modal-body input[type="password"] {
+.preferences-modal-body input[type="password"],
+.preferences-modal-body input[type="number"] {
   font-size: 13px;
   color: var(--ink);
   background: var(--paper);
