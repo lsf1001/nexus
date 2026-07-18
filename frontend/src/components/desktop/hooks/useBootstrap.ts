@@ -24,7 +24,7 @@ interface ModelRow {
  *
  * 历史:Plan 4 §Phase 3 删除 activeModelName 返回值(无消费者 — DesktopShell
  * 解构 useBootstrap 只取 isBootstrapping / initialView)。setModelName 副作用
- * 仍保留在 useStore.conversations slice 中供 ModelConfigModal 切模型同步用。
+ * 仍保留在 useStore.conversations slice 中供模型切换同步用(ModelConfigModal 已删除)。
  */
 export function useBootstrap(): BootstrapResult {
   const [isBootstrapping, setIsBootstrapping] = useState(true);

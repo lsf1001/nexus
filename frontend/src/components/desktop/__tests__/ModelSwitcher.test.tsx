@@ -3,7 +3,7 @@
  *
  * WHY:Claude Desktop / ChatGPT 把模型切换放在顶栏右侧,一键 dropdown,
  * 切完即用,不藏到设置页。第九轮新增 ModelSwitcher,token 同 store
- * `modelName` + `setModelName`,跟 ModelConfigModal 数据源一致。
+ * `modelName` + `setModelName`,数据源与 store 单一真相源一致。
  *
  * 契约:
  *   - 默认收起,chip 显示当前 model 名 + ▾

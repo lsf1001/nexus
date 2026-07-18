@@ -5,8 +5,8 @@ import { useStore } from '../../store';
  * 顶栏模型切换器 — 2026-07-16 第九轮 UI 重设计。
  *
  * 形态:紧凑 chip(模型名 + ▾),点开下拉列表,点项切换 + 自动收起。
- * 数据源:`useStore.models` + `modelName` —— 跟 ModelConfigModal 同源,
- * 后者改完这一头也即时反映。
+ * 数据源:`useStore.models` + `modelName`(store 单一真相源,
+ * PreferencesModal 修改后此处即时反映)。
  *
  * 设计选择:
  * - 不再调 `/api/models/switch`:那是后端切换激活模型(重建 agent)的重操作;

@@ -19,7 +19,7 @@
 ## 架构
 
 - `nexus/backend/`：FastAPI 后端（端口 30000）— `main.py` 入口、`launcher.py` 桌面 APP 启动（pywebview + uvicorn 后台线程）、`agent.py` DeepAgents 封装、`db.py` SQLite + 自动迁移
-- `frontend/`：Vite + React（端口 30077 / DMG 内 `/app/`）— `src/components/` `src/hooks/` `e2e/`
+- `frontend/`：Vite 8 + React 19（端口 30077 / DMG 内 `/app/`）— Tailwind v4 + shadcn/ui + react-router v7 + Zustand 5；`src/components/`(ChatArea/·desktop/·ui/) `src/hooks/` `src/store/` `e2e/`
 - `scripts/build_dmg.sh`：PyInstaller onedir + .app bundle 构造 + hdiutil 打 DMG
 - `tests/`：pytest 后端测试
 - `docs/superpowers/`：设计稿 / 计划 / 进度

@@ -21,7 +21,7 @@
 
 | 组件 | 技术 |
 |------|------|
-| 前端 | React + TypeScript + Vite + Tailwind CSS + Zustand |
+| 前端 | React 19 + TS(strict) + Vite 8 + Tailwind v4 + shadcn/ui + Zustand 5 + react-router v7 + sonner |
 | 后端 | FastAPI + DeepAgents + SQLite + pywebview(WKWebView) |
 | 模型 | MiniMax / DeepSeek / Qwen (OpenAI SDK 兼容) |
 | 桌面 APP | **单二进制**:PyInstaller onedir + pywebview(无 Electron / 无 Chromium) |
@@ -32,12 +32,12 @@
 nexus/                 # 仓库根
 ├── frontend/          # React SPA (独立目录)
 │   ├── src/
-│   │   ├── components/   # ChatArea, Sidebar, ChatBubble...
+│   │   ├── components/   # ChatArea/(对话流) · desktop/(壳/弹窗) · ui/(shadcn 原语)
 │   │   ├── hooks/        # 自定义 Hook
 │   │   ├── store/        # Zustand 状态
 │   │   ├── types/        # TypeScript 类型
 │   │   └── App.tsx
-│   ├── tests/e2e/     # Node 端到端 (Playwright + WS)
+│   ├── e2e/           # Playwright 端到端 (helpers.ts + *.spec.ts)
 │   └── vite.config.ts
 ├── nexus/             # Python 包
 │   ├── backend/        # FastAPI 后端
