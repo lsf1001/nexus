@@ -14,6 +14,7 @@ export interface SidebarProps {
   onSelectConversation: (conv: Conversation) => void;
   onDeleteConversation: (id: string) => void;
   onNewTask: () => void;
+  onOpenPreferences?: () => void;
 }
 
 /**
@@ -32,6 +33,7 @@ export function Sidebar({
   onSelectConversation,
   onDeleteConversation,
   onNewTask,
+  onOpenPreferences,
 }: SidebarProps) {
   const [query, setQuery] = useState('');
 
@@ -172,7 +174,7 @@ export function Sidebar({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="top">
-            <DropdownMenuItem>设置</DropdownMenuItem>
+            <DropdownMenuItem onClick={onOpenPreferences}>设置</DropdownMenuItem>
             <DropdownMenuItem>退出登录</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

@@ -1015,9 +1015,9 @@
 .chat-scroll { padding: clamp(30px, 5vh, 70px) 34px 24px; }
 .empty-state { max-width: 820px; align-items: flex-start; gap: 20px; padding-top: clamp(20px, 6vh, 72px); }
 .empty-state .hero { max-width: 650px; margin: 0; text-align: left; }
-.eyebrow { color: var(--ink); font-size: 11px; letter-spacing: 0.12em; }
-.empty-state h1, .hero h1 { font-size: clamp(34px, 4vw, 52px); letter-spacing: -0.045em; line-height: 1.08; }
-.empty-state .subtitle, .hero p { max-width: 550px; margin: 12px 0 0; text-align: left; font-size: 15px; }
+.eyebrow { color: var(--ink); font-size: 12px; letter-spacing: 0.12em; }
+.empty-state h1, .hero h1 { font-size: clamp(36px, 4.2vw, 54px); letter-spacing: -0.045em; line-height: 1.08; }
+.empty-state .subtitle, .hero p { max-width: 550px; margin: 12px 0 0; text-align: left; font-size: 16px; }
 
 .empty-state .prompt-grid { max-width: 760px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .prompt-card {
@@ -1027,7 +1027,7 @@
   background: var(--paper);
   padding: 15px 16px;
   box-shadow: none;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
 }
 .prompt-card::before { content: "↗"; display: inline-block; margin-right: 10px; color: var(--ink); font-size: 16px; }
@@ -1043,18 +1043,18 @@
   background: transparent;
   padding: 14px 0 0;
 }
-.status-card > strong { display: block; padding: 0 2px 10px; font-size: 12px; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; }
+.status-card > strong { display: block; padding: 0 2px 10px; font-size: 13px; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; }
 .status-card .row { display: inline-flex; width: auto; margin: 0 22px 12px 0; gap: 8px; }
 .status-card .row + .row { margin-top: 0; padding-top: 0; border-top: 0; }
-.status-card .row .label { font-size: 12px; }
-.status-card .row .value { font-size: 12px; }
+.status-card .row .label { font-size: 13px; }
+.status-card .row .value { font-size: 13px; }
 
 .message-list { max-width: 790px; gap: 22px; }
 .message-bubble { max-width: 700px; border-radius: 16px; padding: 14px 16px; }
 /* Claude 三层结构覆盖:用户块=左侧 1px 浅线 + 加粗;助手块=极浅背景 */
 .message-user { background: transparent; border: 0; border-left: 2px solid var(--muted-foreground); color: var(--foreground); box-shadow: none; border-radius: 0; }
 .message-assistant { background: var(--muted); border: 0; color: var(--foreground); box-shadow: none; border-radius: var(--r-lg); }
-.message-markdown { font-size: 15px; line-height: 1.8; }
+.message-markdown { font-size: 16px; line-height: 1.8; }
 
 /* 第六轮(2026-07-15):composer-shell 在 dark 模式下用 paper-soft 替代 paper,
  * 因为 paper (#2a5240) === 整窗 canvas 色,composer 浮不出来;paper-soft

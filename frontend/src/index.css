@@ -199,15 +199,15 @@ html, body {
 
 /* Prose 样式调整 */
 .prose {
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.65;
 }
 
 .prose code {
   background: rgba(0, 0, 0, 0.08);
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .prose pre {
@@ -216,7 +216,7 @@ html, body {
   padding: 16px 20px;
   border-radius: 8px;
   overflow-x: auto;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .prose pre code {

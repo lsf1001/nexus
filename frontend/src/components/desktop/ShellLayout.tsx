@@ -36,6 +36,7 @@ export function ShellLayout({ shellCtx }: ShellLayoutProps) {
         onSelectConversation={shellCtx.onSelectConversation}
         onDeleteConversation={shellCtx.onDeleteConversation}
         onNewTask={shellCtx.onNewTask}
+        onOpenPreferences={shellCtx.onOpenPreferences}
       />
 
       <main className="main">

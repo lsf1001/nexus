@@ -36,6 +36,7 @@ const mockCtx: DesktopShellContext = {
   isBootstrapping: false,
   isModelConfigured: true,
   setModelConfigured: () => {},
+  onOpenPreferences: () => {},
 };
 
 function ProbeChild() {

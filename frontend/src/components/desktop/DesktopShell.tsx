@@ -33,6 +33,8 @@ export interface DesktopShellContext {
   isBootstrapping: boolean;
   isModelConfigured: boolean;
   setModelConfigured: (configured: boolean) => void;
+  // 偏好设置
+  onOpenPreferences: () => void;
 }
 
 /**
@@ -109,6 +111,7 @@ export function DesktopShell() {
     isBootstrapping,
     isModelConfigured,
     setModelConfigured,
+    onOpenPreferences: () => setPreferencesOpen(true),
   };
 
   return (
