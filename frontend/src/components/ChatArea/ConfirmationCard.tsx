@@ -7,6 +7,8 @@
  */
 
 import type { ConfirmationAction, ConfirmationResponseFrame } from '../../types';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 export interface ConfirmationCardProps {
   interruptId: string;
@@ -48,10 +50,10 @@ export function ConfirmationCard({
           )}
           <div className="confirm-actions">
             {action.options.map((opt) => (
-              <button
+              <Button
                 key={opt.decision}
                 type="button"
-                className={`confirm-btn confirm-${opt.decision}`}
+                className={cn(`confirm-btn confirm-${opt.decision}`)}
                 onClick={() => {
                   if (!canSend) return;
                   wsSend({
@@ -64,7 +66,7 @@ export function ConfirmationCard({
                 }}
               >
                 {opt.label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>

@@ -7,6 +7,8 @@
 
 import { formatErrorMessage } from './constants';
 import type { LastError } from './types';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 export interface ErrorBannerProps {
   lastError: LastError;
@@ -27,25 +29,25 @@ export function ErrorBanner({ lastError, onRetry, onClose }: ErrorBannerProps) {
           <div className="detail">{formatErrorMessage(lastError.code, lastError.message)}</div>
         </div>
         {lastError.retryable && (
-          <button
+          <Button
             type="button"
-            className="retry-btn"
+            className={cn('retry-btn')}
             onClick={() => {
               onClose();
               onRetry();
             }}
           >
             重试
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           type="button"
-          className="close-btn"
+          className={cn('close-btn')}
           onClick={onClose}
           aria-label="关闭错误提示"
         >
           ✕
-        </button>
+        </Button>
       </div>
     </div>
   );

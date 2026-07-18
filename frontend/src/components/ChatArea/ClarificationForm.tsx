@@ -12,6 +12,8 @@
  */
 
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 export interface ClarificationFormProps {
   question: string;
@@ -45,14 +47,14 @@ export function ClarificationForm({
       {effectiveOptions.length > 0 ? (
         <div className="clarify-options">
           {effectiveOptions.map((option) => (
-            <button
+            <Button
               key={option}
               type="button"
-              className="clarify-option"
+              className={cn('clarify-option', 'w-full justify-start text-left')}
               onClick={() => onSubmit(option)}
             >
               {option}
-            </button>
+            </Button>
           ))}
           <details className="clarify-free-toggle">
             <summary>自己写回答</summary>
@@ -64,14 +66,14 @@ export function ClarificationForm({
                 rows={2}
                 className="clarify-textarea"
               />
-              <button
+              <Button
                 type="button"
-                className="clarify-submit"
+                className={cn('clarify-submit')}
                 onClick={submitFree}
                 disabled={!freeText.trim()}
               >
                 发送
-              </button>
+              </Button>
             </div>
           </details>
         </div>
@@ -92,17 +94,17 @@ export function ClarificationForm({
             }}
           />
           <div className="clarify-actions">
-            <button type="button" className="clarify-cancel" onClick={onCancel}>
+            <Button type="button" className={cn('clarify-cancel')} onClick={onCancel}>
               取消
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="clarify-submit"
+              className={cn('clarify-submit')}
               onClick={submitFree}
               disabled={!freeText.trim()}
             >
               发送
-            </button>
+            </Button>
           </div>
         </div>
       )}
