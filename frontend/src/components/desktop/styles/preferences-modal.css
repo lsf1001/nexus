@@ -2,6 +2,10 @@
  * 蒙层复用 .modal-overlay 基础样式,新类名 .preferences-modal-overlay。 */
 
 .modal-overlay.preferences-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 24px;
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
