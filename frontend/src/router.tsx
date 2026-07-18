@@ -36,7 +36,7 @@ function IndexRedirect() {
  * /chat* 守卫:模型未配置时重定向到 /setup。
  * bootstrap 进行中(路由尚未挂载)返回 null。
  */
-function RequireModelConfigured() {
+export function RequireModelConfigured() {
   const ctx = useShellContext();
   const { isBootstrapping, isModelConfigured } = ctx;
   if (isBootstrapping) return null;
