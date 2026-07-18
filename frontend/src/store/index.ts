@@ -3,7 +3,7 @@
  *
  * Plan 4 重构:从 useStore.ts 单 store 139 行拆出 4 slice(本轮不建 session
  * slice — `activeModelName` 在 useBootstrap 中是死代码,直接删)。各 slice
- * 文件见 ./slices/,跨切片派生直接用 useStore 选择器(本仓库不单独建 selectors.ts)。
+ * 文件见 ./slices/,跨切片派生见 ./selectors.ts(该文件已存在并导出 3 个 selector hook,当前全仓库无 import,属预留待接入)。
  *
  * 中间件:
  * - `persist` 只挂 uiPrefs 切片(partialize 显式列字段,防止业务字段被
