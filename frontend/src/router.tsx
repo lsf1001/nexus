@@ -37,10 +37,11 @@ function IndexRedirect() {
  * bootstrap 进行中(路由尚未挂载)返回 null。
  */
 function RequireModelConfigured() {
-  const { isBootstrapping, isModelConfigured } = useShellContext();
+  const ctx = useShellContext();
+  const { isBootstrapping, isModelConfigured } = ctx;
   if (isBootstrapping) return null;
   if (!isModelConfigured) return <Navigate to="/setup" replace />;
-  return <Outlet />;
+  return <Outlet context={ctx} />;
 }
 
 /** /setup 路由:渲染 SetupView;保存成功后翻转 modelConfigured 并进入 /chat。 */
