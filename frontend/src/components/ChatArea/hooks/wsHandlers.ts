@@ -15,6 +15,7 @@
 import type { StreamEvent, ConfirmationAction } from '../../../types';
 import type { LastError } from '../types';
 import type { ChatStreamActions } from './useChatStream';
+import type { Artifact, ArtifactKind } from '../../../store/slices/artifacts';
 import { useStore } from '../../../store';
 import { useToastStore } from '../../../store/useToast';
 
@@ -45,6 +46,55 @@ const appendPatch = (
   ctx.stream.ensureAssistantPlaceholder();
   ctx.stream.appendToAssistant(patch);
 };
+
+/**
+ * Task 3.3:从 final / tool_result 帧的 content 中识别结构化 artifact。
+ *
+ * 标记格式(向后兼容新增,无标记时零副作用,**不改 WS 协议**):
+ *   <!-- artifact kind=code lang=ts title=MyScript -->
+ *   <实际内容>
+ *   <!-- /artifact -->
+ * kind ∈ code | markdown | svg | html;lang / title 可选(支持引号包裹)。
+ *
+ * 纯函数:命中返回 Artifact(id 随机,由 slice 按 id 去重),未命中返回 null。
+ * 只"识别"不"改写"——消息 content 照常展示,artifact 额外进 store。
+ */
+const ARTIFACT_BLOCK_RE =
+  /<!--\s*artifact\s+([\s\S]*?)-->\n([\s\S]*?)\n<!--\s*\/artifact\s*-->/;
+
+const ARTIFACT_KINDS = ['code', 'markdown', 'svg', 'html'] as const;
+
+function asArtifactKind(value: string | undefined): ArtifactKind | null {
+  return ARTIFACT_KINDS.includes(value as ArtifactKind) ? (value as ArtifactKind) : null;
+}
+
+function parseArtifactAttrs(raw: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  const re = /(\w+)=("([^"]*)"|'([^']*)'|(\S+))/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    const key = m[1] ?? '';
+    if (!key) continue;
+    const val = m[3] ?? m[4] ?? m[5] ?? '';
+    attrs[key] = val;
+  }
+  return attrs;
+}
+
+export function extractArtifact(content: string): Artifact | null {
+  const m = ARTIFACT_BLOCK_RE.exec(content);
+  if (!m) return null;
+  const attrs = parseArtifactAttrs(m[1] ?? '');
+  const kind = asArtifactKind(attrs.kind);
+  if (!kind) return null;
+  return {
+    id: crypto.randomUUID(),
+    kind,
+    content: m[2] ?? '',
+    title: attrs.title || undefined,
+    language: attrs.lang || undefined,
+  };
+}
 
 export const handleThinking: WsHandler = (ev, ctx) => {
   if (typeof ev.content === 'string') {
@@ -92,6 +142,10 @@ export const handleFinal: WsHandler = (ev, ctx) => {
     next[next.length - 1] = { ...last, content: ev.content };
     useStore.getState().setConversationMessages(next);
   }
+  // Task 3.3:末尾内容识别 artifact → 追加进 artifacts slice。无标记时
+  // extractArtifact 返回 null,零副作用,消息 content 不变。
+  const artifact = extractArtifact(ev.content);
+  if (artifact) useStore.getState().pushArtifact(artifact);
   ctx.setIsLoading(false);
   ctx.disarmWatchdog();
 };
@@ -244,6 +298,9 @@ export const handleToolResult: WsHandler = (ev, ctx) => {
   const next = [...msgs];
   next[next.length - 1] = { ...last, toolCalls: updated };
   useStore.getState().setConversationMessages(next);
+  // Task 3.3:末尾内容识别 artifact(若 tool_result 帧本身带 artifact 标记)。
+  const artifact = extractArtifact(ev.content);
+  if (artifact) useStore.getState().pushArtifact(artifact);
   ctx.disarmWatchdog();
 };
 

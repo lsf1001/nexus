@@ -3,6 +3,7 @@ import { ContextMenuHost } from './ContextMenuHost';
 import { Sidebar } from './Sidebar';
 import { ToastHost } from '../ToastHost';
 import { ArtifactsPanel } from './ArtifactsPanel';
+import { useStore } from '../../store';
 import type { DesktopShellContext } from './DesktopShell';
 
 export interface ShellLayoutProps {
@@ -23,6 +24,10 @@ export interface ShellLayoutProps {
  * 枚举切换。
  */
 export function ShellLayout({ shellCtx }: ShellLayoutProps) {
+  // Task 3.3:订阅 artifacts slice,非空时右栏出现,否则 ArtifactsPanel 返回
+  // null → grid 第 3 轨塌缩,`.chat-area` 保持全宽(e2e 契约不变)。
+  const artifacts = useStore((s) => s.artifacts);
+
   return (
     <div className="nexus-desktop">
       <Sidebar
@@ -37,7 +42,7 @@ export function ShellLayout({ shellCtx }: ShellLayoutProps) {
         <Outlet context={shellCtx} />
       </main>
 
-      <ArtifactsPanel />
+      <ArtifactsPanel artifacts={artifacts} />
 
       <ContextMenuHost />
       <ToastHost />

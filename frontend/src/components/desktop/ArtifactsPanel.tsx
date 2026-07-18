@@ -1,20 +1,12 @@
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import type { Artifact, ArtifactKind } from '../../store/slices/artifacts';
 
 /**
- * Artifact 类型 — 与后端 tool_result/final 帧产出的"作品"对齐。
- * Task 3.3 会从 wsHandlers 写入 store 的 `artifacts` slice,本组件订阅它渲染。
- * 这里先在本地定义并导出,供 3.3 直接复用(避免重复声明)。
+ * Artifact 类型 — 定义与实现统一从 store/slices/artifacts 引入(Task 3.3),
+ * 这里 re-export 以保向后兼容(历史 import 路径不变)。
  */
-export type ArtifactKind = 'code' | 'markdown' | 'svg' | 'html';
-
-export interface Artifact {
-  id: string;
-  kind: ArtifactKind;
-  content: string;
-  title?: string;
-  /** code/markdown 的高亮语言(可选) */
-  language?: string;
-}
+export type { Artifact, ArtifactKind };
 
 export interface ArtifactsPanelProps {
   /** 当前会话的 artifact 列表(来自 store,Phase 3.3 接入)。默认空数组。 */
@@ -104,8 +96,14 @@ function renderArtifact(artifact: Artifact) {
         />
       );
     case 'markdown':
+      // Task 3.3:用 react-markdown 渲染 markdown(已装于 node_modules,
+      // fenced 代码块自动渲染为 <pre><code>)。content 原样传入,不转义。
+      return (
+        <div className="artifact-markdown">
+          <ReactMarkdown>{artifact.content}</ReactMarkdown>
+        </div>
+      );
     default:
-      // 3.3 接入 react-markdown 渲染;当前按纯文本展示。
       return <div className="artifact-markdown">{artifact.content}</div>;
   }
 }
