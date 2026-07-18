@@ -2,14 +2,15 @@ import { useState } from 'react';
 import { apiFetch } from '../../lib/api';
 import { openContextMenuAt } from '../../lib/useContextMenuTrigger';
 import { secretLength } from '../../lib/secret';
+import { DEFAULT_MODEL, DEFAULT_API_BASE } from '../../lib/config';
 
 interface SetupViewProps {
   onDone: () => void;
 }
 
 export function SetupView({ onDone }: SetupViewProps) {
-  const [modelName, setModelName] = useState('MiniMax-M3');
-  const [apiBase, setApiBase] = useState('https://api.minimaxi.com/v1');
+  const [modelName, setModelName] = useState(DEFAULT_MODEL);
+  const [apiBase, setApiBase] = useState(DEFAULT_API_BASE);
   const [apiKey, setApiKey] = useState('');
   const [temperature, setTemperature] = useState('0.7');
   const [status, setStatus] = useState('填写 API 密钥后测试连接');

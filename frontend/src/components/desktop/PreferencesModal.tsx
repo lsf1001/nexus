@@ -1,4 +1,6 @@
 import { useEffect, useRef, type JSX } from 'react';
+import { useStore } from '../../store';
+import { DEFAULT_MODEL } from '../../lib/config';
 
 export type PreferencesTab = 'general';
 
@@ -7,14 +9,18 @@ export interface PreferencesModalProps {
   onClose: () => void;
 }
 
-const MODEL_OPTIONS = [
-  { value: 'MiniMax-M3', label: 'MiniMax-M3 (推荐)' },
-  { value: 'MiniMax-M2', label: 'MiniMax-M2' },
-  { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
-];
-
 export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.Element | null {
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  const models = useStore((s) => s.models);
+  const modelName = useStore((s) => s.modelName);
+  const setModelName = useStore((s) => s.setModelName);
+  const showThinking = useStore((s) => s.showThinking);
+  const setShowThinking = useStore((s) => s.setShowThinking);
+  const darkMode = useStore((s) => s.darkMode);
+  const toggleDarkMode = useStore((s) => s.toggleDarkMode);
+
+  const handleToggleDarkMode = () => toggleDarkMode();
 
   useEffect(() => {
     if (open && dialogRef.current) {
@@ -52,10 +58,18 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
         <div className="preferences-modal-body">
           <div className="setting-row">
             <label htmlFor="pref-model">当前模型</label>
-            <select id="pref-model" defaultValue="MiniMax-M3">
-              {MODEL_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
+            <select
+              id="pref-model"
+              value={modelName}
+              onChange={(e) => setModelName(e.target.value)}
+            >
+              {models.length === 0 ? (
+                <option value={DEFAULT_MODEL}>{DEFAULT_MODEL} (推荐)</option>
+              ) : (
+                models.map((m) => (
+                  <option key={m.id} value={m.name}>{m.name}</option>
+                ))
+              )}
             </select>
           </div>
           <div className="setting-row">
@@ -64,11 +78,27 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
           </div>
           <div className="setting-row">
             <label htmlFor="pref-thinking">显示思考过程</label>
-            <input id="pref-thinking" type="checkbox" defaultChecked />
+            <button
+              id="pref-thinking"
+              type="button"
+              className="setting-toggle"
+              onClick={() => setShowThinking(!showThinking)}
+              aria-pressed={showThinking}
+            >
+              {showThinking ? '已开启' : '已关闭'}
+            </button>
           </div>
           <div className="setting-row">
             <label htmlFor="pref-dark">深色模式</label>
-            <input id="pref-dark" type="checkbox" defaultChecked />
+            <button
+              id="pref-dark"
+              type="button"
+              className="setting-toggle"
+              onClick={handleToggleDarkMode}
+              aria-pressed={darkMode}
+            >
+              {darkMode ? '已开启' : '已关闭'}
+            </button>
           </div>
           <div className="setting-row">
             <label>高级设置</label>

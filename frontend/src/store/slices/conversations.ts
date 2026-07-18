@@ -1,12 +1,13 @@
 import type { StateCreator } from 'zustand';
 import type { Message, Model } from '../../types';
+import { DEFAULT_MODEL } from '../../lib/config';
 
 /**
  * 主会话数据切片 — 业务数据,不持久化(Plan 4 §Phase 2)。
  *
  * 包括:
  * - conversationMessages:当前会话消息列表(由 ChatArea reducer 维护)
- * - models / currentModelId / modelName:模型选择(useBootstrap / ModelConfigModal 同步)
+ * - models / currentModelId / modelName:模型选择(useBootstrap 从 /api/models 载入)
  * - isLoading:ChatArea 流式传输中状态(配合 useLoadingWatchdog 30s 清)
  *
  * 命名稳定:setter 名与原 useStore 完全一致(Plan 4 §Phase 5 迁移约束)。
@@ -29,7 +30,7 @@ export const createConversationsSlice: StateCreator<ConversationsSlice, [], [], 
   conversationMessages: [],
   models: [],
   currentModelId: null,
-  modelName: 'MiniMax-M3',
+  modelName: DEFAULT_MODEL,
   isLoading: false,
   setConversationMessages: (messages) => set({ conversationMessages: messages }),
   clearConversationMessages: () => set({ conversationMessages: [] }),
