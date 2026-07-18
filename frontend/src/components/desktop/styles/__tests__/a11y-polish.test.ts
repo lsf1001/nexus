@@ -40,11 +40,11 @@ describe("Task 6: a11y 契约锁", () => {
   });
 
   it("PreferencesModal 深色模式 toggle 必须有 aria-pressed", () => {
-    expect(PREFERENCES).toMatch(/onClick=\{handleToggleDarkMode\}[\s\S]*?aria-pressed=\{darkMode\}/);
+    expect(PREFERENCES).toMatch(/id="set-dark"[\s\S]*?aria-pressed=\{darkMode\}/);
   });
 
   it("PreferencesModal 思考过程 toggle 必须有 aria-pressed", () => {
-    expect(PREFERENCES).toMatch(/onClick=\{\(\) => setShowThinking\(!showThinking\)\}[\s\S]*?aria-pressed=\{showThinking\}/);
+    expect(PREFERENCES).toMatch(/id="set-thinking"[\s\S]*?aria-pressed=\{showThinking\}/);
   });
 
   it("ChatArea ErrorBanner 外层必须有 role=status + aria-live=assertive", () => {
