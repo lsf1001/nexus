@@ -2,7 +2,8 @@
  * 全局 Toast 浮层。
  *
  * 挂在 App 根部,监听 useToastStore.toasts,逐条渲染顶端浮层。
- * 不引入额外 UI 库 — 简单 inline style 即可覆盖 4 种 kind。
+ * 容器 / item 样式迁 token:见 shell.css 的 .toast-host / .toast-item。
+ * KIND_COLOR 4 种 kind 颜色保留 inline(动态 bg + border-left accent)。
  */
 
 import { useToastStore, type ToastKind } from '../store/useToast';
@@ -26,37 +27,17 @@ export function ToastHost() {
   if (toasts.length === 0) return null;
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 16,
-        right: 16,
-        zIndex: 9999,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        pointerEvents: 'none',
-      }}
-    >
+    <div className="toast-host">
       {toasts.map((t) => {
         const c = KIND_COLOR[t.kind] ?? KIND_COLOR.info;
         return (
           <div
             key={t.id}
             role="status"
+            className="toast-item"
             style={{
               background: c.bg,
               borderLeft: `4px solid ${c.border}`,
-              color: '#f9fafb',
-              padding: '10px 14px',
-              borderRadius: 6,
-              minWidth: 240,
-              maxWidth: 400,
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              pointerEvents: 'auto',
-              cursor: 'pointer',
-              fontSize: 13,
-              lineHeight: 1.4,
             }}
             onClick={() => dismiss(t.id)}
             title="点击关闭"

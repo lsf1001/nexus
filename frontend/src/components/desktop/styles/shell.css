@@ -1730,3 +1730,30 @@
   background: var(--paper-2);
   border-top-color: var(--line);
 }
+
+/* ===== 全局 Toast 浮层(ToastHost.tsx)=====
+ * 原内联 style 迁 token:容器定位、toast item 字号/边框/阴影。
+ * KIND_COLOR 动态 bg/border-left 保留 inline(4 种 kind 颜色按主题独立)。 */
+.toast-host {
+  position: fixed;
+  top: var(--space-4);
+  right: var(--space-4);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+
+.toast-item {
+  color: #f9fafb; /* Toast 始终白字,跨主题,保留 */
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  min-width: 240px;
+  max-width: 400px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  cursor: pointer;
+  font-size: var(--font-sm);
+  line-height: 1.4;
+}
