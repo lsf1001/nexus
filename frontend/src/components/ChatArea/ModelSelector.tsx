@@ -151,7 +151,7 @@ export function ModelSelector({ onOpenSettings }: ModelSelectorProps): JSX.Eleme
                 </span>
                 <span className="model-picker-item-info">
                   <span className="model-picker-item-name">{m.name}</span>
-                  {/* TODO: 后续从 model metadata 取 tag/price */}
+                  {/* 等待 model metadata 提供 tag/price 字段后启用 */}
                 </span>
                 <span className="model-picker-item-price">
                   {!m.api_key ? (
