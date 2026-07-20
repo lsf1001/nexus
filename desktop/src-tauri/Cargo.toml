@@ -1,6 +1,6 @@
 [package]
 name = "nexus-desktop"
-version = "1.1.0"
+version = "1.5.4"
 description = "Nexus Desktop"
 authors = ["夜小白科技"]
 edition = "2021"

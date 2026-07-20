@@ -10,7 +10,7 @@ import { getVersion } from '@tauri-apps/api/app';
  * 导致与 tauri.conf.json 的 version 字段不一致(此前曾出现前端写 1.3.0、
  * tauri.conf 实为 1.1.0 的偏差)。
  */
-export const FALLBACK_VERSION = '1.1.0';
+export const FALLBACK_VERSION = '1.5.4';
 
 let cached: string | null = null;
 
