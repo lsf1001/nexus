@@ -12,18 +12,19 @@
 
 - 名称：Nexus
 - 用途：AI Gateway，三进程/三目录独立构建
-- 技术栈：React 19 + FastAPI + DeepAgents + WebSocket + SQLite + Electron
-- 三进程：Python 后端（端口 30000）、React 前端（端口 30077）、Electron 桌面端（macOS DMG）
+- 技术栈：React 19 + FastAPI + DeepAgents + WebSocket + SQLite + Tauri 2
+- 三进程：Python 后端（端口 30000）、React 前端（端口 30077）、Tauri 2 桌面端（macOS DMG）
 - Python 强制使用 `.venv`，不允许系统 Python
 
 ## 架构
 
-- `nexus/backend/`：FastAPI 后端（端口 30000）— `main.py` 入口、`launcher.py` 桌面 APP 启动（pywebview + uvicorn 后台线程）、`agent.py` DeepAgents 封装、`db.py` SQLite + 自动迁移
-- `frontend/`：Vite 8 + React 19（端口 30077 / DMG 内 `/app/`）— Tailwind v4 + shadcn/ui + react-router v7 + Zustand 5；`src/components/`(ChatArea/·desktop/·ui/) `src/hooks/` `src/store/` `e2e/`
-- `scripts/build_dmg.sh`：PyInstaller onedir + .app bundle 构造 + hdiutil 打 DMG
+- `nexus/backend/`：FastAPI 后端（端口 30000）— `main.py` 入口、`agent.py` DeepAgents 封装、`db.py` SQLite + 自动迁移
+- `frontend/`：Vite 8 + React 19（端口 30077 / DMG 内 `/app/`）— Tailwind v4 + react-router v7 + Zustand 5；`src/components/`(ChatArea/·desktop/·ui/) `src/hooks/` `src/store/` `e2e/`
+- `desktop/src-tauri/`：Tauri 2 桌面壳（生产路径，DMG 入口）；`launcher.py`（pywebview）仅作 dev/legacy fallback
+- `scripts/build_dmg.sh`：Tauri 2 build → PyInstaller 侧车后端 → hdiutil 打 DMG
 - `tests/`：pytest 后端测试
-- `docs/superpowers/`：设计稿 / 计划 / 进度
-- `docs/operations/`：运维文档（含 quality.md 质量门）
+- `docs/designs/frontend.md`：唯一权威前端设计文档（当前事实基线）
+- `docs/operations/`：运维文档（含 quality.md 质量门、fact-check.md 事实校验、logging.md 可观测性）
 
 ## 命令
 
@@ -50,7 +51,7 @@ cd frontend && npm install
 npm run dev|build|lint|test:e2e
 
 # DMG 打包
-bash scripts/build_dmg.sh     # 产物 release/Nexus-1.0.0-arm64.dmg (~70MB)
+bash scripts/build_dmg.sh     # 产物 release/Nexus-<version>-arm64.dmg
 
 # 顶层 npm 脚本
 npm run build:frontend|build:dmg|build:all
@@ -61,6 +62,7 @@ npm run build:frontend|build:dmg|build:all
 <立项时从 SPEC 摘录 3-5 条最硬约束>
 
 - **WebSocket 协议** `/api/ws`，流式响应：`thinking` → `chunk` → `final` → `done`，支持多客户端
+- **WS 鉴权走 `Sec-WebSocket-Protocol: nxv1-<base64url(token)>`**，token 不进 URL（避免落入 access log / 浏览器历史）
 - **WS 跨线程桥接**：流式回调在子线程中用 `asyncio.run_coroutine_threadsafe` 投递回事件循环，**禁止**在子线程直接 `await`
 - **DB PRAGMA**：`db.py` 在连接建立时启用 `foreign_keys=ON / journal_mode=WAL / synchronous=NORMAL`；缺列自动 `ALTER TABLE ADD COLUMN`（无需手工迁移脚本）
 - **`models.json` 写入必须走 `models_config.save_models()`**，**不要**绕过原子写流程
@@ -95,9 +97,9 @@ API Key 解析顺序：`MINIMAX_API_KEY` → `MiniMax_API_KEY` → `ANTHROPIC_AU
 
 ## 文档导航
 
-- [`README.md`](./README.md) — 安装、CLI、API 速查、服务端口
+- [`README.md`](./README.md) — 安装、API 速查、服务端口
 - [`SPEC.md`](./SPEC.md) — 完整技术规格（架构图、模块职责、DB schema、稳定性修复清单）
 - [`python_project.md`](./python_project.md) — Python 工程规约（硬性约束）
 - [`CHANGELOG.md`](./CHANGELOG.md) — 版本变更
-- [`docs/superpowers/`](./docs/superpowers/) — 设计稿 / 计划 / 进度
-- [`docs/operations/quality.md`](./docs/operations/quality.md) — 质量门
+- [`docs/designs/frontend.md`](./docs/designs/frontend.md) — 前端设计事实基线（当前）
+- [`docs/operations/`](./docs/operations/) — 运维文档

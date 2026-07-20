@@ -156,13 +156,12 @@ cd desktop && npm install && npm run dev
 
 ## 📝 文档导航
 
-- [`README.md`](./README.md) — 安装、CLI、API 速查
+- [`README.md`](./README.md) — 安装、API 速查
 - [`SPEC.md`](./SPEC.md) — 完整技术规格
 - [`python_project.md`](./python_project.md) — Python 工程硬性约束
-- [`CHANGELOG.md`](./CHANGELOG.md) — 完整变更日志(本 release 是其中 3 段 Unreleased 合并)
-- [`docs/superpowers/plans/`](./docs/superpowers/plans/) — 各功能实施计划
-- [`docs/operations/quality.md`](./docs/operations/quality.md) — 质量门调优
-- [`docs/operations/logging.md`](./docs/operations/logging.md) — 可观测性查询指南
+- [`CHANGELOG.md`](./CHANGELOG.md) — 完整变更日志（本次发布是其中 3 段 Unreleased 合并）
+- [`docs/designs/frontend.md`](./docs/designs/frontend.md) — 当前前端设计事实基线
+- [`docs/operations/`](./docs/operations/) — 运维文档（quality / fact-check / logging / signing / ws-auth …）
 - [`docs/RELEASE_NOTES_v0.1.0.md`](./docs/RELEASE_NOTES_v0.1.0.md) — 本文档
 
 ---

@@ -21,10 +21,10 @@
 
 | 组件 | 技术 |
 |------|------|
-| 前端 | React 19 + TS(strict) + Vite 8 + Tailwind v4 + shadcn/ui + Zustand 5 + react-router v7 + sonner |
-| 后端 | FastAPI + DeepAgents + SQLite + pywebview(WKWebView) |
+| 前端 | React 19 + TS(strict) + Vite 8 + Tailwind v4 + Zustand 5 + react-router v7 |
+| 后端 | FastAPI + DeepAgents + SQLite |
 | 模型 | MiniMax / DeepSeek / Qwen (OpenAI SDK 兼容) |
-| 桌面 APP | **单二进制**:PyInstaller onedir + pywebview(无 Electron / 无 Chromium) |
+| 桌面 APP | **Tauri 2**(主程序) + Python sidecar(PyInstaller onedir 单二进制嵌入 Python 运行时 + FastAPI 后端) |
 
 ## 项目结构
 
@@ -32,20 +32,22 @@
 nexus/                 # 仓库根
 ├── frontend/          # React SPA (独立目录)
 │   ├── src/
-│   │   ├── components/   # ChatArea/(对话流) · desktop/(壳/弹窗) · ui/(shadcn 原语)
+│   │   ├── components/   # ChatArea/(对话流) · desktop/(壳/弹窗/命令面板)
 │   │   ├── hooks/        # 自定义 Hook
 │   │   ├── store/        # Zustand 状态
 │   │   ├── types/        # TypeScript 类型
 │   │   └── App.tsx
 │   ├── e2e/           # Playwright 端到端 (helpers.ts + *.spec.ts)
 │   └── vite.config.ts
+├── desktop/           # Tauri 2 桌面壳(独立目录)
+│   ├── src/           # 前端 SPA(打包时从 ../frontend/dist 复制)
+│   └── src-tauri/     # Rust 主程序 + sidecar 配置
 ├── nexus/             # Python 包
 │   ├── backend/        # FastAPI 后端
 │   │   ├── main.py     # 入口 + lifespan + WebSocket
 │   │   ├── config.py   # 配置加载 (env 优先级)
 │   │   ├── agent.py    # DeepAgents 封装
 │   │   ├── sessions.py # SessionManager
-│   │   ├── memory.py   # MemoryService + BM25 + 进化
 │   │   ├── db.py       # SQLite + 迁移
 │   │   ├── models_config.py # models.json 原子写
 │   │   ├── routes/     # REST 路由 (model_config 等)
@@ -54,7 +56,7 @@ nexus/                 # 仓库根
 └── tests/             # pytest (后端)
 ```
 
-桌面 APP 不再是独立工程:`scripts/build_dmg.sh` 一步完成 PyInstaller onedir + .app bundle 构造 + hdiutil 打 DMG。APP 内只有一个 Python 进程,uvicorn 起在后台线程,pywebview 主线程弹 WKWebView。
+桌面 APP 当前是 Tauri 2:`desktop/src-tauri/` 是 Rust 主程序,Rust WebSocket relay 把前端与 Python sidecar 串起来。`scripts/build_dmg.sh` 一步完成 build sidecar → `cargo tauri build` → hdiutil 打 DMG。`launcher.py`(pywebview)仅作 dev/legacy fallback,不再用于打 DMG。
 
 ## 核心模块
 
@@ -168,7 +170,7 @@ session_stats(session_id, message_count, total_tokens, last_active_at)
 
 ## CLI
 
-2026-06 清理：产品不再提供 CLI（`nexus/cli/` 整包删除）。终端用户走 macOS DMG APP（`/Applications/Nexus.app`，Electron 拉起后端），开发者从 git clone 走源码直跑：
+2026-06 清理：产品不再提供 CLI（`nexus/cli/` 整包删除）。终端用户走 macOS DMG APP（`/Applications/Nexus.app`，Tauri 2 启动 sidecar 后端），开发者从 git clone 走源码直跑：
 
 ```bash
 # 后端（一个 terminal，30000 端口）
@@ -213,4 +215,4 @@ API Key 兼容：`MINIMAX_API_KEY` > `MiniMax_API_KEY` > `ANTHROPIC_AUTH_TOKEN` 
 
 ---
 
-*最后更新: 2026-06-30*
+*最后更新: 2026-07-20*

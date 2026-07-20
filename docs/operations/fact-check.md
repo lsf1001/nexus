@@ -204,7 +204,7 @@ GROUP BY kind ORDER BY COUNT(*) DESC;
 
 ## 8. 相关资源
 
-- 计划：`docs/superpowers/plans/2026-07-10-fact-check-pipeline.md`（21 任务）
+- 计划历史：`docs/superpowers/plans/2026-07-10-fact-check-pipeline.md`（21 任务，文件已清理，决策可追溯 Git 历史）
 - 回归测试：`tests/test_fact_check_regression_2026_07_10.py`（锁定 2026-07-10 21:45 原 bug）
 - E2E 测试：`tests/test_fact_check_e2e_tomorrow.py`
 - 元评估样本：`data/fact_check_eval_samples.jsonl`（5 样本，kappa=0.643）

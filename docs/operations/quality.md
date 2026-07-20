@@ -332,8 +332,7 @@ LIMIT 10;
 
 ## 9. 相关资源
 
-- 计划文档：`docs/superpowers/plans/`（搜索 "rubric"）
-- 进度记录：`docs/superpowers/progress.md`
+- 计划历史：`docs/superpowers/plans/`（已清理，决策可追溯 Git 历史与 CHANGELOG）
 - 真环境验收脚本：`scripts/verify_phase2.py`
 - 人工样本：`data/rubric_eval_samples.jsonl`
 - 当前 meta-eval 结果：`data/eval_report.json`
