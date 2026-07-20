@@ -5,8 +5,8 @@ WHY 重构:
   分类,每次 user 消息多 1 次 LLM 调用(5s 硬限超时),延迟 +200-400ms 且
   引入 agnes 慢模型 16s+ 的不确定性。对齐 DeepAgents 框架设计原则:
 
-    - 中间件 / 路由层**不该**再调 LLM(IntentClassifier 是反模式,见
-      :mod:`docs/superpowers/plans/2026-06-29-deepagents-native-refactor.md`)
+    - 中间件 / 路由层**不该**再调 LLM(IntentClassifier 是反模式;当前
+      中间件链顺序与职责见 SPEC.md)
     - 主 LLM 决定 dispatch 哪个 subagent 走 :class:`SubAgent` + Task 工具
       机制(已由 deepagents 0.6.x :class:`SubAgentMiddleware` 自动注入)
     - 业务级"intent 标记"用于 DB 统计 / observability 事件,用正则同步

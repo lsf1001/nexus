@@ -165,43 +165,37 @@ def test_chunk_thinking_stop_spinner_early() -> None:
 
 
 def test_model_switch_updates_store_modelname() -> None:
-    """切模型后 store.modelName 必须更新,SettingsView 才会显示新模型。
+    """切模型后 store.modelName 必须更新,顶栏 ModelSwitcher 才显示新模型。
 
     WHY 2026-06-28:之前 useStore.modelName 只有 useBootstrap 启动时设一次,
-    handleSwitch 切完 reload models 但没调 setModelName → SettingsView 的
-    「当前模型」按钮永远停在初始值 'MiniMax-M3',切到 agnes 也不变。
-    修复:handleSwitch 立即 setModelName(active_model.name);loadModels 完成后
-    从新 models 找 is_active 的再同步一次(兜底其他 reload 路径)。
+    切完 reload models 但没调 setModelName → 顶栏永远停在初始值。
+    2026-07-18 重构:原 ModelConfigModal.tsx 已拆为 ModelSwitcher.tsx(顶栏)
+    和 PreferencesModal.tsx(设置弹窗)。本测试跟进新文件结构。
     """
-    modal = (REPO_ROOT / "frontend/src/components/ModelConfigModal.tsx").read_text(encoding="utf-8")
+    switcher = (REPO_ROOT / "frontend/src/components/desktop/ModelSwitcher.tsx").read_text(encoding="utf-8")
 
-    # 1) Modal 必须订阅 setModelName
-    assert "setModelName" in modal, "ModelConfigModal 必须订阅 setModelName 才能同步显示"
+    # 1) ModelSwitcher 必须订阅 setModelName
+    assert "setModelName" in switcher, "ModelSwitcher 必须订阅 setModelName 才能同步显示"
 
-    # 2) handleSwitch 切完调 setModelName(active_model.name)
-    handle_switch = re.search(
-        r"const handleSwitch\s*=\s*async[\s\S]+?\};",
-        modal,
+    # 2) handleSelect 切完调 setModelName(m.name)(乐观更新)
+    handle_select = re.search(
+        r"const handleSelect\s*=\s*\(.*?\).*?:\s*void\s*=>\s*\{[\s\S]+?\};",
+        switcher,
     )
-    assert handle_switch, "未找到 handleSwitch 函数体"
-    body = handle_switch.group(0)
+    assert handle_select, "未找到 handleSelect 函数体"
+    body = handle_select.group(0)
     assert "setModelName" in body, (
-        "handleSwitch 切完必须调 setModelName(active_model.name),否则 SettingsView "
-        "标题不更新。修复:在 success 分支里 await loadModels 之前立即 setModelName。"
+        "handleSelect 切完必须调 setModelName(m.name),否则顶栏模型名不更新。"
     )
 
-    # 3) loadModels 完成后从 models 找 is_active 调 setModelName
-    load_models = re.search(
-        r"const loadModels\s*=\s*useCallback\([\s\S]+?\}\s*,\s*\[",
-        modal,
+    # 3) 失败时必须回滚 setModelName(prevName)
+    assert "setModelName(prevName)" in body, (
+        "handleSelect 失败/异常时必须回滚 setModelName(prevName),"
+        "防止 modelName 跟后端激活模型不一致"
     )
-    assert load_models, "未找到 loadModels 函数体"
-    body = load_models.group(0)
-    assert "setModelName" in body, (
-        "loadModels 必须从 data.find(is_active) 同步 setModelName,作为兜底 "
-        "(防止 handleSwitch 漏写、或者其他 reload 路径漏写导致 modelName 过期)"
+    assert "setCurrentModelId(prevId)" in body, (
+        "handleSelect 失败/异常时必须回滚 setCurrentModelId(prevId)"
     )
-    assert "is_active" in body, "loadModels 必须按 is_active 找当前激活模型"
 
 
 def test_ws_emit_chunk_realtime_not_buffered() -> None:
@@ -252,25 +246,19 @@ def test_ws_emit_chunk_realtime_not_buffered() -> None:
 
 
 def test_settings_view_reads_models_from_store() -> None:
-    """SettingsView 必须从 useStore.models 读,不能维护 local useState。
+    """PreferencesModal 包含 Provider 配置 + 界面偏好(方案 B 分区滚动式)。
 
-    WHY:旧实现 useState<Model[]>([]) + useEffect([]) 只拉一次,
-    ModelConfigModal 切完调 setModels 写进 store,SettingsView 的 local
-    state 不动,「共配置 N 个模型」永远停在初值。修复:直接从 store 读,
-    自动 re-render。
+    WHY 2026-07-19:设置弹窗采用分区滚动式布局,
+    PROVIDER 区块提供 Base URL + API Key 的发现/导入流程,
+    界面区块提供思考模式 / 深色模式 toggle。
     """
-    settings = (REPO_ROOT / "frontend/src/components/desktop/SettingsView.tsx").read_text(encoding="utf-8")
+    modal = (REPO_ROOT / "frontend/src/components/desktop/PreferencesModal.tsx").read_text(encoding="utf-8")
 
-    # 1) 必须从 useStore 读 models(不能 useState)
-    assert "useStore" in settings, "SettingsView 必须 import useStore"
-    assert re.search(
-        r"useStore\(\s*\(\s*\w+\s*\)\s*=>\s*\w+\.models\s*\)",
-        settings,
-    ), "SettingsView 必须用 useStore((s) => s.models) 读 models"
-    assert "useState<Model[]>" not in settings, (
-        "SettingsView 不能用 useState<Model[]>([]) 维护 local models,否则 ModelConfigModal 切完不会触发它 re-render"
-    )
-    # 2) 不应再有自己的 loadModels effect
-    assert "useEffect" not in settings or "apiFetch('/api/models')" not in settings, (
-        "SettingsView 不应再 useEffect 拉 /api/models — 由 ModelConfigModal 维护 store.models 即可"
+    # 1) 必须有 Provider 发现和导入函数
+    assert "discoverProviderModels" in modal, "PreferencesModal 必须 import discoverProviderModels"
+    assert "importProviderModels" in modal, "PreferencesModal 必须 import importProviderModels"
+
+    # 2) 导入后调 refreshModelsIntoStore 同步 store
+    assert "refreshModelsIntoStore" in modal, (
+        "PreferencesModal 导入后必须调 refreshModelsIntoStore 同步 store"
     )

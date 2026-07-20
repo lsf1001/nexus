@@ -10,7 +10,7 @@ WHY 存在:
 
 WHY 用正则而非 LLM 调 LLM:
   对齐 DeepAgents 框架设计原则 —— 中间件层不该再调 LLM(IntentClassifier
-  外挂是反模式,见 docs/superpowers/plans/2026-06-29-deepagents-native-refactor.md)。
+  外挂是反模式;当前架构与中间件链顺序见 SPEC.md)。
   正则判定轻量、可单测、可单元回归覆盖。
 
 DeepAgents 0.6.12 middleware 接口: ``wrap_model_call(request, handler)``,

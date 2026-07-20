@@ -20,7 +20,8 @@ from .api.ws import (
     require_token,
 )
 from .config import CONFIG
-from .mcp import load_all_mcp_tools
+from .mcp import find_mcp_config, load_all_mcp_tools
+from .memory import USER_MEMORY_PATH
 from .models_config import get_active_model
 from .observability import setup_logging
 from .routes import model_config as model_config_routes
@@ -314,6 +315,65 @@ async def trigger_compact() -> dict[str, Any]:
     return {
         "success": True,
         "message": "上下文压缩已触发，将在下一轮对话时生效",
+    }
+
+
+@app.get(f"{API_PREFIX}/memory", dependencies=[Depends(require_token)])
+async def get_memory() -> dict[str, Any]:
+    """读取用户级长期记忆文件(~/.nexus/AGENTS.md)。
+
+    由 deepagents MemoryMiddleware 维护,LLM 跨会话持久化的偏好 / 事实 / 规则。
+    返回 exists/path/content/bytes/lines,前端记忆面板据此渲染。
+    """
+    path = USER_MEMORY_PATH
+    if path.exists():
+        raw = path.read_text(encoding="utf-8")
+        return {
+            "exists": True,
+            "path": str(path),
+            "content": raw,
+            "bytes": len(raw.encode("utf-8")),
+            "lines": raw.count("\n") + 1 if raw else 0,
+        }
+    return {
+        "exists": False,
+        "path": str(path),
+        "content": "",
+        "bytes": 0,
+        "lines": 0,
+    }
+
+
+@app.get(f"{API_PREFIX}/mcp/tools", dependencies=[Depends(require_token)])
+async def get_mcp_tools() -> dict[str, Any]:
+    """列出已连接的 MCP 服务器与加载到的工具(供前端工具面板展示)。
+
+    复用主进程已加载的 ``_mcp_tools`` 全局(agent 构造时由 load_all_mcp_tools
+    填充),不重新 spawn stdio server,避免每次请求 8s 超时。find_mcp_config
+    给出服务器配置来源,用于展示"已配置但未加载"的服务器。
+    """
+    global _mcp_tools
+    servers = find_mcp_config()
+    server_list = [
+        {
+            "name": s.get("name", "unknown"),
+            "source": s.get("source", ""),
+            "enabled": s.get("disabled", False) is False,
+        }
+        for s in servers
+    ]
+    tools = [
+        {
+            "name": getattr(t, "name", str(t)),
+            "description": (getattr(t, "description", "") or "").strip(),
+        }
+        for t in (_mcp_tools or [])
+    ]
+    return {
+        "servers": server_list,
+        "tools": tools,
+        "server_count": len(server_list),
+        "tool_count": len(tools),
     }
 
 
