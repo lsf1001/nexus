@@ -83,7 +83,7 @@ describe('messageListPropsAreEqual 比较器', () => {
     const prev = makeProps([msg('a', 'hi'), msg('b', 'p')]);
     const next = makeProps([
       prev.messages[0]!,
-      msg('b', 'p', { toolCalls: [{ id: 't1', name: 'x', args: {}, status: 'pending' }] }),
+      msg('b', 'p', { toolCalls: [{ id: 't1', name: 'x', args: {}, state: 'running' }] }),
     ]);
     expect(messageListPropsAreEqual(prev, next)).toBe(false);
   });
