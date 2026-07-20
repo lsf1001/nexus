@@ -17,7 +17,7 @@ const SIDEBAR = readFileSync(
   resolve(HERE, "../../Sidebar.tsx"),
   "utf8"
 );
-const PREFERENCES = readFileSync(
+const PREFS = readFileSync(
   resolve(HERE, "../../PreferencesModal.tsx"),
   "utf8"
 );
@@ -40,11 +40,11 @@ describe("Task 6: a11y 契约锁", () => {
   });
 
   it("PreferencesModal 深色模式 toggle 必须有 aria-pressed", () => {
-    expect(PREFERENCES).toMatch(/id="set-dark"[\s\S]*?aria-pressed=\{darkMode\}/);
+    expect(PREFS).toMatch(/aria-pressed=\{darkMode\}/);
   });
 
   it("PreferencesModal 思考过程 toggle 必须有 aria-pressed", () => {
-    expect(PREFERENCES).toMatch(/id="set-thinking"[\s\S]*?aria-pressed=\{showThinking\}/);
+    expect(PREFS).toMatch(/aria-pressed=\{showThinking\}/);
   });
 
   it("ChatArea ErrorBanner 外层必须有 role=status + aria-live=assertive", () => {

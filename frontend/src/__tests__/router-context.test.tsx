@@ -37,6 +37,7 @@ const mockCtx: DesktopShellContext = {
   isModelConfigured: true,
   setModelConfigured: () => {},
   onOpenPreferences: () => {},
+  onOpenWechat: () => {},
 };
 
 function ProbeChild() {

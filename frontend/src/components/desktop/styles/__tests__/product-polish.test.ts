@@ -63,18 +63,19 @@ describe("Task 5: prompt-card hover 视觉强化", () => {
   });
 });
 
-describe("Task 7: sidebar-footer Claude 风格底栏(账户 + 版本)", () => {
-  it(".sidebar-footer 必须有顶部分隔线 + flex 两端对齐", () => {
+describe("Task 7: sidebar-footer Claude 风格底栏(设置 + 版本)", () => {
+  it(".sidebar-footer 必须有顶部分隔线 + 横排布局", () => {
     const body = extractBlock(SHELL, ".sidebar-footer");
     expect(body, "shell.css 缺 .sidebar-footer").not.toBeNull();
     expect(body!, "底栏缺顶部分隔线").toMatch(/border-top:\s*1px solid var\(--line\)/);
-    expect(body!, "底栏未两端对齐(账户 / 版本)").toMatch(/justify-content:\s*space-between/);
+    expect(body!, "底栏未横排布局").toMatch(/justify-content:\s*space-between/);
   });
 
   it(".sidebar-version 小字版本号", () => {
+    // 2026-07-18 全局字号 +2px(用户要求"所有字号都调大"),版本号 11px → 13px。
     const body = extractBlock(SHELL, ".sidebar-version");
     expect(body, "shell.css 缺 .sidebar-version").not.toBeNull();
-    expect(body!, "版本号字号非 11px").toMatch(/font-size:\s*11px/);
+    expect(body!, "版本号字号非 13px").toMatch(/font-size:\s*13px/);
   });
 });
 

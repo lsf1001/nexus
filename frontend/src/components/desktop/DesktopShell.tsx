@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../../store';
 import { useBootstrap } from './hooks/useBootstrap';
@@ -8,6 +8,8 @@ import { useChannelStatusPolling } from '../../hooks/useChannelStatusPolling';
 import { useConversationCrud } from './hooks/useConversationCrud';
 import { PreferencesModal } from './PreferencesModal';
 import { ShellLayout } from './ShellLayout';
+import { CommandPalette } from './CommandPalette';
+import { WeChatModal } from './WeChatModal';
 import type { Conversation } from '../../types';
 
 /**
@@ -35,6 +37,8 @@ export interface DesktopShellContext {
   setModelConfigured: (configured: boolean) => void;
   // 偏好设置
   onOpenPreferences: () => void;
+  // 微信通道弹窗
+  onOpenWechat: () => void;
 }
 
 /**
@@ -63,24 +67,71 @@ export function DesktopShell() {
   const isModelConfigured = modelConfigured ?? initialView === 'chat';
 
   const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [wechatOpen, setWechatOpen] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
 
   const navigate = useNavigate();
 
   const modelName = useStore((state) => state.modelName);
 
-  const handleNewTask = (): void => {
+  const handleNewTask = useCallback((): void => {
     onNewTask();
     navigate('/chat');
-  };
+  }, [onNewTask, navigate]);
+
+  const handleOpenPreferences = useCallback(() => setPreferencesOpen(true), []);
+  const handleClosePreferences = useCallback(() => setPreferencesOpen(false), []);
+  const handleOpenWechat = useCallback(() => setWechatOpen(true), []);
+  const handleCloseWechat = useCallback(() => setWechatOpen(false), []);
+
+  // 监听来自 ModelSelector"配置自定义模型"按钮的自定义事件
+  useEffect(() => {
+    const handler = (): void => setPreferencesOpen(true);
+    window.addEventListener('nexus:open-preferences', handler);
+    return () => window.removeEventListener('nexus:open-preferences', handler);
+  }, []);
+
+  // 监听顶栏 ⌘K 入口按钮触发的命令面板打开事件
+  useEffect(() => {
+    const handler = (): void => setPaletteOpen(true);
+    window.addEventListener('nexus:open-command-palette', handler);
+    return () => window.removeEventListener('nexus:open-command-palette', handler);
+  }, []);
 
   useGlobalShortcuts({
     onNewTask: handleNewTask,
-    // 第十四轮:搜索 input 已删,快捷键暂 noop,待后续 Task 5 整合或重新设计
-    onFocusSearch: () => {},
+    onFocusSearch: () => setPaletteOpen(true),
     onFocusComposer: () => focusElement('.composer-textarea'),
     onCloseModal: () => closeTopModal(),
   });
+
+  // useMemo 必须在 early return 之前调用(React Hooks 规则)
+  const shellCtx = useMemo<DesktopShellContext>(
+    () => ({
+      conversations,
+      currentConversationId,
+      onSelectConversation,
+      onDeleteConversation,
+      onNewTask: handleNewTask,
+      modelName,
+      wsConnected,
+      wechatConnected,
+      onConnectedChange: setWsConnected,
+      onSessionCreated,
+      resetCounter,
+      isBootstrapping,
+      isModelConfigured,
+      setModelConfigured,
+      onOpenPreferences: handleOpenPreferences,
+      onOpenWechat: handleOpenWechat,
+    }),
+    [
+      conversations, currentConversationId, onSelectConversation, onDeleteConversation,
+      handleNewTask, modelName, wsConnected, wechatConnected, onSessionCreated,
+      resetCounter, isBootstrapping, isModelConfigured, handleOpenPreferences, handleOpenWechat,
+    ],
+  );
 
   if (isBootstrapping) {
     return (
@@ -94,33 +145,23 @@ export function DesktopShell() {
     );
   }
 
-  const shellCtx: DesktopShellContext = {
-    conversations,
-    currentConversationId,
-    onSelectConversation,
-    onDeleteConversation,
-    // 新建对话:既重置会话又导航到 /chat(handleNewTask 内含 navigate)。
-    // Sidebar 单测在无 Router 环境渲染,故导航放外壳层而非 Sidebar 内部。
-    onNewTask: handleNewTask,
-    modelName,
-    wsConnected,
-    wechatConnected,
-    onConnectedChange: setWsConnected,
-    onSessionCreated,
-    resetCounter,
-    isBootstrapping,
-    isModelConfigured,
-    setModelConfigured,
-    onOpenPreferences: () => setPreferencesOpen(true),
-  };
-
   return (
     <>
       <ShellLayout shellCtx={shellCtx} />
       <PreferencesModal
         open={preferencesOpen}
-        onClose={() => setPreferencesOpen(false)}
+        onClose={handleClosePreferences}
       />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNewTask={handleNewTask}
+        onOpenPreferences={handleOpenPreferences}
+        onOpenWechat={handleOpenWechat}
+        conversations={conversations}
+        onSelectConversation={onSelectConversation}
+      />
+      <WeChatModal open={wechatOpen} onClose={handleCloseWechat} />
     </>
   );
 }

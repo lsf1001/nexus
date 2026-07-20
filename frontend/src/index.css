@@ -199,7 +199,7 @@ html, body {
 
 /* Prose 样式调整 */
 .prose {
-  font-size: 15px;
+  font-size: 17px;
   line-height: 1.65;
 }
 
@@ -207,7 +207,7 @@ html, body {
   background: rgba(0, 0, 0, 0.08);
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .prose pre {
@@ -216,7 +216,7 @@ html, body {
   padding: 16px 20px;
   border-radius: 8px;
   overflow-x: auto;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .prose pre code {
@@ -325,28 +325,13 @@ html, body {
   }
 }
 
-/* ===== 顶层容器布局(由 tokens.css 迁入,Task 1.2 收敛进 index.css) =====
- * 整窗直铺 grid:264px sidebar + 余下 main(参考 Claude Desktop 全屏
- * native chrome)。之前 tokens.css 的 .nexus-desktop 布局块在 1.1 重构后
- * 已不再被 import,这里迁回 index.css 保证布局不丢。 */
+/* ===== 顶层容器布局由 artifacts.css 接管(三栏 grid)=====
+ * 这里只留 box-sizing / 字体继承 / drag-region 等"非布局"通用样式。 */
+
 .nexus-desktop *,
 .nexus-desktop *::before,
 .nexus-desktop *::after {
   box-sizing: border-box;
-}
-
-.nexus-desktop {
-  height: 100vh;
-  min-width: 100vw;
-  overflow: hidden;
-  color: var(--ink);
-  font-family: var(--font-sans);
-  background: var(--paper);
-  display: grid;
-  /* 三区布局:左 264px Sidebar | 中 1fr(main/ChatArea) | 右 auto ArtifactsPanel。
-   * 右轨 auto:ArtifactsPanel 无 artifact 时返回 null(grid 无 item)→ 塌缩为 0 宽,
-   * 中列 1fr 吃满,`.chat-area` 保持全宽(e2e 契约)。有 artifact 时右轨=面板宽。 */
-  grid-template-columns: 264px minmax(0, 1fr) auto;
 }
 
 .nexus-desktop[data-theme="dark"] {

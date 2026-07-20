@@ -117,7 +117,7 @@ export async function sendMessageAndWaitForReply(
     // 最后一条 assistant 必须有非空文本
     const reply = await lastAssistantBubbleText(page);
     expect(reply.length).toBeGreaterThanOrEqual(minReplyLength);
-  }).toPass({ timeout: timeoutMs, intervals: [500, 1000, 2000] });
+  }).toPass({ timeout: timeoutMs, intervals: [500, 1000, 2000, 4000] });
 
   // 最后等输入框重新可点（流彻底结束、loading 状态彻底清掉）
   await expect(messageInput(page)).toBeEnabled({ timeout: timeoutMs });
@@ -125,7 +125,12 @@ export async function sendMessageAndWaitForReply(
 }
 
 /** 拿到页面上最后一个 assistant 气泡的纯文本。
- *  新 UI（2026-06 desktop shell）：assistant 气泡外层有 ``message-row.is-assistant`` 类。
+ *  新 UI（2026-06 desktop shell）：assistant 气泡外层有 ``message-row.is-assistant`` 类，
+ *  回复内容在 ``.message-markdown.assistant`` 内，由 ``<ReactMarkdown>`` 渲染为
+ *  h2/p/ul/li 等多种 markdown 元素,不是强制 ``<p>``。
+ *
+ *  优先读 ``.message-markdown.assistant`` 整块 innerText(覆盖 h2/p/ul/li/...)
+ *  当 ``<p>`` 子元素被 ReactMarkdown 当 heading-only 回复拆分时也能取到内容。
  *
  *  **不再 fallback 到 ``main p``.last()**:2026-07-12 实测当 assistant 行
  *  不存在时,``main p`` 会命中 user 气泡的 ``<p>``,导致 ``sendMessageAndWaitForReply``
@@ -133,7 +138,7 @@ export async function sendMessageAndWaitForReply(
  *  现在直接抛错,让 spec fail loud — 没有 assistant 气泡 = 旅程没完成。
  */
 export async function lastAssistantBubbleText(page: Page): Promise<string> {
-  const assistantRows = page.locator('.message-row.is-assistant p');
+  const assistantRows = page.locator('.message-row.is-assistant');
   const count = await assistantRows.count();
   if (count === 0) {
     throw new Error(
@@ -142,19 +147,26 @@ export async function lastAssistantBubbleText(page: Page): Promise<string> {
       + '原 fallback 会撞到 user bubble <p>,导致假阳 PASS — 现在直接抛错。',
     );
   }
-  return (await assistantRows.nth(count - 1).innerText()).trim();
+  const last = assistantRows.nth(count - 1);
+  // 优先读 .message-markdown.assistant 整块(覆盖 ReactMarkdown 所有 markdown 元素)
+  const markdown = last.locator('.message-markdown.assistant');
+  if (await markdown.count()) {
+    return (await markdown.innerText()).trim();
+  }
+  // 回退: 取整 bubble 文本(去掉顶部头像等装饰)
+  return (await last.innerText()).trim();
 }
 
 /** 拿到页面上最后一个 user 气泡的纯文本。
  *  新 UI（2026-06 desktop shell）：user 气泡外层有 ``message-row.is-user`` 类。
- *  取该类容器内的 ``<p>`` 文本。
+ *  取该类容器内的 ``<p>`` 文本(user 走简单 markdown,不经过 ReactMarkdown)。
  *
  *  **不再 fallback 到 ``main p``.first()**:2026-07-12 同 false-pass 教训
  *  — 助手的"思考过程"在 ``main p`` 里先出现,fallback 会撞到 assistant 流
  *  中的 ``<p>``,导致 user 内容断言失真。没有 user 行就抛错。
  */
 export async function lastUserBubbleText(page: Page): Promise<string> {
-  const userRows = page.locator('.message-row.is-user p');
+  const userRows = page.locator('.message-row.is-user');
   const count = await userRows.count();
   if (count === 0) {
     throw new Error(
@@ -162,7 +174,12 @@ export async function lastUserBubbleText(page: Page): Promise<string> {
       + '原 fallback 会撞到 assistant 流内的 <p>,导致断言失真 — 现在直接抛错。',
     );
   }
-  return (await userRows.nth(count - 1).innerText()).trim();
+  const last = userRows.nth(count - 1);
+  const p = last.locator('p');
+  if (await p.count()) {
+    return (await p.first().innerText()).trim();
+  }
+  return (await last.innerText()).trim();
 }
 
 /** 当前消息数（user + assistant 总和，按 main 区 .message-row 计数）。

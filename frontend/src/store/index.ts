@@ -22,6 +22,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { createArtifactsSlice, type ArtifactsSlice } from './slices/artifacts';
 import { createChannelsSlice, type ChannelsSlice } from './slices/channels';
 import { createConversationsSlice, type ConversationsSlice } from './slices/conversations';
+import { createMemorySlice, type MemorySlice } from './slices/memory';
 import { createUiPrefsSlice, type UiPrefsSlice } from './slices/uiPrefs';
 import { createWsStatusSlice, type WsStatusSlice } from './slices/wsStatus';
 
@@ -51,7 +52,7 @@ const safeStorage = {
 };
 
 export type Store =
-  UiPrefsSlice & WsStatusSlice & ConversationsSlice & ChannelsSlice & ArtifactsSlice;
+  UiPrefsSlice & WsStatusSlice & ConversationsSlice & ChannelsSlice & ArtifactsSlice & MemorySlice;
 
 export const useStore = create<Store>()(
   persist(
@@ -61,6 +62,7 @@ export const useStore = create<Store>()(
       ...createConversationsSlice(...a),
       ...createChannelsSlice(...a),
       ...createArtifactsSlice(...a),
+      ...createMemorySlice(...a),
     }),
     {
       name: 'nexus-preferences',

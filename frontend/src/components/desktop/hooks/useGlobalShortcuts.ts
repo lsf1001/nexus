@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useStore } from '../../../store';
 
 export interface UseGlobalShortcutsOptions {
   /** Cmd+N / Ctrl+N 新建对话 */
@@ -19,6 +20,9 @@ export interface UseGlobalShortcutsOptions {
  *   - Cmd+K 聚焦搜索框
  *   - Cmd+/ 聚焦 composer
  *   - Esc 关闭 modal
+ *
+ * 第十一轮(三栏重构,2026-07-20):
+ *   - Cmd+\ / Ctrl+\ 折叠/展开右栏 Artifacts 面板
  *
  * modKey = e.metaKey || e.ctrlKey,让 macOS / Win / Linux 通用。
  *
@@ -50,6 +54,13 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
         return;
       }
 
+      // Cmd+\ / Ctrl+\ 翻转右栏折叠态(SPEC §6)
+      if (modKey && e.key === '\\' && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        useStore.getState().toggleArtifactsCollapsed();
+        return;
+      }
+
       if (e.key === 'Escape' && !modKey) {
         // Esc 即便在 input / textarea 内也允许关闭 modal(典型 modal 行为)
         onCloseModal?.();
@@ -76,6 +87,7 @@ export function focusElement(selector: string): boolean {
  *  顺序原则:层级高 / 打开晚的排前面,保证 Esc 优先关最外层。 */
 export function closeTopModal(): boolean {
   const candidates = [
+    '.command-palette-overlay',
     '.preferences-modal-overlay',
     '.model-config-modal-overlay',
     '.wechat-plugin-modal-overlay',

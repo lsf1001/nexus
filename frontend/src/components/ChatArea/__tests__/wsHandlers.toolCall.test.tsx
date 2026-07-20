@@ -17,16 +17,6 @@ import type { StreamEvent } from '../../../types';
 
 function makeCtx(): WsRouterCtx {
   return {
-    stream: {
-      ensureAssistantPlaceholder: () => false,
-      appendToAssistant: () => undefined,
-      pushUserAndPlaceholder: () => undefined,
-      replaceAssistantWithPlaceholder: () => undefined,
-      reset: () => undefined,
-      snapshot: () => useStore.getState().conversationMessages,
-      markUserStopped: () => undefined,
-      allowsStreaming: () => true,
-    },
     setLastError: () => undefined,
     setIsLoading: () => undefined,
     setPendingClarification: () => undefined,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { apiFetch } from '../../../lib/api';
+import { refreshModelsIntoStore } from '../../../lib/models';
 
 export type BootstrapView = 'setup' | 'chat';
 
@@ -8,12 +8,6 @@ export interface BootstrapResult {
   isBootstrapping: boolean;
   /** 根据 /api/models 是否有已配置模型决定:有 → 'chat',无 → 'setup'。 */
   initialView: BootstrapView;
-}
-
-interface ModelRow {
-  api_key?: string;
-  is_active?: boolean;
-  name?: string;
 }
 
 /**
@@ -35,8 +29,9 @@ export function useBootstrap(): BootstrapResult {
 
     const bootstrap = async (): Promise<void> => {
       try {
-        const response = await apiFetch('/api/models');
-        const models = (await response.json()) as ModelRow[];
+        // 拉列表并灌 store(修复切换器下拉永远空)。列表接口 api_key 已掩码,
+        // 但非空即代表"已配置"—— 掩码值 "***xxxx" 或真实值都非空。
+        const models = await refreshModelsIntoStore();
         const hasConfiguredModel = models.some((model) => Boolean(model.api_key?.trim()));
 
         if (cancelled) return;

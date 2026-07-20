@@ -7,7 +7,7 @@
  * 的 inline helper,加一个唯一的 useChatSend 出口。
  */
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import type { WSMessage } from '../../../types';
 import type { LastError, SendFn } from '../types';
 
@@ -51,15 +51,22 @@ export function useChatSend(args: UseChatSendArgs) {
     pushUserAndPlaceholder,
   } = args;
 
+  // ref 桥接:读取最新值但不进入 useCallback deps,
+  // 避免 wsConnected 每次变化都重建 send → 级联重建 useChatAreaActions。
+  const wsConnectedRef = useRef(wsConnected);
+  wsConnectedRef.current = wsConnected;
+  const getReadyStateRef = useRef(getReadyState);
+  getReadyStateRef.current = getReadyState;
+
   return useCallback(
     (content: string) => {
       const trimmed = content.trim();
       if (!trimmed) return;
-      if (!wsConnected) {
+      if (!wsConnectedRef.current) {
         setLastError({ message: '连接尚未就绪，请稍后再试', retryable: true, code: 'ws_not_open', at: Date.now() });
         return;
       }
-      if (getReadyState() !== 1 /* WebSocket.OPEN */) {
+      if (getReadyStateRef.current() !== 1 /* WebSocket.OPEN */) {
         setLastError({ message: '连接尚未就绪，请稍后再试', retryable: true, code: 'ws_not_open', at: Date.now() });
         return;
       }
@@ -85,6 +92,6 @@ export function useChatSend(args: UseChatSendArgs) {
       }
       send(msg);
     },
-    [wsConnected, getReadyState, getSessionId, send, setIsLoading, setLastError, clearInput, armWatchdog, pushUserAndPlaceholder],
+    [getSessionId, send, setIsLoading, setLastError, clearInput, armWatchdog, pushUserAndPlaceholder],
   );
 }

@@ -1,5 +1,6 @@
-/* 第十四轮:从 preferences-drawer(右滑)改为 preferences-modal(居中模态)。
- * 蒙层复用 .modal-overlay 基础样式,新类名 .preferences-modal-overlay。 */
+/* ===== PreferencesModal 居中模态(2026-07-20 V3 美化)=====
+ * workbuddy 极简风格:紧凑 padding / 统一圆角 10px / 标题 14px / toggle 真开关 /
+ * 颜色 token 化(原来硬编码 #2563eb 蓝 / #16a34a 绿 → 用 var(--accent) / var(--ink) 系)。 */
 
 .modal-overlay.preferences-modal-overlay {
   position: fixed;
@@ -10,24 +11,35 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
 }
 
-.nexus-desktop[data-theme="dark"] .modal-overlay.preferences-modal-overlay {
+:root[data-theme="dark"] .modal-overlay.preferences-modal-overlay {
   background: rgba(0, 0, 0, 0.7);
 }
 
 .preferences-modal {
-  width: min(480px, 92vw);
+  width: min(520px, 92vw);
   max-height: 88vh;
   background: var(--paper);
   color: var(--ink);
-  border-radius: 16px;
+  border-radius: 12px;
   border: 1px solid var(--line);
-  box-shadow: var(--shadow-lg);
+  box-shadow:
+    0 24px 48px -12px rgba(0, 0, 0, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.02);
   display: flex;
   flex-direction: column;
   animation: preferences-modal-in 180ms ease-out;
   outline: none;
+  overflow: hidden;
+}
+
+:root[data-theme="dark"] .preferences-modal {
+  box-shadow:
+    0 24px 48px -12px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 @keyframes preferences-modal-in {
@@ -39,105 +51,365 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 24px 14px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--line);
 }
 
 .preferences-modal-header h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--ink);
+  letter-spacing: 0.01em;
 }
 
 .preferences-modal-close {
   background: none;
   border: 0;
-  font-size: 16px;
-  color: var(--ink-2);
+  color: var(--ink-3);
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
   border-radius: 6px;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .preferences-modal-close:hover {
   background: var(--paper-2);
   color: var(--ink);
 }
+.preferences-modal-close svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.5;
+}
 
 .preferences-modal-body {
-  padding: 8px 24px 24px;
+  padding: 8px 20px 20px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ===== 分区(§1 PROVIDER / §2 界面 / §3 关于) ===== */
+.settings-section {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-section + .settings-section {
+  padding-top: 4px;
+}
+.settings-section:last-child {
+  border-bottom: none;
+  padding-bottom: 4px;
+}
+
+.settings-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 10px 0 8px;
+  margin: 0;
+}
+
+:root[data-theme="dark"] .settings-section-title {
+  color: var(--ink-3);
+}
+
+/* ===== §1 Provider 表单 ===== */
+.provider-hint {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+
+.provider-form {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-/* 设置区块(模型配置 / 界面) */
-.settings-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  padding: 16px 0 8px;
-}
-
-.settings-section:first-child .settings-section-title {
-  padding-top: 4px;
-}
-
-.preferences-modal-body .setting-row {
-  display: grid;
-  grid-template-columns: 80px 1fr;
+.provider-actions {
+  display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
-}
-.preferences-modal-body .setting-row:last-child {
-  border-bottom: 0;
+  gap: 8px;
+  padding-top: 8px;
 }
 
-.preferences-modal-body .setting-row label {
-  font-size: 13px;
-  color: var(--ink);
+.provider-discovered-list {
+  margin-top: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--paper-2);
+}
+
+.provider-model-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  border-radius: 6px;
+  background: var(--paper);
+}
+
+.provider-model-id {
   font-weight: 500;
+  font-family: ui-monospace, 'SF Mono', monospace;
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
-.preferences-modal-body .setting-row-meta {
+.provider-model-owner {
+  font-size: 11px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+:root[data-theme="dark"] .provider-hint {
+  color: var(--ink-2);
+}
+
+/* ===== §2 已导入模型管理(预留) ===== */
+.models-empty {
   font-size: 12px;
   color: var(--ink-3);
+  text-align: center;
+  padding: 12px 0;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+:root[data-theme="dark"] .models-empty {
+  border-color: var(--line);
 }
 
-.preferences-modal-body select,
-.preferences-modal-body input[type="checkbox"],
-.preferences-modal-body input[type="text"],
-.preferences-modal-body input[type="password"],
-.preferences-modal-body input[type="number"] {
+.models-manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.model-manage-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: background 150ms, border-color 150ms;
+}
+.model-manage-row:hover {
+  background: var(--paper-2);
+}
+.model-manage-row.is-active {
+  border-color: var(--ink-2);
+  background: var(--paper-2);
+}
+
+.model-manage-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 8px;
+}
+.model-manage-main:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.model-manage-name {
   font-size: 13px;
+  font-weight: 500;
   color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.model-manage-base {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-family: ui-monospace, 'SF Mono', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.model-manage-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--ink);
+  border-radius: 999px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+  line-height: 1.6;
+}
+
+.model-manage-delete {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: none;
   border-radius: 6px;
-  padding: 7px 10px;
-  outline: none;
-  transition: border-color 150ms;
+  font-size: 14px;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background 150ms, color 150ms;
+}
+.model-manage-delete:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
 }
 
-.preferences-modal-body input:focus {
-  border-color: var(--ink);
+/* ===== §2 界面偏好 — 真 toggle 开关(V3)=====
+ * 用 36x20 圆角胶囊 + 滑块,workbuddy 极简风格。激活态滑块右移。 */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
 }
 
-/* API 密钥输入组(输入框 + 状态提示) */
-.setting-input-group {
+.setting-row-label {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
 
-.setting-input-group input {
+.setting-row-label-main {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.setting-row-label-hint {
+  font-size: 11px;
+  color: var(--ink-3);
+  line-height: 1.4;
+}
+
+.setting-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  background: var(--line);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.18s ease;
+}
+.setting-toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--paper);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  transition: transform 0.18s ease;
+}
+.setting-toggle[aria-pressed="true"] {
+  background: var(--ink);
+}
+.setting-toggle[aria-pressed="true"]::after {
+  transform: translateX(16px);
+}
+.setting-toggle:focus-visible {
+  outline: 2px solid var(--ink-2);
+  outline-offset: 2px;
+}
+
+:root[data-theme="dark"] .setting-toggle {
+  background: var(--line);
+}
+:root[data-theme="dark"] .setting-toggle[aria-pressed="true"] {
+  background: #ededed;
+}
+:root[data-theme="dark"] .setting-toggle::after {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* ===== §3 关于 ===== */
+.about-version {
+  font-size: 12px;
+  color: var(--ink-3);
+  padding: 4px 0 4px;
+  font-family: ui-monospace, 'SF Mono', monospace;
+}
+
+.setting-row input[type="text"],
+.setting-row input[type="password"],
+.setting-row input[type="number"] {
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
   width: 100%;
+  box-sizing: border-box;
+}
+
+.setting-row input:focus {
+  border-color: var(--ink-2);
+  background: var(--paper);
+}
+.setting-row input.is-error {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.04);
+}
+:root[data-theme="dark"] .setting-row input.is-error {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.setting-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
 }
 
 .setting-input-hint {
@@ -145,30 +417,235 @@
   color: var(--ink-3);
 }
 
-/* 保存操作行(状态 + 按钮) */
 .setting-row-actions {
-  grid-template-columns: 1fr auto !important;
-  gap: 8px !important;
+  justify-content: flex-end;
 }
 
 .setting-status {
   font-size: 12px;
   color: var(--ink-3);
+  padding: 4px 0;
 }
-.setting-status.is-error { color: #dc2626; }
-.setting-status.is-ok { color: #16a34a; }
+.setting-status.is-error { color: #ef4444; }
+.setting-status.is-ok { color: #10b981; }
 
-.setting-btn-primary {
+/* ===== 按钮 — 统一 8px 圆角 / 13px 字号 / 紧凑 padding ===== */
+.setting-btn-primary,
+.setting-btn-success {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--paper);
   background: var(--ink);
-  color: #fff;
-  border: none;
+  border: 1px solid var(--ink);
   border-radius: 8px;
-  padding: 7px 18px;
+  padding: 7px 14px;
   cursor: pointer;
   white-space: nowrap;
-  transition: opacity 150ms;
+  transition: background 0.15s ease, opacity 0.15s ease;
 }
-.setting-btn-primary:hover { opacity: 0.88; }
-.setting-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+.setting-btn-primary:hover {
+  background: var(--ink-2);
+  border-color: var(--ink-2);
+}
+.setting-btn-primary:disabled {
+  background: var(--line);
+  border-color: var(--line);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+/* 导入按钮 — 略深色以与"发现"区分 */
+.setting-btn-success {
+  background: var(--ink-2);
+  border-color: var(--ink-2);
+}
+.setting-btn-success:hover {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.setting-btn-success:disabled {
+  background: var(--line);
+  border-color: var(--line);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+/* ===== 模型管理(预留扩展) ===== */
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-add-btn {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.settings-add-btn:hover {
+  background: var(--paper);
+  border-color: var(--ink-3);
+}
+.settings-add-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 8px;
+}
+
+.model-list-empty {
+  font-size: 12px;
+  color: var(--ink-3);
+  padding: 12px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+
+.model-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.model-card.is-active {
+  border-color: var(--ink-2);
+  box-shadow: 0 0 0 1px var(--ink-2) inset;
+}
+
+.model-card-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.model-card-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  min-width: 0;
+}
+.model-card-name > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.model-card-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.model-card-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--ink);
+  border-radius: 999px;
+  padding: 0 7px;
+  flex-shrink: 0;
+  line-height: 16px;
+}
+
+.model-card-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--ink-3);
+  font-family: ui-monospace, 'SF Mono', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.model-card-btn {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.model-card-btn:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+.model-card-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.model-card-btn.is-danger:hover:not(:disabled) {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.model-form {
+  padding: 4px 0 8px;
+}
+
+.model-form-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 4px 0 8px;
+}
+
+.model-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.model-form-cancel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.model-form-cancel:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+.model-form-cancel:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

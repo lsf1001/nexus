@@ -35,7 +35,7 @@
   background: var(--accent-soft);
   color: var(--ink);
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 800;
   letter-spacing: 0.02em;
 }
@@ -83,7 +83,7 @@
 .card-heading h2,
 .wechat-bind-card h2 {
   margin: 0 0 6px;
-  font-size: 28px;
+  font-size: 30px;
   letter-spacing: -0.012em;
   color: var(--ink);
   font-weight: 800;
@@ -102,7 +102,7 @@
   background: var(--accent-soft);
   color: var(--ink);
   padding: 6px 11px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -115,7 +115,7 @@
   display: grid;
   gap: 8px;
   margin-bottom: 14px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   color: var(--ink);
 }
@@ -159,7 +159,7 @@
   background: var(--accent-soft);
   color: var(--ink);
   padding: 12px 13px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   margin: 6px 0 18px;
   line-height: 1.5;
@@ -258,7 +258,7 @@
   color: white;
   display: grid;
   place-items: center;
-  font-size: 26px;
+  font-size: 28px;
   font-weight: 900;
   box-shadow: 0 16px 36px rgba(7, 193, 96, 0.22);
 }
@@ -288,7 +288,7 @@
   background: rgba(215, 167, 102, 0.18);
   color: #8a5e1f;
   padding: 7px 13px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 750;
   letter-spacing: 0.01em;
 }
@@ -348,12 +348,12 @@
 
 .inbox-header strong {
   color: var(--ink);
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .inbox-header .btn-secondary {
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .wechat-inbox ul {
@@ -382,13 +382,13 @@
 
 .inbox-time {
   color: var(--ink-2);
-  font-size: 12px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 
 .inbox-content {
   color: var(--ink);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.5;
   word-break: break-word;
 }
@@ -400,13 +400,13 @@
 
 .wechat-status-list strong {
   margin-bottom: 4px;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--ink);
 }
 
 .wechat-status-list span {
   color: var(--ink-2);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -469,13 +469,13 @@
 .setting-row span {
   color: var(--ink-2);
   margin-top: 4px;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
 }
 
 .setting-row strong {
   color: var(--ink);
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
 }
 
@@ -486,7 +486,7 @@
   border-radius: var(--r-sm);
   padding: 9px 12px;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 15px;
   min-width: 84px;
   max-width: 100%;
   text-align: center;
@@ -554,7 +554,7 @@
 
 .wechat-copy-inline h1 {
   margin: 0;
-  font-size: 28px;
+  font-size: 30px;
   line-height: 1.26;
   letter-spacing: -0.006em;
   color: var(--ink);
@@ -566,7 +566,7 @@
   max-width: 520px;
   line-height: 1.78;
   color: var(--ink-2);
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .wechat-extra-actions {
@@ -587,7 +587,7 @@
   border-radius: var(--r-md);
   background: var(--paper);
   box-shadow: 0 10px 32px rgba(24, 26, 32, 0.18);
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink);
   animation: context-menu-in 120ms ease-out;
 }
@@ -633,7 +633,7 @@
 
 .context-menu-floating .kbd-hint {
   margin-left: auto;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--ink-2);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   opacity: 0.7;
@@ -678,7 +678,7 @@
   color: var(--paper);
   border-radius: 12px;
   padding: 8px 14px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -695,7 +695,7 @@
   border: 1px dashed var(--line);
   border-radius: 12px;
   color: var(--ink-2);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .channel-inbox > button {
@@ -705,7 +705,7 @@
   color: var(--ink-2);
   border-radius: 8px;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -725,13 +725,13 @@
 }
 
 .channel-inbox-user {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--ink-2);
   margin-bottom: 4px;
 }
 
 .channel-inbox-content {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink);
 }
 

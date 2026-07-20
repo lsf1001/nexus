@@ -1,0 +1,362 @@
+import { useCallback, useEffect, useState } from 'react';
+import { useStore } from '../store';
+import type { Model } from '../types';
+import { apiFetch, getApiBase } from '../lib/api';
+import { openContextMenuAt } from '../lib/useContextMenuTrigger';
+
+interface ModelConfigModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onModelChange?: (name: string) => void;
+}
+
+function ModelConfigModal({ isOpen, onClose, onModelChange }: ModelConfigModalProps) {
+  const models = useStore((s) => s.models);
+  const setModels = useStore((s) => s.setModels);
+  const setModelName = useStore((s) => s.setModelName);
+  const [editingModel, setEditingModel] = useState<Model | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [formData, setFormData] = useState({
+    id: '',
+    name: '',
+    api_key: '',
+    api_base: 'https://api.minimaxi.com/v1',
+    temperature: 0.7,
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const apiUrl = `${getApiBase()}/api`;
+
+  const loadModels = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${apiUrl}/models`);
+      const data = await res.json();
+      setModels(data);
+      // 同步 modelName:从最新 models 里找 is_active 的。
+      // 之前 useStore.modelName 只有 useBootstrap 启动时设一次,切模型后
+      // SettingsView / ChatView 还显示旧名字。设在这里之后,任何 path
+      // (modal load / 切完 reload / 外部 reload) 都能保证 modelName 同步。
+      const active = (data as Model[]).find((m) => m.is_active);
+      if (active) setModelName(active.name);
+    } catch {
+      console.error('加载模型失败');
+    }
+  }, [apiUrl, setModels, setModelName]);
+
+  const resetForm = useCallback(() => {
+    setFormData({
+      id: `model-${Date.now()}`,
+      name: '',
+      api_key: '',
+      api_base: 'https://api.minimaxi.com/v1',
+      temperature: 0.7,
+    });
+    setEditingModel(null);
+    setIsCreating(false);
+    setError(null);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    resetForm();
+    onClose();
+  }, [onClose, resetForm]);
+
+  useEffect(() => {
+    if (isOpen) {
+      void loadModels();
+    }
+  }, [isOpen, loadModels]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleClose, isOpen]);
+
+  const handleCreateNew = () => {
+    setIsCreating(true);
+    setEditingModel(null);
+    setFormData({
+      id: `model-${Date.now()}`,
+      name: '',
+      api_key: '',
+      api_base: 'https://api.minimaxi.com/v1',
+      temperature: 0.7,
+    });
+  };
+
+  const handleEdit = (model: Model) => {
+    setIsCreating(false);
+    setEditingModel(model);
+    setFormData({
+      id: model.id,
+      name: model.name,
+      api_key: model.api_key || '',
+      api_base: model.api_base || 'https://api.minimaxi.com/v1',
+      temperature: model.temperature,
+    });
+  };
+
+  const handleDelete = async (modelId: string) => {
+    if (!confirm('确定要删除这个模型吗？')) return;
+    setLoading(true);
+    try {
+      const res = await apiFetch(`${apiUrl}/models/${modelId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        await loadModels();
+      } else {
+        setError(data.error || '删除失败');
+      }
+    } catch {
+      setError('删除失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSwitch = async (modelId: string) => {
+    setLoading(true);
+    try {
+      const res = await apiFetch(`${apiUrl}/models/switch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: modelId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        // 立即同步 modelName,不等 loadModels 完成。SettingsView / ChatView
+        // 标题立即反映新模型;loadModels 内部还会再同步一次做兜底。
+        if (data.active_model?.name) setModelName(data.active_model.name);
+        await loadModels();
+        onModelChange?.(data.active_model.name);
+      } else {
+        setError(data.error || '切换失败');
+      }
+    } catch {
+      setError('切换失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!formData.name.trim()) {
+      setError('请输入模型名称');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (isCreating) {
+        const res = await apiFetch(`${apiUrl}/models`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData),
+        });
+        const data = await res.json();
+        if (data.success) {
+          await loadModels();
+          resetForm();
+        } else {
+          setError(data.error || '创建失败');
+        }
+      } else if (editingModel) {
+        const res = await apiFetch(`${apiUrl}/models/${editingModel.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData),
+        });
+        const data = await res.json();
+        if (data.success) {
+          await loadModels();
+          resetForm();
+        } else {
+          setError(data.error || '更新失败');
+        }
+      }
+    } catch {
+      setError(isCreating ? '创建失败' : '更新失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50" onClick={handleClose}>
+      <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 bg-gray-900">
+          <h2 className="text-lg font-semibold text-white">模型配置</h2>
+          <button
+            onClick={handleClose}
+            className="w-8 h-8 rounded-full bg-gray-900 hover:bg-gray-700 text-white flex items-center justify-center transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 max-h-[60vh] overflow-y-auto">
+          {/* 模型列表 */}
+          {!isCreating && !editingModel && (
+            <div className="space-y-3">
+              {models.map((model) => (
+                <div
+                  key={model.id}
+                  className={`p-4 rounded-2xl border transition-all ${
+                    model.is_active
+                      ? 'border-gray-900 bg-gray-50'
+                      : 'border-gray-200 hover:border-gray-700'
+                  }`}
+                  onContextMenu={(e) =>
+                    openContextMenuAt(
+                      e,
+                      `模型: ${model.name}\n${model.api_base}\n温度: ${model.temperature}\n${model.is_active ? '当前使用中' : '备用'}`,
+                      '模型'
+                    )
+                  }
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">{model.name}</span>
+                        {model.is_active && (
+                          <span className="px-2 py-0.5 bg-gray-900 text-white text-xs rounded-full">
+                            使用中
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">{model.api_base}</p>
+                      <p className="text-xs text-gray-500">
+                        温度参数：{model.temperature}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      {!model.is_active && (
+                        <button
+                          onClick={() => handleSwitch(model.id)}
+                          disabled={loading || !model.api_key}
+                          className="px-3 py-1 text-xs rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50"
+                        >
+                          切换
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleEdit(model)}
+                        className="px-3 py-1 text-xs rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600"
+                      >
+                        编辑
+                      </button>
+                      <button
+                        onClick={() => handleDelete(model.id)}
+                        disabled={models.length <= 1}
+                        className="px-3 py-1 text-xs rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* 添加按钮 */}
+              <button
+                onClick={handleCreateNew}
+                className="w-full py-3 rounded-xl border-2 border-dashed border-gray-300 text-gray-500 hover:border-gray-900 hover:text-gray-900 transition-colors"
+              >
+                + 添加模型
+              </button>
+            </div>
+          )}
+
+          {/* 表单 */}
+          {(isCreating || editingModel) && (
+            <div className="space-y-4">
+              {error && (
+                <div className="p-3 bg-red-50 text-red-600 text-sm rounded-xl">{error}</div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-1">模型名称</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="例如: MiniMax-M3"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-gray-900 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-1">API 地址</label>
+                <input
+                  type="text"
+                  value={formData.api_base}
+                  onChange={(e) => setFormData({ ...formData, api_base: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-gray-900 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-1">API 密钥</label>
+                <input
+                  type="password"
+                  value={formData.api_key}
+                  onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
+                  placeholder="输入 API 密钥"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-gray-900 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-1">
+                  温度参数：{formData.temperature}
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  value={formData.temperature}
+                  onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
+                  className="w-full accent-gray-900"
+                />
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>精确</span>
+                  <span>创意</span>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={handleSubmit}
+                  disabled={loading}
+                  className="flex-1 py-2 rounded-xl bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 transition-colors"
+                >
+                  {loading ? '保存中...' : '保存'}
+                </button>
+                <button
+                  onClick={resetForm}
+                  className="px-4 py-2 rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default ModelConfigModal;

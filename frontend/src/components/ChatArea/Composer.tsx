@@ -66,9 +66,6 @@ export function Composer({
             />
             <div className="composer-bottom">
               <ComposerToolbar />
-              <span className="hint">
-                {isLoading ? '正在生成中...可点击右侧按钮停止' : '个人任务助手 · 本地运行'}
-              </span>
               {isLoading ? (
                 <button
                   type="button"

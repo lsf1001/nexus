@@ -53,7 +53,7 @@
   .sidebar .footer-link {
     min-height: 32px;
     padding: 0 10px;
-    font-size: 12px;
+    font-size: 14px;
   }
 
   .main {
@@ -87,7 +87,7 @@
   .setup-copy h1,
   .wechat-copy h1,
   .settings-copy h1 {
-    font-size: 28px;
+    font-size: 30px;
   }
 
   .settings-list {
@@ -109,7 +109,7 @@
 
   .empty-state h1,
   .hero h1 {
-    font-size: 30px;
+    font-size: 32px;
   }
 
   /* 移动端 prompt grid 变 1 列 */

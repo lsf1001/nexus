@@ -13,6 +13,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useGlobalShortcuts } from "../useGlobalShortcuts";
+import { useStore } from "../../../../store";
 
 function fireKey(opts: {
   key: string;
@@ -92,5 +93,29 @@ describe("useGlobalShortcuts (Cmd+N/K// + Esc)", () => {
     renderHook(() => useGlobalShortcuts({ onNewTask }));
     fireKey({ key: "n", metaKey: true, shiftKey: true });
     expect(onNewTask).not.toHaveBeenCalled();
+  });
+
+  // 第十一轮(三栏重构,2026-07-20):Cmd+\ 翻转 Artifacts 折叠态
+  it("Cmd+\\ 翻转 Artifacts 折叠态", () => {
+    useStore.getState().setArtifactsCollapsed(true);
+    renderHook(() => useGlobalShortcuts({}));
+    fireKey({ key: "\\", metaKey: true });
+    expect(useStore.getState().artifactsCollapsed).toBe(false);
+    fireKey({ key: "\\", metaKey: true });
+    expect(useStore.getState().artifactsCollapsed).toBe(true);
+  });
+
+  it("Ctrl+\\ 也触发(Win/Linux 通用)", () => {
+    useStore.getState().setArtifactsCollapsed(true);
+    renderHook(() => useGlobalShortcuts({}));
+    fireKey({ key: "\\", ctrlKey: true });
+    expect(useStore.getState().artifactsCollapsed).toBe(false);
+  });
+
+  it("Shift+\\ 不触发折叠(只 plain Cmd+\\)", () => {
+    useStore.getState().setArtifactsCollapsed(true);
+    renderHook(() => useGlobalShortcuts({}));
+    fireKey({ key: "|", metaKey: true, shiftKey: true }); // Shift+\ 产出 |
+    expect(useStore.getState().artifactsCollapsed).toBe(true);
   });
 });

@@ -77,3 +77,129 @@ export function apiFetch(
   }
   return fetch(resolveApiUrl(input), { ...init, headers });
 }
+
+export interface MemoryInfo {
+  exists: boolean;
+  path: string;
+  content: string;
+  bytes: number;
+  lines: number;
+}
+
+/** 读取用户级长期记忆文件(~/.nexus/AGENTS.md)。 */
+export async function fetchMemory(): Promise<MemoryInfo> {
+  const res = await apiFetch('/api/memory');
+  if (!res.ok) {
+    throw new Error(`读取记忆失败: ${res.status}`);
+  }
+  return (await res.json()) as MemoryInfo;
+}
+
+// ============ MCP 工具 ============
+
+export interface McpServerInfo {
+  name: string;
+  source: string;
+  enabled: boolean;
+}
+
+export interface McpToolInfo {
+  name: string;
+  description: string;
+}
+
+export interface McpToolsResponse {
+  servers: McpServerInfo[];
+  tools: McpToolInfo[];
+  server_count: number;
+  tool_count: number;
+}
+
+/** 列出已连接的 MCP 服务器与加载到的工具。 */
+export async function fetchMcpTools(): Promise<McpToolsResponse> {
+  const res = await apiFetch('/api/mcp/tools');
+  if (!res.ok) {
+    throw new Error(`读取 MCP 工具失败: ${res.status}`);
+  }
+  return (await res.json()) as McpToolsResponse;
+}
+
+// ============ 微信通道 ============
+
+export interface WechatQrResponse {
+  success?: boolean;
+  qrcode_url?: string;
+  qrcode?: string;
+  session_key?: string;
+  error?: string;
+}
+
+export interface WechatBindStatus {
+  bound: boolean;
+  account_id?: string;
+  status?: string;
+}
+
+export interface ChannelInfo {
+  id: string;
+  type: string;
+  status: string;
+  enabled: boolean;
+}
+
+/** 获取微信登录二维码。 */
+export async function fetchWechatQr(): Promise<WechatQrResponse> {
+  const res = await apiFetch('/api/channels/wechat/qr', { method: 'POST' });
+  return (await res.json()) as WechatQrResponse;
+}
+
+/** 轮询微信二维码扫描状态。 */
+export async function fetchWechatQrStatus(
+  sessionKey: string,
+  timeoutMs = 10000,
+): Promise<Record<string, unknown>> {
+  const res = await apiFetch(
+    `/api/channels/wechat/status/${encodeURIComponent(sessionKey)}?timeout_ms=${timeoutMs}`,
+  );
+  return (await res.json()) as Record<string, unknown>;
+}
+
+/** 获取微信绑定状态。 */
+export async function fetchWechatBindStatus(): Promise<WechatBindStatus> {
+  const res = await apiFetch('/api/channels/wechat/bind');
+  return (await res.json()) as WechatBindStatus;
+}
+
+/** 绑定/恢复微信账号。 */
+export async function postWechatBind(): Promise<Record<string, unknown>> {
+  const res = await apiFetch('/api/channels/wechat/bind', { method: 'POST' });
+  return (await res.json()) as Record<string, unknown>;
+}
+
+/** 解除微信绑定。 */
+export async function deleteWechatBind(): Promise<Record<string, unknown>> {
+  const res = await apiFetch('/api/channels/wechat/bind', { method: 'DELETE' });
+  return (await res.json()) as Record<string, unknown>;
+}
+
+/** 获取所有通道状态。 */
+export async function fetchChannels(): Promise<ChannelInfo[]> {
+  const res = await apiFetch('/api/channels');
+  const data = (await res.json()) as { channels?: ChannelInfo[] };
+  return data.channels ?? [];
+}
+
+// ============ 模型切换 ============
+
+/** 切换当前激活模型并同步 store。失败抛错由调用方处理。 */
+export async function switchModel(id: string): Promise<void> {
+  const res = await apiFetch('/api/models/switch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`切换模型失败: ${res.status} ${detail}`);
+  }
+}
