@@ -2,25 +2,23 @@
  * 消息列表(MessageList) + 加载 spinner。
  *
  * 拆出原因:ChatArea function body 内 message-list map + isLoading 渲染占 20 行,
- * 抽出后 ChatArea 顶部 JSX 更接近"布局壳"。后续 Plan 2 Phase 2 会在这里加
- * React.memo(每个 ChatBubble 已经计划走 memo + 优化 prop 传输)。
+ * 抽出后 ChatArea 顶部 JSX 更接近“布局壳”。
  *
- * 注意:Memo 隔离尚未引入(Phase 1 只拆文件,不动 React 渲染层);准备好
- * Phase 2 时改 ChatBubble → React.memo + custom equality 即可,不需改这里。
+ * React.memo + 自定义比较器:见 ./messageListProps.ts。2026-07-20 修产品 bug —
+ * 流式期间最后一条 content 增量的更新需要 MessageList 比较器按值比较 content /
+ * thinking / toolCalls,不再把责任完全下放给 ChatBubble 自身的 memo。
  */
 
+import { memo } from 'react';
 import ChatBubble from '../ChatBubble';
-import type { Message } from '../../types';
+import {
+  messageListPropsAreEqual,
+  type MessageListProps,
+} from './messageListProps';
 
-export interface MessageListProps {
-  messages: ReadonlyArray<Message>;
-  showThinking: boolean;
-  isLoading: boolean;
-  onCopy?: (content: string) => void;
-  onRetry?: () => void;
-}
+export type { MessageListProps };
 
-export function MessageList({
+function MessageListInner({
   messages,
   showThinking,
   isLoading,
@@ -50,3 +48,5 @@ export function MessageList({
     </div>
   );
 }
+
+export const MessageList = memo(MessageListInner, messageListPropsAreEqual);
