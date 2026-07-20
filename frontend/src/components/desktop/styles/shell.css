@@ -1549,7 +1549,7 @@
 }
 
 .sidebar-version {
-  font-size: var(--font-2xs);
+  font-size: var(--font-sm);
   color: var(--sidebar-fg-tertiary, var(--ink-tertiary, #888));
   font-variant-numeric: tabular-nums;
 }

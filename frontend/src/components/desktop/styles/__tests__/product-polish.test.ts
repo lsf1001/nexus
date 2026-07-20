@@ -73,9 +73,12 @@ describe("Task 7: sidebar-footer Claude 风格底栏(设置 + 版本)", () => {
 
   it(".sidebar-version 小字版本号", () => {
     // 2026-07-18 全局字号 +2px(用户要求"所有字号都调大"),版本号 11px → 13px。
+    // 2026-07-21 token 化后,13px 走 var(--font-sm),token 与字面量都接受。
     const body = extractBlock(SHELL, ".sidebar-version");
     expect(body, "shell.css 缺 .sidebar-version").not.toBeNull();
-    expect(body!, "版本号字号非 13px").toMatch(/font-size:\s*13px/);
+    expect(body!, "版本号字号非 13px").toMatch(
+      /font-size:\s*(?:13px|var\(--font-sm\))/,
+    );
   });
 });
 
