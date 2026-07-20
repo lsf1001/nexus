@@ -199,7 +199,7 @@ html, body {
 
 /* Prose 样式调整 */
 .prose {
-  font-size: 17px;
+  font-size: 17px; /* 非标值,页面默认字号,保留 */
   line-height: 1.65;
 }
 
@@ -207,7 +207,7 @@ html, body {
   background: rgba(0, 0, 0, 0.08);
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 16px;
+  font-size: var(--font-md);
 }
 
 .prose pre {
@@ -216,7 +216,7 @@ html, body {
   padding: 16px 20px;
   border-radius: 8px;
   overflow-x: auto;
-  font-size: 16px;
+  font-size: var(--font-md);
 }
 
 .prose pre code {

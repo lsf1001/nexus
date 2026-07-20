@@ -67,6 +67,13 @@
   --font-xl: 28px;
   --font-2xl: 36px;
 
+  /* 补缺位:9/10/15/18/24 px 在多文件出现,避免反复写字面量 */
+  --font-9: 9px;
+  --font-10: 10px;
+  --font-15: 15px;
+  --font-18: 18px;
+  --font-24: 24px;
+
   /* Sidebar(Claude Desktop 浅) */
   --sidebar-bg:        #fafafa;
   --sidebar-bg-2:      #f0f0f0;

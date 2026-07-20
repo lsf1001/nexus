@@ -57,7 +57,7 @@
 
 .preferences-modal-header h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-base);
   font-weight: 600;
   color: var(--ink);
   letter-spacing: 0.01em;
@@ -108,7 +108,7 @@
 }
 
 .settings-section-title {
-  font-size: 11px;
+  font-size: var(--font-2xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -123,7 +123,7 @@
 
 /* ===== §1 Provider 表单 ===== */
 .provider-hint {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--ink-3);
   margin: 0 0 8px;
   line-height: 1.5;
@@ -161,15 +161,15 @@
   justify-content: space-between;
   gap: 8px;
   padding: 6px 8px;
-  font-size: 12.5px;
+  font-size: 12.5px; /* 非标值,徽章字号,保留 */
   border-radius: 6px;
   background: var(--paper);
 }
 
 .provider-model-id {
   font-weight: 500;
-  font-family: ui-monospace, 'SF Mono', monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -178,7 +178,7 @@
 }
 
 .provider-model-owner {
-  font-size: 11px;
+  font-size: var(--font-2xs);
   color: var(--ink-3);
   flex-shrink: 0;
 }
@@ -189,7 +189,7 @@
 
 /* ===== §2 已导入模型管理(预留) ===== */
 .models-empty {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--ink-3);
   text-align: center;
   padding: 12px 0;
@@ -243,7 +243,7 @@
 }
 
 .model-manage-name {
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 500;
   color: var(--ink);
   overflow: hidden;
@@ -254,9 +254,9 @@
 }
 
 .model-manage-base {
-  font-size: 11px;
+  font-size: var(--font-2xs);
   color: var(--ink-3);
-  font-family: ui-monospace, 'SF Mono', monospace;
+  font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -265,7 +265,7 @@
 }
 
 .model-manage-badge {
-  font-size: 10px;
+  font-size: var(--font-10);
   font-weight: 600;
   color: var(--paper);
   background: var(--ink);
@@ -284,7 +284,7 @@
   background: none;
   border: none;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: var(--font-base);
   color: var(--ink-3);
   cursor: pointer;
   transition: background 150ms, color 150ms;
@@ -312,13 +312,13 @@
 }
 
 .setting-row-label-main {
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 500;
   color: var(--ink);
 }
 
 .setting-row-label-hint {
-  font-size: 11px;
+  font-size: var(--font-2xs);
   color: var(--ink-3);
   line-height: 1.4;
 }
@@ -371,16 +371,16 @@
 
 /* ===== §3 关于 ===== */
 .about-version {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--ink-3);
   padding: 4px 0 4px;
-  font-family: ui-monospace, 'SF Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .setting-row input[type="text"],
 .setting-row input[type="password"],
 .setting-row input[type="number"] {
-  font-size: 13px;
+  font-size: var(--font-sm);
   color: var(--ink);
   background: var(--paper);
   border: 1px solid var(--line);
@@ -413,7 +413,7 @@
 }
 
 .setting-input-hint {
-  font-size: 11px;
+  font-size: var(--font-2xs);
   color: var(--ink-3);
 }
 
@@ -422,7 +422,7 @@
 }
 
 .setting-status {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--ink-3);
   padding: 4px 0;
 }
@@ -432,7 +432,7 @@
 /* ===== 按钮 — 统一 8px 圆角 / 13px 字号 / 紧凑 padding ===== */
 .setting-btn-primary,
 .setting-btn-success {
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 500;
   color: var(--paper);
   background: var(--ink);
@@ -479,7 +479,7 @@
 }
 
 .settings-add-btn {
-  font-size: 12px;
+  font-size: var(--font-xs);
   font-weight: 500;
   color: var(--ink);
   background: var(--paper-2);
@@ -507,7 +507,7 @@
 }
 
 .model-list-empty {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--ink-3);
   padding: 12px;
   text-align: center;
@@ -540,7 +540,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 500;
   color: var(--ink);
   min-width: 0;
@@ -559,7 +559,7 @@
 }
 
 .model-card-badge {
-  font-size: 10px;
+  font-size: var(--font-10);
   font-weight: 600;
   color: var(--paper);
   background: var(--ink);
@@ -571,9 +571,9 @@
 
 .model-card-meta {
   margin-top: 3px;
-  font-size: 11px;
+  font-size: var(--font-2xs);
   color: var(--ink-3);
-  font-family: ui-monospace, 'SF Mono', monospace;
+  font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -587,7 +587,7 @@
 }
 
 .model-card-btn {
-  font-size: 12px;
+  font-size: var(--font-xs);
   font-weight: 500;
   color: var(--ink-2);
   background: var(--paper-2);
@@ -616,7 +616,7 @@
 }
 
 .model-form-title {
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 600;
   color: var(--ink);
   padding: 4px 0 8px;
@@ -631,7 +631,7 @@
 }
 
 .model-form-cancel {
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 500;
   color: var(--ink-2);
   background: var(--paper-2);

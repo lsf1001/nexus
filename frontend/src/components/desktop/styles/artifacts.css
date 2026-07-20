@@ -56,7 +56,7 @@
   flex-shrink: 0;
   border-bottom: 1px solid var(--line);
   background: var(--paper-2);
-  font-size: 12px;
+  font-size: var(--font-xs);
 }
 
 .artifact-filename {
@@ -74,7 +74,7 @@
   align-items: center;
   gap: 10px;
   color: var(--ink-3);
-  font-size: 11px;
+  font-size: var(--font-2xs);
 }
 
 .artifact-counter {
@@ -86,7 +86,7 @@
   background: transparent;
   border: 0;
   color: var(--ink-3);
-  font-size: 14px;
+  font-size: var(--font-base);
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
@@ -121,7 +121,7 @@
   background: transparent;
   border: 0;
   border-bottom: 2px solid transparent;
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--ink-3);
   cursor: pointer;
   white-space: nowrap;
@@ -140,7 +140,7 @@
 
 .artifact-tab-count {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 10.5px; /* 非标值,artifact 元信息,保留 */
   color: var(--ink-3);
   background: var(--paper-3);
   padding: 1px 6px;
@@ -165,7 +165,7 @@
   padding: 6px 14px;
   border-top: 1px solid var(--line);
   background: var(--paper-2);
-  font-size: 10.5px;
+  font-size: 10.5px; /* 非标值,artifact 元信息,保留 */
   color: var(--ink-3);
   flex-shrink: 0;
 }
@@ -178,7 +178,7 @@
   background: transparent;
   border: 0;
   color: var(--ink-3);
-  font-size: 10.5px;
+  font-size: 10.5px; /* 非标值,artifact 元信息,保留 */
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
@@ -204,18 +204,18 @@
 }
 
 .artifacts-empty-icon {
-  font-size: 36px;
+  font-size: var(--font-2xl);
   opacity: 0.5;
 }
 
 .artifacts-empty-title {
-  font-size: 14px;
+  font-size: var(--font-base);
   font-weight: 500;
   color: var(--ink);
 }
 
 .artifacts-empty-hint {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--ink-3);
   max-width: 240px;
   line-height: 1.6;
@@ -227,7 +227,7 @@
   flex-direction: column;
   height: 100%;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 12.5px; /* 非标值,artifact 元信息,保留 */
   line-height: 1.55;
 }
 
@@ -238,7 +238,7 @@
   padding: 6px 14px;
   border-bottom: 1px solid var(--line);
   background: var(--paper-2);
-  font-size: 10.5px;
+  font-size: 10.5px; /* 非标值,artifact 元信息,保留 */
 }
 
 .artifact-code-lang {
@@ -304,13 +304,13 @@
   font-weight: 600;
 }
 
-.artifact-renderer-markdown h1 { font-size: 20px; }
-.artifact-renderer-markdown h2 { font-size: 17px; }
-.artifact-renderer-markdown h3 { font-size: 15px; }
+.artifact-renderer-markdown h1 { font-size: var(--font-lg); }
+.artifact-renderer-markdown h2 { font-size: 17px; /* 非标值,artifact 描述,保留 */ }
+.artifact-renderer-markdown h3 { font-size: var(--font-15); }
 
 .artifact-renderer-markdown p {
   margin: 0 0 0.8em;
-  font-size: 13.5px;
+  font-size: 13.5px; /* 非标值,artifact 标签,保留 */
   color: var(--ink-2);
 }
 
@@ -318,7 +318,7 @@
 .artifact-renderer-markdown ol {
   padding-left: 1.4em;
   margin: 0 0 0.8em;
-  font-size: 13.5px;
+  font-size: 13.5px; /* 非标值,artifact 标签,保留 */
   color: var(--ink-2);
 }
 
@@ -327,7 +327,7 @@
   padding: 1px 5px;
   border-radius: 3px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--ink);
 }
 
@@ -336,7 +336,7 @@
   padding: 12px 14px;
   border-radius: var(--r-sm);
   overflow-x: auto;
-  font-size: 12.5px;
+  font-size: 12.5px; /* 非标值,artifact 元信息,保留 */
   margin: 0 0 0.8em;
 }
 
@@ -371,7 +371,7 @@
   background: var(--paper-2);
   padding: 10px 12px;
   border-radius: var(--r-sm);
-  font-size: 11.5px;
+  font-size: 11.5px; /* 非标值,artifact 元信息,保留 */
   overflow: auto;
   color: var(--ink-2);
   margin: 0;
@@ -380,7 +380,7 @@
 .artifact-renderer-error-tag {
   margin-top: 8px;
   text-align: center;
-  font-size: 11px;
+  font-size: var(--font-2xs);
   color: var(--destructive);
 }
 
@@ -397,7 +397,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--font-2xs);
   color: var(--ink-3);
   flex-shrink: 0;
 }
@@ -408,7 +408,7 @@
   color: var(--ink-2);
   padding: 3px 10px;
   border-radius: 99px;
-  font-size: 11px;
+  font-size: var(--font-2xs);
   cursor: pointer;
   font-family: inherit;
 }
