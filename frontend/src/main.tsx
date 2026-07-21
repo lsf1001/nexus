@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import './components/desktop/styles/tokens.css'
 import './components/desktop/styles/shell.css'
 import './components/desktop/styles/views.css'
 import './components/desktop/styles/chat.css'

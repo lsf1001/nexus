@@ -1,4 +1,13 @@
 /* ===== 整体窗口 + 侧边栏 + 主区 + topbar ===== */
+/* tokens.css 由 main.tsx 显式 import(在 index.css 之后,本文件之前),
+ * 与本文件后续规则同处于"无 layer"作用域。Tailwind base layer 内的
+ * button { font: inherit } 在 cascade 中优先级低于本文件的组件规则。
+ *
+ * 之前 shell.css 顶部曾用 `@import "./tokens.css"`,但 Vite 把被 import 的
+ * CSS 当作"附属"而非 entry,产物里 tokens.css 内容消失,var(--font-15) /
+ * var(--font-2xs) 等 token 在浏览器里未定义 → fallback 到 inherit → 16px。
+ * 由 main.tsx 顶部 ESM import 才是 Vite 真正当作 entry 的方式。 */
+
 /* 整窗网格已合进 index.css 的 .nexus-desktop(顶 264px sidebar + 余 main)
  * ——参考 Claude Desktop 全屏 native chrome,不再嵌套 .window 卡片。 */
 

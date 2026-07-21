@@ -202,11 +202,15 @@
   opacity: 0.12;
 }
 
-/* 表单元素继承字体 */
-.nexus-desktop button,
-.nexus-desktop input,
-.nexus-desktop textarea {
-  font: inherit;
+/* 表单元素继承字体 — 用 :where() 把 specificity 锁到 0,让下游组件规则
+ * (如 .btn-new-task (0,2,0) / .settings-trigger (0,1,0)) 正常覆盖 font-size。
+ * 之前 `.nexus-desktop button` (0,1,1) 胜所有下游 → var(--font-15) 被吞。 */
+:where(.nexus-desktop button),
+:where(.nexus-desktop input),
+:where(.nexus-desktop textarea) {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
   color: inherit;
 }
 
