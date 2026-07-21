@@ -36,14 +36,10 @@ export function ChatView({
     Boolean(context.modelName),
   );
 
-  const handleOpenCommandPalette = (): void => {
-    window.dispatchEvent(new CustomEvent('nexus:open-command-palette'));
-  };
-
   return (
     <>
       {/* V3 (2026-07-20) WorkBuddy 极简 IDE 风格:
-       *  - 22px 顶栏(从 36 收):左侧当前标题 + 右侧 ⌘K 入口(替代已删的本地在线 pill / ThemeToggle)
+       *  - 22px 顶栏(从 36 收):仅左侧当前标题(⌘K 按钮已删,快捷键 Cmd/Ctrl+K 仍全局生效)
        *  - 14px 底栏(新增 StatusBar):模型 + 连接点 + spacer + local
        *  - 主对话区 ChatArea 限宽 720px 居中(从 760 收)
        *  - 整条顶栏 drag-region 让 macOS chrome 整窗可拖 */}
@@ -53,18 +49,6 @@ export function ChatView({
             {currentConv?.title || '新任务'}
             {currentConv?.channel === 'wechat' && <span className="chat-status-channel">· 微信通道</span>}
           </span>
-          <div className="chat-status-actions">
-            <button
-              type="button"
-              className="cmd-k-trigger"
-              aria-label="打开命令面板 (快捷键 Cmd+K / Ctrl+K)"
-              title="命令面板"
-              onClick={handleOpenCommandPalette}
-            >
-              <span>命令</span>
-              <kbd>⌘K</kbd>
-            </button>
-          </div>
         </header>
 
         <ChatArea

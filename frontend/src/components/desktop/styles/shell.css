@@ -364,49 +364,7 @@
   background: var(--paper-3);
 }
 
-/* 顶栏右侧 ⌘K 入口(WorkBuddy 风格:小键帽 + cmd 文本) */
-.chat-status-bar .cmd-k-trigger {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 6px 1px 8px;
-  height: 16px;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--ink-2);
-  border-radius: 3px;
-  font-size: var(--font-10);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.chat-status-bar .cmd-k-trigger:hover {
-  background: var(--paper-2);
-  color: var(--ink);
-}
-
-.chat-status-bar .cmd-k-trigger kbd {
-  display: inline-block;
-  padding: 0 4px;
-  min-width: 14px;
-  text-align: center;
-  background: var(--paper-2);
-  border: 1px solid var(--line);
-  border-radius: 2px;
-  font-family: var(--font-mono);
-  font-size: var(--font-9);
-  line-height: 12px;
-  color: var(--ink-2);
-}
-
-.nexus-desktop[data-theme="dark"] .chat-status-bar .cmd-k-trigger kbd {
-  background: var(--paper-3);
-  border-color: var(--line);
-}
-
-/* 顶栏右侧 actions 群组(保留供将来扩展,现在只放 ⌘K 入口)。*/
+/* 顶栏右侧 actions 群组(保留供将来扩展,⌘K 按钮已删,快捷键仍生效)。*/
 .chat-status-actions {
   flex: 0 0 auto;
   display: inline-flex;

@@ -21,7 +21,7 @@ export interface ShellLayoutProps {
  * 三栏布局。
  *
  * 低频入口(记忆 / 工具 / 微信 / Artifacts 折叠态入口等)由 `⌘K` 命令面板
- * 承担。视图内容由 react-router 子路由渲染(`.main` 内 <Outlet>)。
+ * 承担(快捷键 Cmd/Ctrl+K,UI 无按钮入口)。视图内容由 react-router 子路由渲染(`.main` 内 <Outlet>)。
  */
 export function ShellLayout({ shellCtx }: ShellLayoutProps) {
   const collapsed = useStore((s) => s.artifactsCollapsed);

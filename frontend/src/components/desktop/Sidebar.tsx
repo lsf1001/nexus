@@ -15,7 +15,7 @@ export interface SidebarProps {
 /**
  * 左侧栏 — 极简单栏。
  * 按 Nexus 实际功能设计：多会话 + 搜索 + 新对话 + 设置入口。
- * 记忆 / 工具 / 技能走 ⌘K 命令面板，不常驻侧栏。
+ * 记忆 / 工具 / 技能走 ⌘K 命令面板，不常驻侧栏（快捷键 Cmd/Ctrl+K，UI 无按钮入口）。
  *
  *   - 顶部：38px 拖拽区（让位 macOS traffic lights）
  *   - 品牌块：Logo N + Nexus
