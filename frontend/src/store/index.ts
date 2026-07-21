@@ -71,6 +71,7 @@ export const useStore = create<Store>()(
       partialize: (state) => ({
         darkMode: state.darkMode,
         showThinking: state.showThinking,
+        fontScale: state.fontScale,
       }),
       skipHydration: true,
     }
