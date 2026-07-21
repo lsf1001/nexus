@@ -65,11 +65,6 @@
   max-width: 480px;
 }
 
-.empty-state .prompt-grid {
-  width: 100%;
-  max-width: 600px;
-}
-
 /* ===== 消息列表 =====
  * V3 (2026-07-20):WorkBuddy 极简风格 — 限宽 720px 居中,行间距 16px(从 18 收)。
  * 不动 message-bubble 圆角 21px / padding(避免破坏现有阅读体验)。 */
@@ -1065,21 +1060,6 @@
 .eyebrow { color: var(--ink); font-size: var(--font-base); letter-spacing: 0.12em; }
 .empty-state h1, .hero h1 { font-size: clamp(36px, 4.2vw, 54px); letter-spacing: -0.045em; line-height: 1.08; }
 .empty-state .subtitle, .hero p { max-width: 550px; margin: 12px auto 0; text-align: center; font-size: var(--font-18); }
-
-.empty-state .prompt-grid { max-width: 760px; margin: 0 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.prompt-card {
-  min-height: 66px;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  background: var(--paper);
-  padding: 15px 16px;
-  box-shadow: none;
-  font-size: var(--font-md);
-  font-weight: 650;
-}
-.prompt-card::before { content: "↗"; display: inline-block; margin-right: 10px; color: var(--ink); font-size: var(--font-18); }
-.prompt-card:hover { border-color: #9ed9e3; background: #f8feff; box-shadow: 0 10px 22px rgba(24, 74, 103, 0.08); transform: translateY(-2px); }
-.nexus-desktop[data-theme="dark"] .prompt-card:hover { background: var(--paper); border-color: var(--ink); }
 
 /* 空态 prompt chip(2026-07-21 简化:砍状态卡后,4 个 chip 横向 chip-row,
    取代原 2×2 卡片网格。macOS Spotlight 风 — 圆角胶囊 + 紧凑 padding)。 */
