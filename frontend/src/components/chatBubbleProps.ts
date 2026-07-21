@@ -13,6 +13,7 @@
  * 字段优先级:
  *  - id:同一消息在 streaming 中内容累计,id 不变 — 若 id 变说明换消息,必渲染
  *  - content / thinking:这两者变 = 流式追加或用户打字,需要更新 DOM
+ *  - toolCalls:tool_call / tool_result 帧到达时引用变化,必须重渲染
  *  - role:同一 id 的消息 role 不会变,但写入判定稳妥
  *  - showThinking / onCopy 引用变化不视为重渲染信号(parent re-render 无关)
  */
@@ -22,6 +23,10 @@ export interface ChatBubbleProps {
   message: Message;
   showThinking?: boolean;
   onCopy?: (content: string) => void;
+  /** 悬停工具栏"引用":把消息文本交给父级(未接时回落为剪贴板引用块)。 */
+  onQuote?: (content: string) => void;
+  /** 悬停工具栏"重试":重发最后一条用户消息。 */
+  onRetry?: () => void;
 }
 
 export function chatBubblePropsAreEqual(
@@ -33,6 +38,7 @@ export function chatBubblePropsAreEqual(
     prev.message.role === next.message.role &&
     prev.message.content === next.message.content &&
     prev.message.thinking === next.message.thinking &&
+    prev.message.toolCalls === next.message.toolCalls &&
     prev.showThinking === next.showThinking
   );
 }

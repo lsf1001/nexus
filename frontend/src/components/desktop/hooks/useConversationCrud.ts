@@ -112,7 +112,7 @@ export function useConversationCrud(): ConversationCrud {
     let cancelled = false;
     const loadSessions = async (): Promise<void> => {
       try {
-        const response = await apiFetch('/api/sessions?limit=50');
+        const response = await apiFetch('/api/sessions?limit=6');
         if (!response.ok) return;
         const rows = (await response.json()) as Array<Record<string, unknown>>;
         if (cancelled) return;

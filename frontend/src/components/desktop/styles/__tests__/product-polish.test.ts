@@ -4,7 +4,7 @@
  *   Task 4 loading-dot 三段 delay
  *   Task 5 prompt-card hover 视觉
  *   Task 6 a11y(aria-label/aria-live/aria-pressed)
- *   Task 7 footer-link--wechat 双色态
+ *   Task 7 sidebar-footer 底栏(账户 + 版本)视觉
  *   Task 8 form input focus-visible + .hint.is-error 边条
  *
  * WHY:不再为每个 task 单独建文件 — 都是 CSS 文本锁,提取函数复用,
@@ -63,19 +63,22 @@ describe("Task 5: prompt-card hover 视觉强化", () => {
   });
 });
 
-describe("Task 7: footer-link--wechat 双色态视觉", () => {
-  it("未绑定态 footer-link 透明背景 + 间距 + padding", () => {
-    const body = extractBlock(SHELL, ".sidebar-footer .footer-link");
-    expect(body, "shell.css 缺 .sidebar-footer .footer-link").not.toBeNull();
-    expect(body!).toMatch(/background:\s*transparent/);
-    expect(body!).toMatch(/min-height:\s*38px/);
+describe("Task 7: sidebar-footer Claude 风格底栏(设置 + 版本)", () => {
+  it(".sidebar-footer 必须有顶部分隔线 + 横排布局", () => {
+    const body = extractBlock(SHELL, ".sidebar-footer");
+    expect(body, "shell.css 缺 .sidebar-footer").not.toBeNull();
+    expect(body!, "底栏缺顶部分隔线").toMatch(/border-top:\s*1px solid var\(--line\)/);
+    expect(body!, "底栏未横排布局").toMatch(/justify-content:\s*space-between/);
   });
 
-  it("已连接态 footer-link--wechat 图标和 status 都变 wechat 绿", () => {
-    const re = /\.sidebar-footer\s+\.footer-link--wechat\.is-connected\s+\.footer-link-icon[^{]*\{[^}]*color:\s*var\(--wechat\)/;
-    expect(SHELL, "缺 is-connected 图标 wechat 绿").toMatch(re);
-    const re2 = /\.sidebar-footer\s+\.footer-link--wechat\.is-connected\s+\.footer-link-status[^{]*\{[^}]*color:\s*var\(--wechat\)/;
-    expect(SHELL, "缺 is-connected status wechat 绿").toMatch(re2);
+  it(".sidebar-version 小字版本号", () => {
+    // 2026-07-18 全局字号 +2px(用户要求"所有字号都调大"),版本号 11px → 13px。
+    // 2026-07-21 token 化后,13px 走 var(--font-sm),token 与字面量都接受。
+    const body = extractBlock(SHELL, ".sidebar-version");
+    expect(body, "shell.css 缺 .sidebar-version").not.toBeNull();
+    expect(body!, "版本号字号非 13px").toMatch(
+      /font-size:\s*(?:13px|var\(--font-sm\))/,
+    );
   });
 });
 

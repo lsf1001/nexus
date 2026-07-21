@@ -20,14 +20,12 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+// Task 1.2:tokens.css 已并入 index.css,测试改读 index.css 的 token 块。
 const TOKENS_PATH = join(
   __dirname,
   '..',
   '..',
-  'components',
-  'desktop',
-  'styles',
-  'tokens.css',
+  'index.css',
 );
 const STYLES_DIR = join(__dirname, '..', '..', 'components', 'desktop', 'styles');
 
@@ -135,7 +133,9 @@ const GRAY_TOKENS = [
   'ink', 'ink-2', 'ink-3',
   'paper', 'paper-2', 'paper-3',
   'line', 'line-2',
-  'accent', 'accent-soft',
+  // 'accent' 已并入 shadcn 核心 token(Claude --accent: 220 14% 96%,HSL 三元组,
+  // 饱和度 ~14% 高于下方 0.10 锁),故从此列表移除;其存在性由 focus-ring 等测试覆盖。
+  'accent-soft',
   'wechat',
   'sidebar-bg', 'sidebar-bg-2',
   'sidebar-fg', 'sidebar-fg-2', 'sidebar-fg-3',

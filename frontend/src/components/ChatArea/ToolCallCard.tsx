@@ -10,10 +10,17 @@
  *   - 点 ▾ → 展开 args(JSON) + result(text)
  *   - state 颜色:running(灰)/ success(森林绿)/ error(深红)
  *
+ * 第十轮(2026-07-20 三栏重构):file-class 工具(edit_file / write_md /
+ * write_html / draw_diagram 等)+ result ≥ 30 字符 → 显示"→ 在右侧查看"
+ * 链接,点击把 result 推入 Artifacts 面板(store.pushArtifact 自动激活
+ * + 展开右栏),让用户从消息流直接跳到产物视图。
+ *
  * 不放权限弹窗(HITL 由 ConfirmationCard 单独处理),只读展示。
  */
 import { useState } from 'react';
 import type { ToolCall } from '../../types';
+import { inferArtifact, isArtifactTool } from '../Artifacts/utils/inferArtifact';
+import { useStore } from '../../store';
 
 export interface ToolCallCardProps {
   call: ToolCall;
@@ -34,6 +41,26 @@ const STATE_ICON: Record<ToolCall['state'], string> = {
 export function ToolCallCard({ call }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const argsJson = call.args ? JSON.stringify(call.args, null, 2) : '{}';
+
+  // 联动:file-class tool + 长度足够 → 显示"→ 在右侧查看"链接
+  const inferred = isArtifactTool(call.name) && call.state === 'success' && call.result
+    ? inferArtifact(call.name, call.args, call.result)
+    : null;
+
+  const handleOpenInPanel = () => {
+    if (!inferred || !call.result) return;
+    useStore.getState().pushArtifact({
+      id: call.id,
+      kind: inferred.kind,
+      content: call.result,
+      language: inferred.language,
+      filename: inferred.filename,
+      sourceToolCallId: call.id,
+      createdAt: Date.now(),
+    });
+    // push 已自动 setActive + setCollapsed(false),无需额外调用
+  };
+
   return (
     <div className="tool-call-card">
       <button
@@ -68,6 +95,18 @@ export function ToolCallCard({ call }: ToolCallCardProps) {
               <div className="tool-call-result">
                 <pre>{call.result}</pre>
               </div>
+              {inferred && (
+                <div className="tool-call-actions">
+                  <button
+                    type="button"
+                    className="tool-call-open-artifact"
+                    onClick={handleOpenInPanel}
+                    title="在右侧产物面板打开"
+                  >
+                    <span aria-hidden="true">→</span> 在右侧查看
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { apiFetch, getApiBase } from '../lib/api';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogClose,
+} from '@/components/ui/dialog';
 
 interface WechatPluginModalProps {
   isOpen: boolean;
@@ -160,22 +166,37 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
     setError('');
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={handleClose}>
-      <div className="bg-white rounded-2xl w-[400px] max-h-[90vh] overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        {/* 头部 */}
-        <div className="bg-gradient-to-r from-gray-900 to-gray-800 px-5 py-4 flex items-center justify-between">
-          <h3 className="text-white font-semibold text-base flex items-center gap-2">
-            <span className="text-xl">📱</span> 微信插件
-          </h3>
-          <button onClick={handleClose} className="text-white/70 hover:text-white transition-colors">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+    <Dialog open={isOpen} onOpenChange={(o) => { if (!o) handleClose(); }}>
+      <DialogContent showCloseButton={false} className="p-0 border-0 bg-transparent max-w-none w-full">
+        <DialogTitle className="sr-only">微信插件</DialogTitle>
+        {/* 外层遮罩:保留 e2e 选择器 div.fixed.inset-0 且内含"微信插件"文案 */}
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={handleClose}
+        >
+          <div
+            className="bg-white rounded-2xl w-[400px] max-h-[90vh] overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 头部 */}
+            <div className="bg-gradient-to-r from-gray-900 to-gray-800 px-5 py-4 flex items-center justify-between">
+              <h3 className="text-white font-semibold text-base flex items-center gap-2">
+                <span className="text-xl">📱</span> 微信插件
+              </h3>
+              <DialogClose asChild>
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="text-white/70 hover:text-white transition-colors"
+                  aria-label="关闭"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </DialogClose>
+            </div>
 
         {/* 内容 */}
         <div className="p-6">
@@ -267,6 +288,8 @@ export function WechatPluginModal({ isOpen, onClose, onSuccess }: WechatPluginMo
         </div>
       </div>
     </div>
+    </DialogContent>
+  </Dialog>
   );
 }
 

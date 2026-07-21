@@ -14,12 +14,11 @@
 
 import type { StreamEvent, ConfirmationAction } from '../../../types';
 import type { LastError } from '../types';
-import type { ChatStreamActions } from './useChatStream';
+import type { Artifact, ArtifactKind } from '../../../store/slices/artifacts';
 import { useStore } from '../../../store';
 import { useToastStore } from '../../../store/useToast';
 
 export interface WsRouterCtx {
-  stream: ChatStreamActions;
   setLastError: (err: LastError | null) => void;
   setIsLoading: (loading: boolean) => void;
   setPendingClarification: (
@@ -39,18 +38,75 @@ export interface WsRouterCtx {
 export type WsHandler = (ev: StreamEvent, ctx: WsRouterCtx) => void;
 
 const appendPatch = (
-  ctx: WsRouterCtx,
+  _ctx: WsRouterCtx,
   patch: Partial<{ content: string; thinking: string }>,
 ) => {
-  ctx.stream.ensureAssistantPlaceholder();
-  ctx.stream.appendToAssistant(patch);
+  // 2026-07-20:不再走 ctx.stream.appendToAssistant — 那个函数捕获 useChatStream
+  // 的 useCallback([]) 闭包,在 React 19 并发 + ChatArea 高频 re-render 场景下,
+  // 新 dispatcher 持新 ctx,新 ctx.stream 是 useChatStream() 返回的新对象字面量
+  // (useChatStream 没用 useMemo),appendToAssistant 引用虽然 useCallback 缓存
+  // 但 ctx.stream 闭包链上有 subtle timing 问题(实测 content 不写 store,thinking
+  // 写)。直接走 store action 消除整条闭包链,handler 与 ctx.stream 解耦。
+  useStore.getState().appendAssistantPatch(patch);
 };
+
+/**
+ * Task 3.3:从 final / tool_result 帧的 content 中识别结构化 artifact。
+ *
+ * 标记格式(向后兼容新增,无标记时零副作用,**不改 WS 协议**):
+ *   <!-- artifact kind=code lang=ts title=MyScript -->
+ *   <实际内容>
+ *   <!-- /artifact -->
+ * kind ∈ code | markdown | svg | html;lang / title 可选(支持引号包裹)。
+ *
+ * 纯函数:命中返回 Artifact(id 随机,由 slice 按 id 去重),未命中返回 null。
+ * 只"识别"不"改写"——消息 content 照常展示,artifact 额外进 store。
+ */
+const ARTIFACT_BLOCK_RE =
+  /<!--\s*artifact\s+([\s\S]*?)-->\n([\s\S]*?)\n<!--\s*\/artifact\s*-->/;
+
+const ARTIFACT_KINDS = ['code', 'markdown', 'svg', 'html'] as const;
+
+function asArtifactKind(value: string | undefined): ArtifactKind | null {
+  return ARTIFACT_KINDS.includes(value as ArtifactKind) ? (value as ArtifactKind) : null;
+}
+
+function parseArtifactAttrs(raw: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  const re = /(\w+)=("([^"]*)"|'([^']*)'|(\S+))/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    const key = m[1] ?? '';
+    if (!key) continue;
+    const val = m[3] ?? m[4] ?? m[5] ?? '';
+    attrs[key] = val;
+  }
+  return attrs;
+}
+
+export function extractArtifact(content: string): Artifact | null {
+  const m = ARTIFACT_BLOCK_RE.exec(content);
+  if (!m) return null;
+  const attrs = parseArtifactAttrs(m[1] ?? '');
+  const kind = asArtifactKind(attrs.kind);
+  if (!kind) return null;
+  return {
+    id: crypto.randomUUID(),
+    kind,
+    content: m[2] ?? '',
+    title: attrs.title || undefined,
+    language: attrs.lang || undefined,
+  };
+}
 
 export const handleThinking: WsHandler = (ev, ctx) => {
   if (typeof ev.content === 'string') {
     appendPatch(ctx, { thinking: ev.content });
   } else {
-    ctx.stream.ensureAssistantPlaceholder();
+    // 兜底:即使 content 为空 / 不存在,也确保 assistant 占位存在并清空,
+    // 让 handleFinal 的 last.content 校验有目标。原 ctx.stream.ensureAssistantPlaceholder()
+    // 已并入 appendAssistantPatch,这里用空 patch 调用即可。
+    appendPatch(ctx, {});
   }
   ctx.setIsLoading(false);
   ctx.disarmWatchdog();
@@ -61,7 +117,7 @@ export const handleChunk: WsHandler = (ev, ctx) => {
   if (typeof ev.content === 'string') {
     appendPatch(ctx, { content: ev.content });
   } else {
-    ctx.stream.ensureAssistantPlaceholder();
+    appendPatch(ctx, {});
   }
   ctx.setIsLoading(false);
   ctx.disarmWatchdog();
@@ -75,7 +131,11 @@ export const handleFinal: WsHandler = (ev, ctx) => {
   // handleFinal 直接 useStore.setState 覆盖最后一条 assistant content — 会把
   // handleStop 追加的 "[已停止]" marker 抹掉。这里必须尊重 user-stop gate,
   // 否则最终 DOM 看不到 marker,journey-stop-mid-stream spec 永远失败。
-  if (!ctx.stream.snapshot().length || !ctx.stream.allowsStreaming()) {
+  //
+  // 2026-07-20:streamingPaused 已迁到 store,直接 useStore.getState() 读,
+  // 不再依赖 ctx.stream.snapshot / ctx.stream.allowsStreaming,消除闭包链。
+  const state = useStore.getState();
+  if (!state.conversationMessages.length || state.streamingPaused) {
     ctx.setIsLoading(false);
     ctx.disarmWatchdog();
     return;
@@ -85,13 +145,17 @@ export const handleFinal: WsHandler = (ev, ctx) => {
     ctx.disarmWatchdog();
     return;
   }
-  const msgs = useStore.getState().conversationMessages;
+  const msgs = state.conversationMessages;
   const last = msgs[msgs.length - 1];
   if (last && last.role === 'assistant' && ev.content !== last.content) {
     const next = [...msgs];
     next[next.length - 1] = { ...last, content: ev.content };
-    useStore.getState().setConversationMessages(next);
+    state.setConversationMessages(next);
   }
+  // Task 3.3:末尾内容识别 artifact → 追加进 artifacts slice。无标记时
+  // extractArtifact 返回 null,零副作用,消息 content 不变。
+  const artifact = extractArtifact(ev.content);
+  if (artifact) useStore.getState().pushArtifact(artifact);
   ctx.setIsLoading(false);
   ctx.disarmWatchdog();
 };
@@ -244,6 +308,9 @@ export const handleToolResult: WsHandler = (ev, ctx) => {
   const next = [...msgs];
   next[next.length - 1] = { ...last, toolCalls: updated };
   useStore.getState().setConversationMessages(next);
+  // Task 3.3:末尾内容识别 artifact(若 tool_result 帧本身带 artifact 标记)。
+  const artifact = extractArtifact(ev.content);
+  if (artifact) useStore.getState().pushArtifact(artifact);
   ctx.disarmWatchdog();
 };
 

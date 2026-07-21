@@ -1,8 +1,6 @@
 /**
  * User Journey: 第九轮 UI 重设计 — 模拟人工测试
  *
- * SPEC 关联:docs/superpowers/specs/2026-07-16-redesign-spec.md §4.1
- *
  * 10 个 journey:
  *   1. empty-state-hero        — 删全部会话 → 看到 hero + 4 prompt + 大输入框
  *   2. new-conversation-flow   — 输入框打"你好" → Enter → 助手回复

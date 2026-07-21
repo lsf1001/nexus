@@ -58,13 +58,25 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  --font-xs: 12px;
-  --font-sm: 13px;
-  --font-base: 14px;
-  --font-md: 16px;
-  --font-lg: 20px;
-  --font-xl: 28px;
-  --font-2xl: 36px;
+  /* 字号：用 --fs 单变量 multiplier 驱动,JS useFontScaleRoot() 写入。
+   * 基础档对齐 Tailwind 默认(16px base),Cmd+= → 1.25×,Cmd+- → 0.875×,Cmd+0 → 1。
+   * 也保留 5 个补缺位用于历史非标值场景。 */
+  --fs: 1;
+  --font-2xs: calc(12px * var(--fs));
+  --font-xs:  calc(13px * var(--fs));
+  --font-sm:  calc(14px * var(--fs));
+  --font-base:calc(16px * var(--fs));
+  --font-md:  calc(18px * var(--fs));
+  --font-lg:  calc(22px * var(--fs));
+  --font-xl:  calc(30px * var(--fs));
+  --font-2xl: calc(40px * var(--fs));
+
+  /* 补缺位:9/10/15/18/24 px 在多文件出现,避免反复写字面量 */
+  --font-9:  calc(9px  * var(--fs));
+  --font-10: calc(10px * var(--fs));
+  --font-15: calc(15px * var(--fs));
+  --font-18: calc(18px * var(--fs));
+  --font-24: calc(24px * var(--fs));
 
   /* Sidebar(Claude Desktop 浅) */
   --sidebar-bg:        #fafafa;
@@ -194,11 +206,15 @@
   opacity: 0.12;
 }
 
-/* 表单元素继承字体 */
-.nexus-desktop button,
-.nexus-desktop input,
-.nexus-desktop textarea {
-  font: inherit;
+/* 表单元素继承字体 — 用 :where() 把 specificity 锁到 0,让下游组件规则
+ * (如 .btn-new-task (0,2,0) / .settings-trigger (0,1,0)) 正常覆盖 font-size。
+ * 之前 `.nexus-desktop button` (0,1,1) 胜所有下游 → var(--font-15) 被吞。 */
+:where(.nexus-desktop button),
+:where(.nexus-desktop input),
+:where(.nexus-desktop textarea) {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
   color: inherit;
 }
 

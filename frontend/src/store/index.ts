@@ -3,7 +3,7 @@
  *
  * Plan 4 重构:从 useStore.ts 单 store 139 行拆出 4 slice(本轮不建 session
  * slice — `activeModelName` 在 useBootstrap 中是死代码,直接删)。各 slice
- * 文件见 ./slices/,跨切片派生见 ./selectors.ts。
+ * 文件见 ./slices/,跨切片派生见 ./selectors.ts(该文件已存在并导出 3 个 selector hook,当前全仓库无 import,属预留待接入)。
  *
  * 中间件:
  * - `persist` 只挂 uiPrefs 切片(partialize 显式列字段,防止业务字段被
@@ -19,8 +19,10 @@
  */
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { createArtifactsSlice, type ArtifactsSlice } from './slices/artifacts';
 import { createChannelsSlice, type ChannelsSlice } from './slices/channels';
 import { createConversationsSlice, type ConversationsSlice } from './slices/conversations';
+import { createMemorySlice, type MemorySlice } from './slices/memory';
 import { createUiPrefsSlice, type UiPrefsSlice } from './slices/uiPrefs';
 import { createWsStatusSlice, type WsStatusSlice } from './slices/wsStatus';
 
@@ -49,7 +51,8 @@ const safeStorage = {
   },
 };
 
-export type Store = UiPrefsSlice & WsStatusSlice & ConversationsSlice & ChannelsSlice;
+export type Store =
+  UiPrefsSlice & WsStatusSlice & ConversationsSlice & ChannelsSlice & ArtifactsSlice & MemorySlice;
 
 export const useStore = create<Store>()(
   persist(
@@ -58,6 +61,8 @@ export const useStore = create<Store>()(
       ...createWsStatusSlice(...a),
       ...createConversationsSlice(...a),
       ...createChannelsSlice(...a),
+      ...createArtifactsSlice(...a),
+      ...createMemorySlice(...a),
     }),
     {
       name: 'nexus-preferences',
@@ -66,6 +71,7 @@ export const useStore = create<Store>()(
       partialize: (state) => ({
         darkMode: state.darkMode,
         showThinking: state.showThinking,
+        fontScale: state.fontScale,
       }),
       skipHydration: true,
     }

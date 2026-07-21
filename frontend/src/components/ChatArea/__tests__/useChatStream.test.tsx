@@ -1,15 +1,16 @@
 /**
- * useChatStream 单测 — stoppedRef gate(2026-07-13 stop 按钮改造)
+ * useChatStream 单测 — streamingPaused gate(2026-07-13 stop 按钮改造,
+ * 2026-07-20 重构:gate 从 useChatStream 内部 stoppedRef 升级为 store.streamingPaused,
+ * handler 直接读 store,appendToAssistant / ensureAssistantPlaceholder 从本 hook 移除)。
  *
  * 覆盖 4 个核心场景:
- *   1. markUserStopped() 后,appendToAssistant 不再写 store
- *   2. pushUserAndPlaceholder 会清 stopped gate,新一轮流正常写入
+ *   1. markUserStopped() 后,store.appendAssistantPatch 不再写 store
+ *   2. pushUserAndPlaceholder 会清 streamingPaused gate,新一轮流正常写入
  *   3. reset() 也会清 gate(配合 resetTrigger / 新会话)
- *   4. markUserStopped 之前 appendToAssistant 正常写入(regression 不退化)
+ *   4. markUserStopped 之前 appendAssistantPatch 正常写入(regression 不退化)
  *
- * 为什么单测而不是 e2e:stoppedRef 是 useChatStream 内部的 useRef,组件外不可见,
- * e2e 只能验证"是否还有文本冒出来",但区分不出"是 markUserStopped 没生效" vs
- * "store 写入了但 React 没渲染"。直接调 hook 验证 store 写入次数更精准。
+ * 为什么单测而不是 e2e:streamingPaused 是 store 状态,组件外可观察,e2e
+ * 也能验证,但单测更精准(直接断言 store action 写入次数)。
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
@@ -28,11 +29,12 @@ function makeUser(content: string): Message {
 
 describe('useChatStream — markUserStopped gate', () => {
   beforeEach(() => {
-    // 重置 store.messages
+    // 重置 store.messages + gate
     useStore.getState().setConversationMessages([]);
+    useStore.setState({ streamingPaused: false });
   });
 
-  it('markUserStopped 后 appendToAssistant 不写 store', () => {
+  it('markUserStopped 后 store.appendAssistantPatch 不写 store', () => {
     const { result } = renderHook(() => useChatStream());
 
     // 先放一条 user + 占位
@@ -45,10 +47,11 @@ describe('useChatStream — markUserStopped gate', () => {
     act(() => {
       result.current.markUserStopped();
     });
+    expect(useStore.getState().streamingPaused).toBe(true);
 
-    // appendToAssistant 应被 gate 掉,store 不变
+    // 直接调 store action(模拟 handleChunk 收到帧)
     act(() => {
-      result.current.appendToAssistant({ content: 'late chunk' });
+      useStore.getState().appendAssistantPatch({ content: 'late chunk' });
     });
     const msgs = useStore.getState().conversationMessages;
     expect(msgs).toHaveLength(2);
@@ -65,7 +68,7 @@ describe('useChatStream — markUserStopped gate', () => {
       result.current.markUserStopped();
     });
     act(() => {
-      result.current.appendToAssistant({ content: 'should not write' });
+      useStore.getState().appendAssistantPatch({ content: 'should not write' });
     });
     expect(useStore.getState().conversationMessages[1]?.content).toBe('');
 
@@ -73,8 +76,9 @@ describe('useChatStream — markUserStopped gate', () => {
     act(() => {
       result.current.pushUserAndPlaceholder(makeUser('second'));
     });
+    expect(useStore.getState().streamingPaused).toBe(false);
     act(() => {
-      result.current.appendToAssistant({ content: 'new chunk' });
+      useStore.getState().appendAssistantPatch({ content: 'new chunk' });
     });
     const msgs = useStore.getState().conversationMessages;
     expect(msgs).toHaveLength(4);
@@ -93,32 +97,39 @@ describe('useChatStream — markUserStopped gate', () => {
     act(() => {
       result.current.reset();
     });
-    // 模拟新一轮 — push user + appendToAssistant
+    expect(useStore.getState().streamingPaused).toBe(false);
+    // 模拟新一轮 — push user + appendAssistantPatch
     act(() => {
       result.current.pushUserAndPlaceholder(makeUser('after reset'));
     });
     act(() => {
-      result.current.appendToAssistant({ content: 'ok' });
+      useStore.getState().appendAssistantPatch({ content: 'ok' });
     });
     const msgs = useStore.getState().conversationMessages;
     expect(msgs).toHaveLength(2);
     expect(msgs[1]?.content).toBe('ok');
   });
 
-  it('未 markUserStopped 时 appendToAssistant 正常写入(regression)', () => {
-    const { result } = renderHook(() => useChatStream());
-
+  it('未 markUserStopped 时 store.appendAssistantPatch 正常写入(regression)', () => {
+    // 不走 useChatStream — 直接用 store 模拟:先 push user+placeholder,
+    // 然后调 store.appendAssistantPatch(等价 handler 调 path)
+    useStore.getState().setConversationMessages([
+      makeUser('hi'),
+      {
+        id: 'placeholder',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date(),
+      },
+    ]);
     act(() => {
-      result.current.pushUserAndPlaceholder(makeUser('hi'));
+      useStore.getState().appendAssistantPatch({ content: 'chunk1' });
     });
     act(() => {
-      result.current.appendToAssistant({ content: 'chunk1' });
+      useStore.getState().appendAssistantPatch({ content: ' chunk2' });
     });
     act(() => {
-      result.current.appendToAssistant({ content: ' chunk2' });
-    });
-    act(() => {
-      result.current.appendToAssistant({ thinking: 'thinking...' });
+      useStore.getState().appendAssistantPatch({ thinking: 'thinking...' });
     });
 
     const msgs = useStore.getState().conversationMessages;

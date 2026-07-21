@@ -1,4 +1,4 @@
-"""模型配置路由：CRUD + 切换激活模型。"""
+"""模型配置路由：CRUD + 切换激活模型 + Provider 模型发现。"""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 from threading import Lock
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -298,3 +299,145 @@ async def delete_model(model_id: str) -> dict[str, bool]:
     config["models"] = [m for m in models if m.get("id") != model_id]
     save_models(config)
     return {"success": True}
+
+
+# ============================================================================
+# Provider 模型发现：给定 baseURL + apiKey，调用 {baseURL}/models 拉取可用模型
+# ============================================================================
+
+
+class DiscoverModelsRequest(BaseModel):
+    """Provider 模型发现请求。"""
+
+    base_url: str = Field(..., min_length=1, description="API 基础 URL，如 https://api.openai.com/v1")
+    api_key: str = Field(..., min_length=1, description="API 密钥")
+
+
+class DiscoveredModel(BaseModel):
+    """从 Provider 发现的模型。"""
+
+    id: str
+    name: str
+    owned_by: str = ""
+
+
+@router.post("/discover")
+async def discover_provider_models(body: DiscoverModelsRequest) -> dict[str, Any]:
+    """从 Provider 的 /models 端点拉取可用模型列表。
+
+    兼容 OpenAI 风格:GET {base_url}/models 返回
+    {"data": [{"id": "gpt-4", "owned_by": "openai", ...}, ...]}
+    """
+    base_url = body.base_url.rstrip("/")
+    models_url = f"{base_url}/models"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                models_url,
+                headers={"Authorization": f"Bearer {body.api_key}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=408, detail=f"连接超时: {models_url}") from None
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(status_code=401, detail="API Key 无效") from e
+        raise HTTPException(status_code=e.response.status_code, detail=f"Provider 返回 {e.response.status_code}") from e
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"无法连接 Provider: {type(e).__name__}") from e
+
+    # 解析 OpenAI 风格的响应
+    raw_models = data.get("data", []) if isinstance(data, dict) else []
+    if not raw_models and isinstance(data, list):
+        raw_models = data
+
+    discovered: list[dict[str, str]] = []
+    for m in raw_models:
+        if isinstance(m, dict) and "id" in m:
+            discovered.append({
+                "id": m["id"],
+                "name": m.get("id", ""),
+                "owned_by": m.get("owned_by", ""),
+            })
+
+    # 按 id 排序
+    discovered.sort(key=lambda x: x["id"])
+    return {"success": True, "models": discovered, "count": len(discovered)}
+
+
+@router.post("/import")
+async def import_provider_models(body: DiscoverModelsRequest) -> dict[str, Any]:
+    """从 Provider 发现模型并全部导入到本地配置(自动创建不存在的,更新已有的)。
+
+    所有导入模型共享同一 base_url + api_key,temperature 默认 0.7。
+    导入后第一个模型自动激活(如果之前没有任何 active 模型)。
+    """
+    # 先发现
+    base_url = body.base_url.rstrip("/")
+    models_url = f"{base_url}/models"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                models_url,
+                headers={"Authorization": f"Bearer {body.api_key}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=408, detail=f"连接超时: {models_url}") from None
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(status_code=401, detail="API Key 无效") from e
+        raise HTTPException(status_code=e.response.status_code, detail=f"Provider 返回 {e.response.status_code}") from e
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"无法连接 Provider: {type(e).__name__}") from e
+
+    raw_models = data.get("data", []) if isinstance(data, dict) else []
+    if not raw_models and isinstance(data, list):
+        raw_models = data
+
+    config = load_models()
+    existing = {m.get("id"): m for m in config.get("models", [])}
+    has_active = any(m.get("is_active") for m in existing.values())
+
+    imported_ids: list[str] = []
+    for m in raw_models:
+        if not isinstance(m, dict) or "id" not in m:
+            continue
+        model_id = m["id"]
+        if model_id in existing:
+            # 已存在:更新 base_url 和 api_key
+            existing[model_id]["api_base"] = base_url
+            existing[model_id]["api_key"] = body.api_key
+        else:
+            # 新增
+            new_model = {
+                "id": model_id,
+                "name": model_id,
+                "api_key": body.api_key,
+                "api_base": base_url,
+                "temperature": 0.7,
+                "is_active": not has_active and len(imported_ids) == 0,
+            }
+            config.setdefault("models", []).append(new_model)
+        imported_ids.append(model_id)
+
+    save_models(config)
+
+    # 如果新导入的第一个被激活了,重建 Agent
+    if not has_active and imported_ids:
+        first = next(
+            (m for m in config.get("models", []) if m.get("id") == imported_ids[0]),
+            None,
+        )
+        if first and _create_agent_with_model is not None:
+            new_agent = await asyncio.get_running_loop().run_in_executor(
+                None, _create_agent_with_model, first, _mcp_tools
+            )
+            if new_agent is not None and _set_global_agent is not None:
+                _set_global_agent(new_agent)
+
+    return {"success": True, "imported": imported_ids, "count": len(imported_ids)}

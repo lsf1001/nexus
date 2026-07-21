@@ -4,27 +4,27 @@
  *
  * 覆盖 6 类路径(等价于 node:test 覆盖,但用 vitest + RTL 走 React hook):
  * - (1) 未知 frame type 时 noop(不抛错,不调用 ctx 里任何方法)
- * - (2) thinking 帧 → appendToAssistant 写 thinking
- * - (3) chunk 帧 → appendToAssistant 写 content
+ * - (2) thinking 帧 → store.appendAssistantPatch 写 thinking
+ * - (3) chunk 帧 → store.appendAssistantPatch 写 content
  * - (4) error 帧 → setLastError
  * - (5) confirmation_request 帧 → setPendingConfirmation(event_id/actions)
  * - (6) ctx 引用变化 → 返回的 dispatcher 引用更新(useCallback dep 行为)
  * - (7) null / 非对象 / 缺 type 字段 → 不抛错,吞掉
  *
- * 注:handlers 直接访问 useStore.getState(),测试不动 store 全局状态 —
- * appendToAssistant 这条路径只检查 spy 调用,不去拿真实 DB 断言。
+ * 2026-07-20:handler 不再走 ctx.stream,直接用 useStore.getState().appendAssistantPatch,
+ * 所以本测试 spy store action(spy 整个 store getState 返回值),不再 spy stream。
  */
-import { describe, expect, it, vi, type Mock } from 'vitest'
+import { describe, expect, it, vi, beforeEach, type Mock } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useWsMessageRouter } from '../hooks/useWsMessageRouter'
 import type { WsRouterCtx } from '../hooks/wsHandlers'
+import { useStore } from '../../../store'
 import type { ConfirmationAction } from '../../../types'
 
-function makeCtx(): {
+function makeCtx(spies?: { appendAssistantPatch: Mock }): {
   ctx: WsRouterCtx
   spies: {
-    ensureAssistantPlaceholder: Mock
-    appendToAssistant: Mock
+    appendAssistantPatch: Mock
     setLastError: Mock
     setIsLoading: Mock
     setPendingClarification: Mock
@@ -32,36 +32,42 @@ function makeCtx(): {
     disarmWatchdog: Mock
   }
 } {
-  const spies = {
-    ensureAssistantPlaceholder: vi.fn(),
-    appendToAssistant: vi.fn(),
-    setLastError: vi.fn(),
-    setIsLoading: vi.fn(),
-    setPendingClarification: vi.fn(),
-    setPendingConfirmation: vi.fn(),
-    disarmWatchdog: vi.fn(),
-  }
+  const appendAssistantPatch = spies?.appendAssistantPatch ?? vi.fn()
+  // 用一个真实 store action 替换,spy 它
+  const realAppend = useStore.getState().appendAssistantPatch
+  useStore.setState({ appendAssistantPatch: appendAssistantPatch as typeof realAppend })
+
+  const setLastError = vi.fn()
+  const setIsLoading = vi.fn()
+  const setPendingClarification = vi.fn()
+  const setPendingConfirmation = vi.fn()
+  const disarmWatchdog = vi.fn()
   const ctx: WsRouterCtx = {
-    stream: {
-      ensureAssistantPlaceholder: spies.ensureAssistantPlaceholder,
-      appendToAssistant: spies.appendToAssistant,
-      reset: vi.fn(),
-      pushUserAndPlaceholder: vi.fn(),
-      replaceAssistantWithPlaceholder: vi.fn(),
-      snapshot: () => [],
-      markUserStopped: vi.fn(),
-      allowsStreaming: () => true,
-    },
-    setLastError: spies.setLastError,
-    setIsLoading: spies.setIsLoading,
-    setPendingClarification: spies.setPendingClarification,
-    setPendingConfirmation: spies.setPendingConfirmation,
-    disarmWatchdog: spies.disarmWatchdog,
+    setLastError,
+    setIsLoading,
+    setPendingClarification,
+    setPendingConfirmation,
+    disarmWatchdog,
   }
-  return { ctx, spies }
+  return {
+    ctx,
+    spies: {
+      appendAssistantPatch,
+      setLastError,
+      setIsLoading,
+      setPendingClarification,
+      setPendingConfirmation,
+      disarmWatchdog,
+    },
+  }
 }
 
 describe('useWsMessageRouter', () => {
+  beforeEach(() => {
+    // 还原 store action(防止前一个 case 残留 spy)
+    useStore.setState({ conversationMessages: [], streamingPaused: false })
+  })
+
   it('未知 type 字段 → noop,不抛错', () => {
     const { ctx } = makeCtx()
     const { result } = renderHook(() => useWsMessageRouter(ctx))
@@ -80,22 +86,20 @@ describe('useWsMessageRouter', () => {
     // 因为 frame 没 type,narrowing 直接 return,不会调任何 handler
   })
 
-  it('thinking 帧 → appendToAssistant 写 thinking + disarmWatchdog + setIsLoading(false)', () => {
+  it('thinking 帧 → store.appendAssistantPatch 写 thinking + disarmWatchdog + setIsLoading(false)', () => {
     const { ctx, spies } = makeCtx()
     const { result } = renderHook(() => useWsMessageRouter(ctx))
     result.current({ type: 'thinking', content: 'hmm let me think' })
-    expect(spies.ensureAssistantPlaceholder).toHaveBeenCalledTimes(1)
-    expect(spies.appendToAssistant).toHaveBeenCalledWith({ thinking: 'hmm let me think' })
+    expect(spies.appendAssistantPatch).toHaveBeenCalledWith({ thinking: 'hmm let me think' })
     expect(spies.setIsLoading).toHaveBeenCalledWith(false)
     expect(spies.disarmWatchdog).toHaveBeenCalledTimes(1)
   })
 
-  it('chunk 帧 → appendToAssistant 写 content + 清 LastError + disarmWatchdog', () => {
+  it('chunk 帧 → store.appendAssistantPatch 写 content + 清 LastError + disarmWatchdog', () => {
     const { ctx, spies } = makeCtx()
     const { result } = renderHook(() => useWsMessageRouter(ctx))
     result.current({ type: 'chunk', content: 'hello ' })
-    expect(spies.ensureAssistantPlaceholder).toHaveBeenCalledTimes(1)
-    expect(spies.appendToAssistant).toHaveBeenCalledWith({ content: 'hello ' })
+    expect(spies.appendAssistantPatch).toHaveBeenCalledWith({ content: 'hello ' })
     // chunk 帧到时清 lastError(老 error 帧被覆盖)
     expect(spies.setLastError).toHaveBeenCalledWith(null)
     expect(spies.disarmWatchdog).toHaveBeenCalledTimes(1)

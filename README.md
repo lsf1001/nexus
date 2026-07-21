@@ -25,7 +25,7 @@ python nexus/backend/run.py    # 监听 30000
 
 浏览器开 http://localhost:30077/ 。配置 API Key 见下方 [配置](#配置)。
 
-> **macOS DMG 用户**：v0.1.0 release 暂未挂 DMG 安装包（网络上传限制），可在本地构建：`cd desktop && npm install && npm run pack`，产物在 `desktop/dist/`。详见下方 [macOS 桌面端（DMG）](#macos-桌面端dmg)。
+> **macOS DMG 用户**：从 `release/` 目录取最新 DMG（`bash scripts/build_dmg.sh` 本地构建，产物约 70 MB，arm64，未签名），拖到 `/Applications/`。详见 [macOS 桌面端（DMG）](#macos-桌面端dmg)。
 
 ## 功能
 
@@ -37,7 +37,7 @@ python nexus/backend/run.py    # 监听 30000
 - **微信通道** - 二维码登录集成
 - **MCP 插件** - 动态加载扩展
 - **质量门** - 4 维度 rubric judge（safety / accuracy / completeness / tool_correctness），REPAIR/REJECT 自动降级
-- **macOS 桌面端** - Electron 打包的 `.dmg`，双击安装即用
+- **macOS 桌面端** - Tauri 2 打包的 `.dmg`，双击安装即用
 
 ## 安装
 
@@ -78,16 +78,17 @@ python nexus/backend/run.py
 
 ```bash
 bash scripts/build_dmg.sh
-# 产物：release/Nexus-1.0.0-arm64.dmg（约 70 MB，arm64，未签名）
+# 产物：release/Nexus-<version>-arm64.dmg（约 70 MB，arm64，未签名）
 ```
 
 | 项 | 值 |
 | --- | --- |
-| 产物 | `release/Nexus-1.0.0-arm64.dmg`（本地构建约 70 MB，arm64） |
+| 产物 | `release/Nexus-<version>-arm64.dmg`（本地构建约 70 MB，arm64，UDZO 压缩） |
 | 架构 | macOS Apple Silicon（Intel 暂未出包） |
-| 签名 | **未签名**（内测版，无 Apple Developer ID） |
+| 签名 | **未签名**（内测版，无 Apple Developer ID；签名细节见 `docs/operations/signing.md`） |
 | 端口 | 后端 30000 + WKWebView 弹原生窗口（启动时自动拉起） |
-| 内部结构 | `MacOS/Nexus`(壳脚本)→ exec `Resources/nexus-backend/nexus-backend`(PyInstaller 单二进制 + Python 运行时 + pywebview) |
+| 内部结构 | Tauri 2 主程序 + Python sidecar（PyInstaller onedir 单二进制嵌入 Python 运行时 + FastAPI 后端） |
+| 窗口 chrome | `titleBarStyle: Overlay` + `hiddenTitle: true`，前端 `data-tauri-drag-region` 标顶栏整窗可拖 |
 
 > **首次启动绕过 Gatekeeper**（仅一次）：
 >
@@ -114,10 +115,12 @@ bash scripts/build_dmg.sh
 ### WebSocket 示例
 
 ```javascript
-const ws = new WebSocket('ws://localhost:30000/api/ws?token=nexus-default-token');
+const ws = new WebSocket('ws://localhost:30000/api/ws', ['nxv1-' + btoa(token).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')]);
 ws.send(JSON.stringify({ content: '你好' }));
 // 接收: thinking → chunk → final → done
 ```
+
+> **鉴权走 `Sec-WebSocket-Protocol: nxv1-<base64url(token)>`**，token 不进 URL（旧 `?token=` 形式默认仍兼容但不推荐）。
 
 ## 配置
 
@@ -150,8 +153,8 @@ ws.send(JSON.stringify({ content: '你好' }));
 - [SPEC.md](./SPEC.md) - 技术规格
 - [CLAUDE.md](./CLAUDE.md) - 开发规范
 - [CHANGELOG.md](./CHANGELOG.md) - 版本变更
-- [docs/RELEASE_NOTES_v0.1.0.md](./docs/RELEASE_NOTES_v0.1.0.md) - v0.1.0 发布说明
-- [scripts/build_dmg.sh](./scripts/build_dmg.sh) - DMG 打包脚本(PyInstaller + hdiutil)
+- [docs/designs/frontend.md](./docs/designs/frontend.md) - 前端设计事实基线
+- [scripts/build_dmg.sh](./scripts/build_dmg.sh) - DMG 打包脚本（Tauri 2 + PyInstaller sidecar + hdiutil）
 
 ---
 

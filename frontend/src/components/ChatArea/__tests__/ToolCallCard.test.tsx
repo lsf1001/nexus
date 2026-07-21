@@ -12,9 +12,10 @@
  *   - args 用 <code> JSON 序列化展示
  *   - result 用 <pre> 纯文本展示
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import { fireEvent, render } from '@testing-library/react';
 import { ToolCallCard } from '../ToolCallCard';
+import { useStore } from '../../../store';
 import type { ToolCall } from '../../../types';
 
 function makeCall(overrides: Partial<ToolCall> = {}): ToolCall {
@@ -29,6 +30,10 @@ function makeCall(overrides: Partial<ToolCall> = {}): ToolCall {
 }
 
 describe('ToolCallCard (第九轮)', () => {
+  beforeEach(() => {
+    useStore.getState().clearArtifacts();
+    useStore.getState().setArtifactsCollapsed(true);
+  });
   it('默认折叠 — 只显示 name + state,toggle 标 ▸', () => {
     const { container } = render(<ToolCallCard call={makeCall()} />);
     const card = container.querySelector('.tool-call-card');
@@ -96,5 +101,83 @@ describe('ToolCallCard (第九轮)', () => {
     const parsed = JSON.parse(args!.textContent!);
     expect(parsed.command).toBe('echo');
     expect(parsed.cwd).toBe('/tmp');
+  });
+
+  // ─── 第十轮:ToolCallCard → Artifacts 联动 ───
+
+  it('非 file-class 工具(shell_run)不显示联动链接', () => {
+    const { container } = render(<ToolCallCard call={makeCall()} />);
+    fireEvent.click(container.querySelector('.tool-call-toggle') as HTMLElement);
+    expect(container.querySelector('.tool-call-open-artifact')).toBeNull();
+  });
+
+  it('file-class 工具 + result ≥ 30 字符 → 显示"→ 在右侧查看"', () => {
+    const code = 'def hello():\n    return "hi from nexus"\n';
+    const { container } = render(
+      <ToolCallCard
+        call={makeCall({
+          id: 'tc-py',
+          name: 'edit_file',
+          args: { path: 'hello.py' },
+          result: code,
+        })}
+      />
+    );
+    fireEvent.click(container.querySelector('.tool-call-toggle') as HTMLElement);
+    const btn = container.querySelector('.tool-call-open-artifact');
+    expect(btn).not.toBeNull();
+    expect(btn?.textContent).toContain('在右侧查看');
+  });
+
+  it('点联动按钮 → pushArtifact 自动激活 + 展开', () => {
+    const code = 'def hello():\n    return "hi from nexus"\n';
+    const { container } = render(
+      <ToolCallCard
+        call={makeCall({
+          id: 'tc-py',
+          name: 'edit_file',
+          args: { path: 'hello.py' },
+          result: code,
+        })}
+      />
+    );
+    fireEvent.click(container.querySelector('.tool-call-toggle') as HTMLElement);
+    fireEvent.click(container.querySelector('.tool-call-open-artifact') as HTMLElement);
+    const state = useStore.getState();
+    expect(state.artifacts).toHaveLength(1);
+    expect(state.artifacts[0]?.filename).toBe('hello.py');
+    expect(state.artifacts[0]?.kind).toBe('code');
+    expect(state.artifacts[0]?.language).toBe('python');
+    expect(state.activeArtifactId).toBe('tc-py');
+    expect(state.artifactsCollapsed).toBe(false);
+  });
+
+  it('.md 文件 → markdown kind', () => {
+    const md = '# Hello\n\nThis is a sample doc with enough length to pass the threshold.\n';
+    const { container } = render(
+      <ToolCallCard
+        call={makeCall({
+          id: 'tc-md',
+          name: 'write_md',
+          args: { path: 'README.md' },
+          result: md,
+        })}
+      />
+    );
+    fireEvent.click(container.querySelector('.tool-call-toggle') as HTMLElement);
+    fireEvent.click(container.querySelector('.tool-call-open-artifact') as HTMLElement);
+    const a = useStore.getState().artifacts[0];
+    expect(a?.kind).toBe('markdown');
+    expect(a?.filename).toBe('README.md');
+  });
+
+  it('state=running 不显示联动(还没出结果)', () => {
+    const { container } = render(
+      <ToolCallCard
+        call={makeCall({ state: 'running', result: undefined })}
+      />
+    );
+    fireEvent.click(container.querySelector('.tool-call-toggle') as HTMLElement);
+    expect(container.querySelector('.tool-call-open-artifact')).toBeNull();
   });
 });

@@ -1,37 +1,172 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
 
-@theme {
-  --color-ink:   #1f1f1f;
-  --color-paper: #ffffff;
-  --color-line:  #e5e5e5;
+/* 深色调由 data-theme="dark" 驱动(useDarkModeRoot 写 <html> 与 .nexus-desktop,
+   不写 .dark 类)。让 Tailwind 的 dark: 工具类响应 data-theme。 */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* ===== 设计 Token：Claude 对齐中性色板 + 既有品牌 token 收敛 =====
+ * - shadcn 核心 token 用 Claude 对齐 HSL 三元组,经 @theme inline 暴露为 Tailwind
+ *   工具类(bg-background / text-foreground / border-border ...)。
+ * - 品牌 token(--ink / --paper / --line / --space-* / --font-* / --sidebar-* /
+ *   --focus-ring ...)保留原命名(无 color- 前缀),供 shell/chat/views.css 的
+ *   var() 直接引用,迁移面最小。
+ * - light token 挂 :root;dark 覆盖用 :root[data-theme="dark"](源码顺序在后,
+ *   命中 <html data-theme="dark">,自动覆盖 light)。 */
+
+:root {
+  /* —— shadcn 核心 token（Claude 对齐中性） —— */
+  --background: 0 0% 100%;
+  --foreground: 220 14% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 14% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 14% 11%;
+  --primary: 24 9% 18%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 220 14% 11%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 9% 46%;
+  --accent: 220 14% 96%;
+  --accent-foreground: 220 14% 11%;
+  --destructive: 0 72% 51%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 220 13% 60%;
+  --radius: 0.75rem;
+  --chart-1: 0 0% 87%;
+  --chart-2: 0 0% 56%;
+  --chart-3: 0 0% 44%;
+  --chart-4: 0 0% 37%;
+  --chart-5: 0 0% 27%;
+  --sidebar: 0 0% 98%;
+  --sidebar-foreground: 220 14% 11%;
+  --sidebar-primary: 24 9% 18%;
+  --sidebar-primary-foreground: 0 0% 98%;
+  --sidebar-accent: 220 14% 96%;
+  --sidebar-accent-foreground: 220 14% 11%;
+  --sidebar-border: 220 13% 91%;
+  --sidebar-ring: 220 13% 60%;
+
+  /* —— 品牌 token（既有命名,中性灰阶,供语义 CSS 引用） —— */
+  --ink: #1f1f1f;
+  --ink-2: #4a4a4a;
+  --ink-3: #8a8a8a;
+  --paper: #ffffff;
+  --paper-2: #f7f7f7;
+  --paper-3: #ededed;
+  --line: #e5e5e5;
+  --line-2: #d0d0d0;
+  --accent-soft: #ededed;
+  --wechat: #4a4a4a;
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.10);
+  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0  7px 18px rgba(0, 0, 0, 0.04);
+  --font-sans: "Geist Variable", "SF Pro Display", "PingFang SC", "Avenir Next",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --r-sm: 9px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-2xl: 28px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  /* 字号：与 tokens.css 同步,基础档对齐 Tailwind 默认(16px base),
+   * JS useFontScaleRoot() 改 --fs 实现 Cmd+= / Cmd+- / Cmd+0 三档缩放。 */
+  --fs: 1;
+  --font-2xs: calc(12px * var(--fs));
+  --font-xs:  calc(13px * var(--fs));
+  --font-sm:  calc(14px * var(--fs));
+  --font-base:calc(16px * var(--fs));
+  --font-md:  calc(18px * var(--fs));
+  --font-lg:  calc(22px * var(--fs));
+  --font-xl:  calc(30px * var(--fs));
+  --font-2xl: calc(40px * var(--fs));
+  --sidebar-bg: #fafafa;
+  --sidebar-bg-2: #f0f0f0;
+  --sidebar-fg: #1f1f1f;
+  --sidebar-fg-2: #5a5a5a;
+  --sidebar-fg-3: #9a9a9a;
+  --sidebar-divider: rgba(0, 0, 0, 0.08);
+  --sidebar-hover-bg: rgba(0, 0, 0, 0.04);
+  --focus-ring: #000000;
+  --focus-ring-offset: #ffffff;
 }
 
-/* 默认背景跟随系统外观,避免 macOS Dark Mode 下标题栏(深)和 body(浅)
-   颜色不一致产生"黑色横条"违和感。主题 JS 加载完会按用户偏好切换。 */
+:root[data-theme="dark"] {
+  /* —— shadcn 核心 token（Claude 对齐中性） —— */
+  --background: 0 0% 7%;
+  --foreground: 0 0% 92%;
+  --card: 0 0% 9%;
+  --card-foreground: 0 0% 92%;
+  --popover: 0 0% 9%;
+  --popover-foreground: 0 0% 92%;
+  --primary: 0 0% 92%;
+  --primary-foreground: 0 0% 9%;
+  --secondary: 0 0% 14%;
+  --secondary-foreground: 0 0% 92%;
+  --muted: 0 0% 12%;
+  --muted-foreground: 0 0% 58%;
+  --accent: 0 0% 14%;
+  --accent-foreground: 0 0% 96%;
+  --destructive: 0 70% 45%;
+  --border: 0 0% 16%;
+  --input: 0 0% 16%;
+  --ring: 0 0% 40%;
+  --chart-1: 0 0% 80%;
+  --chart-2: 0 0% 55%;
+  --chart-3: 0 0% 44%;
+  --chart-4: 0 0% 37%;
+  --chart-5: 0 0% 27%;
+  --sidebar: 0 0% 9%;
+  --sidebar-foreground: 0 0% 92%;
+  --sidebar-primary: 0 0% 92%;
+  --sidebar-primary-foreground: 0 0% 9%;
+  --sidebar-accent: 0 0% 14%;
+  --sidebar-accent-foreground: 0 0% 96%;
+  --sidebar-border: 0 0% 16%;
+  --sidebar-ring: 0 0% 40%;
+
+  /* —— 品牌 token（dark） —— */
+  --ink: #ededed;
+  --ink-2: #a8a8a8;
+  --ink-3: #6e6e6e;
+  --paper: #1a1a1a;
+  --paper-2: #232323;
+  --paper-3: #2c2c2c;
+  --line: #2e2e2e;
+  --line-2: #404040;
+  --accent-soft: #2c2c2c;
+  --wechat: #b5b5b5;
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.40);
+  --shadow-sm: 0  7px 18px rgba(0, 0, 0, 0.25);
+  --sidebar-bg: #161616;
+  --sidebar-bg-2: #1f1f1f;
+  --sidebar-fg: #ededed;
+  --sidebar-fg-2: #a8a8a8;
+  --sidebar-fg-3: #6e6e6e;
+  --sidebar-divider: rgba(255, 255, 255, 0.08);
+  --sidebar-hover-bg: rgba(255, 255, 255, 0.05);
+  --focus-ring: #ffffff;
+  --focus-ring-offset: #1a1a1a;
+}
+
+/* 整窗铺满 viewport:禁用 body 滚动,由 .chat-scroll 内部滚动。
+   背景/前景色交给 @layer base 的 token 驱动,随 data-theme 切换。 */
 html, body {
   height: 100%;
   overflow: hidden;
-  background: #ffffff;
-  color: #1f1f1f;
-}
-@media (prefers-color-scheme: dark) {
-  html, body {
-    background: #1a1a1a;
-    color: #ededed;
-  }
-}
-/* 第六轮(2026-07-15):JS 设的主题(在 <html data-theme="dark">)优先级高于
-   prefers-color-scheme,避免 preview 在 light scheme 下暗色模式只染 .nexus-desktop
-   而 body 仍白。Claude Desktop 风格的暗色铺满整窗必须 body 也跟随。 */
-:root[data-theme="dark"],
-:root[data-theme="dark"] body {
-  background: #1a1a1a;
-  color: #ededed;
-}
-:root[data-theme="light"],
-:root[data-theme="light"] body {
-  background: #ffffff;
-  color: #1f1f1f;
 }
 
 /* 滚动条样式 - 加强可见性 */
@@ -68,15 +203,17 @@ html, body {
 
 /* Prose 样式调整 */
 .prose {
-  font-size: 14px;
-  line-height: 1.6;
+  /* 17px 跟随 --fs 缩放(原 14px 太小的根因也在这里补一刀)
+   * user prefer 风格 — 但保持 17 的非整数偏置以更好读正文 */
+  font-size: calc(17px * var(--fs));
+  line-height: 1.65;
 }
 
 .prose code {
   background: rgba(0, 0, 0, 0.08);
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .prose pre {
@@ -85,7 +222,7 @@ html, body {
   padding: 16px 20px;
   border-radius: 8px;
   overflow-x: auto;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .prose pre code {
@@ -93,25 +230,20 @@ html, body {
   padding: 0;
 }
 
-/* 深色模式 */
-.dark {
-  background: #0a0a0a;
-  color: #e5e5e5;
-}
-
-.dark ::-webkit-scrollbar-thumb {
+/* 深色模式滚动条 / prose(由 data-theme 驱动,.dark 类已不再使用) */
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb {
   background: rgba(155, 155, 155, 0.35);
 }
 
-.dark ::-webkit-scrollbar-thumb:hover {
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   background: rgba(155, 155, 155, 0.6);
 }
 
-.dark ::-webkit-scrollbar-track {
+:root[data-theme="dark"] ::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.dark .prose pre {
+:root[data-theme="dark"] .prose pre {
   background: #0f0f0f;
 }
 
@@ -144,4 +276,120 @@ html, body {
 
 .toggle-switch.off::after {
   transform: translateX(20px);
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+  --font-sans: "Geist Variable", "SF Pro Display", "PingFang SC", "Avenir Next",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --font-heading: var(--font-sans);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* ===== 顶层容器布局由 artifacts.css 接管(三栏 grid)=====
+ * 这里只留 box-sizing / 字体继承 / drag-region 等"非布局"通用样式。 */
+
+.nexus-desktop *,
+.nexus-desktop *::before,
+.nexus-desktop *::after {
+  box-sizing: border-box;
+}
+
+.nexus-desktop[data-theme="dark"] {
+  background: var(--paper);
+}
+
+/* 拖拽区 — Tauri 2 macOS chrome:标题栏区域 drag,其它 UI 自动 no-drag。 */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.nexus-desktop button,
+.nexus-desktop input,
+.nexus-desktop textarea,
+.nexus-desktop select,
+.nexus-desktop [role="button"],
+.nexus-desktop .task-item,
+.nexus-desktop .recent-panel,
+.nexus-desktop .empty-tasks {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* 网格纸纹理 / 噪点叠加(原型同款,当前禁用,保留占位) */
+.nexus-desktop::before { content: none; }
+.nexus-desktop[data-theme="dark"]::before {
+  opacity: 0.10;
+  mix-blend-mode: screen;
+}
+.nexus-desktop::after { content: none; }
+.nexus-desktop[data-theme="dark"]::after {
+  opacity: 0.12;
+}
+
+/* 表单元素继承字体 — 用 :where() 把 specificity 锁到 0,让下游单属性规则
+ * (如 .btn-new-task (0,2,0) / .settings-trigger (0,1,0)) 正常覆盖 font-size。
+ * 之前 `font: inherit` 在 .nexus-desktop button (0,1,1) 上,胜所有下游。 */
+:where(.nexus-desktop button),
+:where(.nexus-desktop input),
+:where(.nexus-desktop textarea) {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+.nexus-desktop button {
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+}
+
+/* 深色模式下手绘装饰用更柔的笔触,避免在深色背景上像黑洞 */
+.nexus-desktop[data-theme="dark"] .sketch-line ellipse[fill="none"] {
+  stroke-opacity: 0.18;
 }

@@ -4,12 +4,12 @@
  * 复现 e2e journey-stop-mid-stream 暴露的 bug:handleFinal 直接写
  * useStore.setState 覆盖最后一条 assistant 的 content,会绕过
  * useChatStream.appendToAssistant 的 stoppedRef gate,把"已停止"marker
- * 抹掉。修复:handleFinal 写 store 前查 stream.allowsStreaming();为 false
+ * 抹掉。修复:handleFinal 写 store 前查 store.streamingPaused;为 true
  * 时只 disarm + setIsLoading(false),不改 store,marker 保留。
  *
- * 与 useWsMessageRouter.test.tsx 区别:那个测试 ctx.stream 是 spy,
- * 验证 dispatcher 路由;本文件直接调 handleFinal,验证 store 实际写入
- * 与 stop gate 行为。
+ * 2026-07-20:gate 从 useChatStream 内部 stoppedRef 升级为
+ * useStore.streamingPaused,handler 直接读 store state,本测试同步切换
+ * setStreamingPaused 切 gate。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useStore } from '../../../store';
@@ -17,21 +17,10 @@ import { handleFinal } from '../hooks/wsHandlers';
 import type { WsRouterCtx } from '../hooks/wsHandlers';
 
 function makeCtx(
-  allowsStreaming: boolean,
   setIsLoading: WsRouterCtx['setIsLoading'] = () => undefined,
   disarmWatchdog: WsRouterCtx['disarmWatchdog'] = () => undefined,
 ): WsRouterCtx {
   return {
-    stream: {
-      ensureAssistantPlaceholder: () => false,
-      appendToAssistant: () => undefined,
-      pushUserAndPlaceholder: () => undefined,
-      replaceAssistantWithPlaceholder: () => undefined,
-      reset: () => undefined,
-      snapshot: () => useStore.getState().conversationMessages,
-      markUserStopped: () => undefined,
-      allowsStreaming: () => allowsStreaming,
-    },
     setLastError: () => undefined,
     setIsLoading,
     setPendingClarification: () => undefined,
@@ -43,9 +32,10 @@ function makeCtx(
 describe('handleFinal — user-stopped gate', () => {
   beforeEach(() => {
     useStore.getState().setConversationMessages([]);
+    useStore.setState({ streamingPaused: false });
   });
 
-  it('未 markUserStopped 时 final 帧覆盖最后一条 assistant content', () => {
+  it('未 streamingPaused 时 final 帧覆盖最后一条 assistant content', () => {
     useStore.getState().setConversationMessages([
       {
         id: 'a1',
@@ -57,7 +47,7 @@ describe('handleFinal — user-stopped gate', () => {
 
     const setIsLoading = vi.fn();
     const disarm = vi.fn();
-    const ctx = makeCtx(true, setIsLoading, disarm);
+    const ctx = makeCtx(setIsLoading, disarm);
 
     handleFinal({ type: 'final', content: 'quality pipeline 输出' }, ctx);
 
@@ -67,7 +57,7 @@ describe('handleFinal — user-stopped gate', () => {
     expect(disarm).toHaveBeenCalledTimes(1);
   });
 
-  it('markUserStopped 后 final 帧不覆盖 store,保留"已停止"marker', () => {
+  it('streamingPaused=true 时 final 帧不覆盖 store,保留"已停止"marker', () => {
     // 已点上 stop 的状态:最后一条 assistant 末尾被 handleStop 追加过 marker
     useStore.getState().setConversationMessages([
       {
@@ -77,10 +67,11 @@ describe('handleFinal — user-stopped gate', () => {
         createdAt: new Date(),
       },
     ]);
+    useStore.setState({ streamingPaused: true });
 
     const setIsLoading = vi.fn();
     const disarm = vi.fn();
-    const ctx = makeCtx(false, setIsLoading, disarm);
+    const ctx = makeCtx(setIsLoading, disarm);
 
     // 服务端 final 帧仍到达,内容是 quality pipeline 输出(不等于已加 marker 的内容)
     handleFinal({ type: 'final', content: 'quality pipeline 输出' }, ctx);
@@ -94,11 +85,11 @@ describe('handleFinal — user-stopped gate', () => {
     expect(disarm).toHaveBeenCalledTimes(1);
   });
 
-  it('snapshot 为空时 final 帧也不写 store(防御性)', () => {
-    // 极端 case:final 帧先于任何 chunk 到达(snapshot.length === 0)
+  it('conversationMessages 为空时 final 帧也不写 store(防御性)', () => {
+    // 极端 case:final 帧先于任何 chunk 到达(conversationMessages.length === 0)
     const setIsLoading = vi.fn();
     const disarm = vi.fn();
-    const ctx = makeCtx(true, setIsLoading, disarm);
+    const ctx = makeCtx(setIsLoading, disarm);
     handleFinal({ type: 'final', content: 'should-be-ignored' }, ctx);
     expect(useStore.getState().conversationMessages).toEqual([]);
   });

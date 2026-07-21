@@ -18,6 +18,7 @@ import { Composer } from './Composer';
 import { EmptyState } from './EmptyState';
 import { ErrorBanner } from './ErrorBanner';
 import { MessageList } from './MessageList';
+import { ModelSelector } from './ModelSelector';
 import { useAutoScroll } from './hooks/useAutoScroll';
 import { useChatAreaActions } from './hooks/useChatAreaActions';
 import { useChatSend } from './hooks/useChatSend';
@@ -41,8 +42,6 @@ export function ChatArea({
   onSessionCreated,
   conversationId: conversationIdProp,
   connectionState = 'connecting',
-  activeConversationTitle = null,
-  conversationCount = 0,
 }: ChatAreaProps) {
   const [input, setInput] = useState('');
   const [lastError, setLastError] = useState<LastError | null>(null);
@@ -65,7 +64,6 @@ export function ChatArea({
   const setWsConnected = useStore((s) => s.setWsConnected);
   const displayMessages = useStore((s) => s.conversationMessages);
   const clearConversationMessages = useStore((s) => s.clearConversationMessages);
-  const modelName = useStore((s) => s.modelName);
   const pendingConfirmation = useStore((s) => s.pendingConfirmation);
   const setPendingConfirmation = useStore((s) => s.setPendingConfirmation);
 
@@ -95,13 +93,14 @@ export function ChatArea({
   });
 
   // === WS 连接 — 鉴权走 subprotocol ===
-  // 关键:WsRouterCtx 对象每次 render 都重算,会让 dispatcher(用 useCallback([ctx])
-  // 记忆)每次都变 → useWsConnection 的 effect 会把它当 onMessage 变化,触发
-  // 重连。修复:用 useMemo 包 ctx,稳定上游引用;useChatStream 的 callback
-  // 内部都用 useCallback([...只读 store/state]),stream 引用稳定可入 deps。
+  // 2026-07-20:WsRouterCtx 不再含 stream — wsHandlers.handleChunk / handleThinking
+  // / handleFinal 都改用 useStore.getState().appendAssistantPatch,直接读 store,
+  // 完全不依赖 ctx.stream。WsRouterCtx 现在只剩 React setter + watchdog,引用
+  // 全是 useState setter(本就稳定)+ useCallback(依赖稳定),useMemo 几乎可以
+  // 移除 — 这里保留 useMemo 是为了未来扩展 setLastError 等可能在 ChatArea 内
+  // 重建的 setter 仍走稳定路径。
   const wsCtx = useMemo<WsRouterCtx>(
     () => ({
-      stream,
       setLastError,
       setIsLoading,
       setPendingClarification,
@@ -109,13 +108,15 @@ export function ChatArea({
       disarmWatchdog,
       onSessionCreated,
     }),
-    [stream, setLastError, setIsLoading, setPendingClarification, setPendingConfirmation, disarmWatchdog, onSessionCreated],
+    [setLastError, setIsLoading, setPendingClarification, setPendingConfirmation, disarmWatchdog, onSessionCreated],
   );
   const handleWsMessage = useWsMessageRouter(wsCtx);
 
-  const wsBase = getApiBase().replace(/^http/, 'ws');
-  const wsUrl = `${wsBase}/api/ws`;
-  const wsToken = getWsToken();
+  const wsUrl = useMemo(() => {
+    const wsBase = getApiBase().replace(/^http/, 'ws');
+    return `${wsBase}/api/ws`;
+  }, []);
+  const wsToken = useMemo(() => getWsToken(), []);
   const {
     connected: wsHookConnected,
     send: wsSend,
@@ -125,9 +126,6 @@ export function ChatArea({
     token: wsToken,
     onMessage: handleWsMessage,
   });
-
-  const getReadyStateRef = useRef(getReadyState);
-  getReadyStateRef.current = getReadyState;
 
   useEffect(() => {
     setWsConnected(wsHookConnected);
@@ -151,7 +149,7 @@ export function ChatArea({
   // === 单一发送入口 ===
   const send = useChatSend({
     wsConnected,
-    getReadyState: getReadyStateRef.current,
+    getReadyState,
     getSessionId: () => sessionIdRef.current,
     send: sendFn,
     setIsLoading,
@@ -210,20 +208,14 @@ export function ChatArea({
     <div className="chat-area">
       <div className="chat-scroll" ref={chatScrollRef}>
         {isIdle ? (
-          <EmptyState
-            modelName={modelName}
-            connectionState={connectionState}
-            activeConversationTitle={activeConversationTitle}
-            conversationCount={conversationCount}
-            onInsertPrompt={insertPrompt}
-            onSubmit={send}
-          />
+          <EmptyState onInsertPrompt={insertPrompt} />
         ) : (
           <MessageList
             messages={displayMessages}
             showThinking={showThinking}
             isLoading={isLoading}
             onCopy={handleCopyMessage}
+            onRetry={handleRetry}
           />
         )}
         {pendingClarification && (
@@ -264,17 +256,25 @@ export function ChatArea({
         </div>
       )}
 
-      <Composer
-        value={input}
-        onChange={setInput}
-        onSubmit={() => send(input)}
-        onKeyDown={handleKeyDown}
-        placeholder={composerPlaceholder}
-        disabled={!wsConnected}
-        isLoading={isLoading}
-        onStop={handleStop}
-        inputRef={inputRef}
-      />
+      {/* 模型选择器 + 输入框容器 */}
+      <div className="composer-input-group">
+        <ModelSelector
+          onOpenSettings={() => {
+            window.dispatchEvent(new CustomEvent('nexus:open-preferences'));
+          }}
+        />
+        <Composer
+          value={input}
+          onChange={setInput}
+          onSubmit={() => send(input)}
+          onKeyDown={handleKeyDown}
+          placeholder={composerPlaceholder}
+          disabled={!wsConnected}
+          isLoading={isLoading}
+          onStop={handleStop}
+          inputRef={inputRef}
+        />
+      </div>
     </div>
   );
 }

@@ -3,8 +3,11 @@
 
 用法：
     python scripts/eval_rubrics.py \\
-        --samples ./data/rubric_eval_samples.jsonl \\
-        --output ./data/eval_report.json
+        --samples ~/.nexus/evaluations/rubric_eval_samples.jsonl \\
+        --output ~/.nexus/evaluations/eval_report.json
+
+默认路径在 ~/.nexus/evaluations/ 下(与 nexus.db 同区,不入库)。
+旧路径 ./data/* 仍可通过 --samples/--output 显式覆盖。
 
 jsonl 样本格式（每行一个 JSON）：
     {

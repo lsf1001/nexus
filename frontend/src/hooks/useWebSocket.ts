@@ -55,14 +55,22 @@ export function useWebSocket<T = unknown>({
       url,
       subprotocols,
       socketFactory: factory,
-      onMessage: (data) => onMessageRef.current(data as T),
-      onOpen: () => setConnected(true),
-      onClose: () => setConnected(false),
+      onMessage: (data) => {
+        onMessageRef.current(data as T);
+      },
+      onOpen: () => {
+        setConnected(true);
+      },
+      onClose: (_info) => {
+        setConnected(false);
+      },
       policy: {
         baseDelayMs: baseDelay,
         maxDelayMs: maxDelay,
         maxRetries,
-        onExhausted: onExhausted ?? (() => undefined),
+        onExhausted: () => {
+          onExhausted?.();
+        },
       },
     });
     clientRef.current = client;

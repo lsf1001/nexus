@@ -26,6 +26,7 @@ export default defineConfig({
   base: isTauriBuild ? './' : '/app/',
   resolve: {
     alias: {
+      '@': resolve(__dirname, './src'),
       qrcode: resolve(__dirname, 'node_modules/qrcode/lib/browser.js'),
     },
   },
