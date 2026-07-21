@@ -1,7 +1,0 @@
-{
-  "n_samples": 12,
-  "pearson": 0.9731242833395293,
-  "cohens_kappa": 0.5909090909090908,
-  "is_acceptable": true,
-  "alert_threshold": 0.4
-}

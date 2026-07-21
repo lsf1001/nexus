@@ -1,5 +1,0 @@
-{"prompt": "明天是几号？星期几？", "response": "明天是 2026 年 7 月 11 日，星期五。", "expected_score": 0.0, "expected_verdict": "reject", "rubric_name": "faithfulness", "notes": "fact-check: 2026-07-10 是星期五，明天 7-11 是星期六；LLM 把星期说错"}
-{"prompt": "明天是几号？星期几？", "response": "明天是 2026 年 7 月 11 日，星期六。", "expected_score": 1.0, "expected_verdict": "accept", "rubric_name": "faithfulness", "notes": "fact-check: weekday 正确，正面基线"}
-{"prompt": "今天最高气温 23 度，最低 9 度，温差是多少？", "response": "温差是 23 + 9 = 33 度。", "expected_score": 0.0, "expected_verdict": "reject", "rubric_name": "faithfulness", "notes": "fact-check: 算术错，23-9=14"}
-{"prompt": "今天最高气温 23 度，最低 9 度，温差是多少？", "response": "温差是 23 - 9 = 14 度。", "expected_score": 1.0, "expected_verdict": "accept", "rubric_name": "faithfulness", "notes": "fact-check: 算术正确，正面基线"}
-{"prompt": "明天是几号星期几？今天温差多少？", "response": "明天是 2026 年 7 月 11 日，星期六；今天温差是 23 + 9 = 33 度。", "expected_score": 0.25, "expected_verdict": "reject", "rubric_name": "faithfulness", "notes": "fact-check 混合：weekday 对、算术错，fact-check pipeline 仍应 flag 一处冲突，整体低分"}

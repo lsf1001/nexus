@@ -90,5 +90,8 @@ frontend/manual-shots/
 # 实验性 staging 目录(本地 .laobai-lab / 反复跑出的产物,不入库)
 .laobai-lab-staging/
 
+# 本地 rubric 元评估产物(eval_rubrics.py 输出 + 人工样本,本地运行后落到此目录;不再入库)
+data/
+
 # Tauri 编译产物(desktop/src-tauri/frontend-dist 由 vite build 出来,产物)
 desktop/src-tauri/frontend-dist/
