@@ -8,9 +8,10 @@
  *   - 连接状态点（online / connecting / offline 三色）
  *   - 右侧 spacer + "local" 提示
  *
- * **不显示**模型名 — EmptyState 任务状态卡片里已经有"助手: <model>"，
- * 重复显示浪费状态条空间。暂不显示 token 计数（input_tokens /
- * output_tokens）—— 后端未下发，留待接入。
+ * **2026-07-21 重定位**：EmptyState 任务状态卡已砍,StatusBar 是模型 + 连接
+ * 在主界面的唯一可见位置 — 后续如需显示模型名,应在此处加,不再回到
+ * EmptyState。暂不显示 token 计数（input_tokens / output_tokens）—— 后端未
+ * 下发,留待接入。
  */
 import { useStore } from '../../store';
 
