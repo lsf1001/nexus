@@ -81,13 +81,17 @@
   --space-5: 24px;
   --space-6: 32px;
   --space-7: 48px;
-  --font-xs: 12px;
-  --font-sm: 13px;
-  --font-base: 14px;
-  --font-md: 16px;
-  --font-lg: 20px;
-  --font-xl: 28px;
-  --font-2xl: 36px;
+  /* 字号：与 tokens.css 同步,基础档对齐 Tailwind 默认(16px base),
+   * JS useFontScaleRoot() 改 --fs 实现 Cmd+= / Cmd+- / Cmd+0 三档缩放。 */
+  --fs: 1;
+  --font-2xs: calc(12px * var(--fs));
+  --font-xs:  calc(13px * var(--fs));
+  --font-sm:  calc(14px * var(--fs));
+  --font-base:calc(16px * var(--fs));
+  --font-md:  calc(18px * var(--fs));
+  --font-lg:  calc(22px * var(--fs));
+  --font-xl:  calc(30px * var(--fs));
+  --font-2xl: calc(40px * var(--fs));
   --sidebar-bg: #fafafa;
   --sidebar-bg-2: #f0f0f0;
   --sidebar-fg: #1f1f1f;
@@ -199,7 +203,9 @@ html, body {
 
 /* Prose 样式调整 */
 .prose {
-  font-size: 17px; /* 非标值,页面默认字号,保留 */
+  /* 17px 跟随 --fs 缩放(原 14px 太小的根因也在这里补一刀)
+   * user prefer 风格 — 但保持 17 的非整数偏置以更好读正文 */
+  font-size: calc(17px * var(--fs));
   line-height: 1.65;
 }
 

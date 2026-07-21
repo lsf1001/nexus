@@ -59,7 +59,7 @@
 .empty-state .subtitle {
   margin: -10px 0 6px;
   color: var(--ink-2);
-  font-size: 17px; /* 非标值,Hero 副标题,保留 */
+  font-size: calc(17px * var(--fs)); /* 非标值,Hero 副标题;跟随 Cmd+= 三档缩放 */
   line-height: 1.7;
   text-align: center;
   max-width: 480px;
@@ -789,7 +789,7 @@
   background: transparent;
   color: var(--ink);
   padding: 18px 20px 8px;
-  font-size: 17px; /* 非标值,工具调用标题,保留 */
+  font-size: calc(17px * var(--fs)); /* 跟随 Cmd+= 三档缩放 */
   line-height: 1.65;
 }
 
