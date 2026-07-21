@@ -42,8 +42,6 @@ export function ChatArea({
   onSessionCreated,
   conversationId: conversationIdProp,
   connectionState = 'connecting',
-  activeConversationTitle = null,
-  conversationCount = 0,
 }: ChatAreaProps) {
   const [input, setInput] = useState('');
   const [lastError, setLastError] = useState<LastError | null>(null);
@@ -66,7 +64,6 @@ export function ChatArea({
   const setWsConnected = useStore((s) => s.setWsConnected);
   const displayMessages = useStore((s) => s.conversationMessages);
   const clearConversationMessages = useStore((s) => s.clearConversationMessages);
-  const modelName = useStore((s) => s.modelName);
   const pendingConfirmation = useStore((s) => s.pendingConfirmation);
   const setPendingConfirmation = useStore((s) => s.setPendingConfirmation);
 
@@ -211,14 +208,7 @@ export function ChatArea({
     <div className="chat-area">
       <div className="chat-scroll" ref={chatScrollRef}>
         {isIdle ? (
-          <EmptyState
-            modelName={modelName}
-            connectionState={connectionState}
-            activeConversationTitle={activeConversationTitle}
-            conversationCount={conversationCount}
-            onInsertPrompt={insertPrompt}
-            onSubmit={send}
-          />
+          <EmptyState onInsertPrompt={insertPrompt} />
         ) : (
           <MessageList
             messages={displayMessages}
