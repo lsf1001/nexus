@@ -5,6 +5,66 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+### [1.5.4] — 2026-07-21 字号档位 + Mac 放大快捷键(第十五轮)
+
+用户反馈"字体统一调大"和"Mac 快捷键 无法放大窗口及字体",本轮交付
+浏览器风格的三档字号缩放,Cmd+= / Cmd+- / Cmd+0 在 0.875 / 1.0 / 1.25
+间切换,设置页 GUI radio 同步。
+
+#### Added
+
+- **字号档位系统**: CSS token 加 `--fs` multiplier,8 个 `--font-*`(2xs
+  12 / xs 13 / sm 14 / base 16 / md 18 / lg 22 / xl 30 / 2xl 40)与 5 个
+  补缺位全部改写为 `calc(Npx * var(--fs))`,基础档对齐 Tailwind 默认 16px
+  基线 —— 即使不切档也比 v1.5.3 字号明显更顺眼
+- **三档缩放**: `FontScale = 0.875 | 1 | 1.25`(不取 1.5 是因为 40px ×
+  1.5 = 60px 让 hero `clamp(36px, 4.2vw, 54px)` 撞顶)
+- **快捷键**: `Cmd/Ctrl+=` 大一档、`Cmd/Ctrl+-` 小一档、`Cmd/Ctrl+0` 复位;
+  这 3 个新增 `isTextInput` guard(在 textarea / input / contenteditable
+  内放行输入,`=` / `-` / `0` 是高频输入字符不可吞)
+- **持久化**: `uiPrefs.fontScale` 字段走 Zustand persist partialize,与
+  `darkMode` / `showThinking` 同列,跨会话保留
+- **设置页 radio**: PreferencesModal §2 界面区块加 radio-group(小/中/大),
+  与 Cmd+= 双向同步,切换弹 toast 反馈 1.5s
+- **新 hook**: `useFontScaleRoot` 镜像 `useDarkModeRoot` —— dual-write
+  `style.setProperty('--fs', scale)` 到 `:root` + `.nexus-desktop`,并用
+  MutationObserver 防 React 19 整树重建擦掉 inline style
+
+#### Changed
+
+- `.composer-textarea` 17px 与 `.prose` 17px 改 `calc(17px * var(--fs))`,
+  跟着字号档位缩放;其他 13 处非标硬编码 17/30/32/34 保留
+- `tokens-space-font.test` 适配 calc() 写法:`getTokenValue` 提取器
+  支持 `calc(Npx * var(--fs))`,新 FONT 期望值对齐 Tailwind 16px 基线
+- `SettingsFlow.test` mock store 加 `fontScale` / `setFontScale` /
+  `cycleFontScale` 字段,新增 3 个 radio 行为 case
+
+#### Fixed
+
+- macOS 浏览器 `Cmd+=` 缩放 webview 字体在 Tauri 2 WKWebView 上不生效
+  (WKWebView 不透传系统级缩放) —— 现已通过前端 `Cmd+=` / `Cmd+-` /
+  `Cmd+0` 在 0.875 / 1 / 1.25 三档线性缩放所有 `var(--font-*)` token
+- `chat.css` 的 `button { font: inherit }` shorthand 曾阻塞 `--font-*`
+  覆盖 —— 此前已修(`use { :where 降级 }`),本轮未涉及
+
+#### 验证
+
+- `npm run test:vitest` 249/249 PASS(33 个文件)
+- `npm run build` 0 error,dist 143 kB CSS + 766 kB JS
+- `bash scripts/build_dmg.sh` 产物 `release/Nexus-1.5.4-arm64.dmg`(86 MB,
+  arm64)
+
+#### 文件清单(7 commit)
+
+1. `refactor(tokens)` 字号 token 重塑 + `--fs` multiplier
+2. `feat(store)` uiPrefs.fontScale + cycleFontScale + partialize
+3. `feat(hooks)` useFontScaleRoot 双写 + MutationObserver
+4. `feat(shortcuts)` Cmd+= / Cmd+- / Cmd+0(带 input guard)
+5. `feat(preferences)` 设置页 radio + toast 反馈 + 测试覆盖
+6. (后续 commits — DMG 重打、tag 见 git log)
+
+---
+
 ### [Unreleased] — Pre-release hardening (2026-07-14)
 
 #### Added — 右栏 Artifacts 产物面板 + 三栏布局 (第十三轮 2026-07-20)
