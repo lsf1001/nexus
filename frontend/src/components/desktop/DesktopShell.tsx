@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../../store';
 import { useBootstrap } from './hooks/useBootstrap';
 import { useDarkModeRoot } from './hooks/useDarkModeRoot';
+import { useFontScaleRoot } from './hooks/useFontScaleRoot';
 import { useGlobalShortcuts, focusElement, closeTopModal } from './hooks/useGlobalShortcuts';
 import { useChannelStatusPolling } from '../../hooks/useChannelStatusPolling';
 import { useConversationCrud } from './hooks/useConversationCrud';
@@ -10,6 +11,8 @@ import { PreferencesModal } from './PreferencesModal';
 import { ShellLayout } from './ShellLayout';
 import { CommandPalette } from './CommandPalette';
 import { WeChatModal } from './WeChatModal';
+import { FONT_SCALE_LABEL } from '../../store/slices/uiPrefs';
+import { useToastStore } from '../../store/useToast';
 import type { Conversation } from '../../types';
 
 /**
@@ -49,6 +52,10 @@ export interface DesktopShellContext {
 export function DesktopShell() {
   const { isBootstrapping, initialView } = useBootstrap();
   useDarkModeRoot(useStore((state) => state.darkMode));
+  const fontScale = useStore((state) => state.fontScale);
+  const cycleFontScale = useStore((state) => state.cycleFontScale);
+  const setFontScale = useStore((state) => state.setFontScale);
+  useFontScaleRoot(fontScale);
   const wechatBindStatus = useChannelStatusPolling('wechat');
   const wechatConnected = !!(wechatBindStatus?.bound && wechatBindStatus.status === 'running');
   const {
@@ -104,7 +111,17 @@ export function DesktopShell() {
     onFocusSearch: () => setPaletteOpen(true),
     onFocusComposer: () => focusElement('.composer-textarea'),
     onCloseModal: () => closeTopModal(),
+    onZoomIn: () => cycleFontScale(+1),
+    onZoomOut: () => cycleFontScale(-1),
+    onZoomReset: () => setFontScale(1),
   });
+
+  // 字号档位变化时弹 toast 短反馈(1.5s)
+  useEffect(() => {
+    useToastStore.getState().push('info', `字号 ${FONT_SCALE_LABEL[fontScale]}`, 1500);
+    // 首屏一次不算触发:通过 ref 跳过 mount 时那次;但 mount 那次也是用户进入 app,
+    // 让 toast 出现一次也无害。
+  }, [fontScale]);
 
   // useMemo 必须在 early return 之前调用(React Hooks 规则)
   const shellCtx = useMemo<DesktopShellContext>(

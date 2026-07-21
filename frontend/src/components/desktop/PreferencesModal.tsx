@@ -10,6 +10,7 @@ import {
 } from '../../lib/models';
 import { useStore } from '../../store';
 import { useAppVersion } from '../../hooks/useAppVersion';
+import { FONT_SCALES, FONT_SCALE_LABEL, type FontScale } from '../../store/slices/uiPrefs';
 
 export interface PreferencesModalProps {
   open: boolean;
@@ -22,7 +23,7 @@ export interface PreferencesModalProps {
  *
  * 三个区块用分割线清晰隔开：
  *   §1 PROVIDER — Base URL + API Key → 发现模型 → 导入全部
- *   §2 界面     — 思考模式 toggle + 深色模式 toggle
+ *   §2 界面     — 思考模式 toggle + 深色模式 toggle + 字号 radio
  *   §3 关于     — Nexus 版本号
  *
  * 模型选择已移至输入框上方（ModelSelector），设置弹窗只管理供应商配置。
@@ -36,6 +37,8 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
   const setShowThinking = useStore((s) => s.setShowThinking);
   const darkMode = useStore((s) => s.darkMode);
   const toggleDarkMode = useStore((s) => s.toggleDarkMode);
+  const fontScale = useStore((s) => s.fontScale);
+  const setFontScale = useStore((s) => s.setFontScale);
   const models = useStore((s) => s.models);
   const currentModelId = useStore((s) => s.currentModelId);
   const version = useAppVersion();
@@ -282,6 +285,28 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
                 title="深色模式"
                 onClick={() => toggleDarkMode()}
               />
+            </div>
+            <div className="setting-row">
+              <div className="setting-row-label">
+                <span className="setting-row-label-main">字号</span>
+                <span className="setting-row-label-hint">
+                  小 / 中(默认)/ 大;按 ⌘= / ⌘- / ⌘0 切换
+                </span>
+              </div>
+              <div className="radio-group" role="radiogroup" aria-label="字号">
+                {FONT_SCALES.map((v: FontScale) => (
+                  <button
+                    key={v}
+                    type="button"
+                    role="radio"
+                    aria-checked={fontScale === v}
+                    className={fontScale === v ? 'is-active' : ''}
+                    onClick={() => setFontScale(v)}
+                  >
+                    {FONT_SCALE_LABEL[v]}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

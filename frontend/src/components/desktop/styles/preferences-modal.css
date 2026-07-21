@@ -377,6 +377,42 @@
   font-family: var(--font-mono);
 }
 
+/* ===== 字号 radio group ===== */
+.setting-row .radio-group {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--paper);
+}
+.setting-row .radio-group button {
+  padding: 4px 12px;
+  font-size: var(--font-sm);
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.setting-row .radio-group button:last-child {
+  border-right: 0;
+}
+.setting-row .radio-group button[aria-checked='true'],
+.setting-row .radio-group button.is-active {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 500;
+}
+.setting-row .radio-group button:hover:not([aria-checked='true']):not(.is-active) {
+  background: var(--paper-2);
+}
+:root[data-theme="dark"] .setting-row .radio-group button[aria-checked='true'],
+:root[data-theme="dark"] .setting-row .radio-group button.is-active {
+  background: var(--paper);
+  color: var(--ink);
+}
+
 .setting-row input[type="text"],
 .setting-row input[type="password"],
 .setting-row input[type="number"] {

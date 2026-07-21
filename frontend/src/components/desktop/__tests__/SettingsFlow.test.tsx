@@ -27,6 +27,9 @@ const storeState = {
   setShowThinking: vi.fn(),
   darkMode: false,
   toggleDarkMode: vi.fn(),
+  fontScale: 1 as 0.875 | 1 | 1.25,
+  setFontScale: vi.fn(),
+  cycleFontScale: vi.fn(),
   starredIds: [] as string[],
   toggleStarred: vi.fn(),
   models: [
@@ -91,6 +94,8 @@ beforeEach(() => {
   vi.mocked(switchModel).mockClear();
   storeState.setShowThinking.mockClear();
   storeState.toggleDarkMode.mockClear();
+  storeState.setFontScale.mockClear();
+  storeState.cycleFontScale.mockClear();
 });
 
 describe('模拟人工:设置按钮入口', () => {
@@ -158,6 +163,41 @@ describe('模拟人工:设置弹窗界面偏好', () => {
     const toggles = within(dialog).getAllByRole('switch', { name: '已关闭' });
     fireEvent.click(toggles[1]!);
     expect(storeState.toggleDarkMode).toHaveBeenCalled();
+  });
+});
+
+describe('模拟人工:设置弹窗字号 radio', () => {
+  it('字号 radio 组有"小/中/大"三个,默认选中"中"', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    const dialog = screen.getByRole('dialog', { name: '设置' });
+
+    const group = within(dialog).getByRole('radiogroup', { name: '字号' });
+    const radios = within(group).getAllByRole('radio');
+    expect(radios).toHaveLength(3);
+    expect(radios.map((r) => r.textContent)).toEqual(['小', '中', '大']);
+    // 默认 1(中)应被选中
+    expect(radios[1]).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('点击"大" radio → setFontScale(1.25)', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    const dialog = screen.getByRole('dialog', { name: '设置' });
+    const group = within(dialog).getByRole('radiogroup', { name: '字号' });
+
+    fireEvent.click(within(group).getByRole('radio', { name: '大' }));
+    expect(storeState.setFontScale).toHaveBeenCalledWith(1.25);
+  });
+
+  it('点击"小" radio → setFontScale(0.875)', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    const dialog = screen.getByRole('dialog', { name: '设置' });
+    const group = within(dialog).getByRole('radiogroup', { name: '字号' });
+
+    fireEvent.click(within(group).getByRole('radio', { name: '小' }));
+    expect(storeState.setFontScale).toHaveBeenCalledWith(0.875);
   });
 });
 
