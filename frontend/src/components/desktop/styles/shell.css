@@ -1673,7 +1673,7 @@
   opacity: 0.85;
 }
 .settings-trigger-label {
-  font-size: var(--font-2xs);
+  font-size: var(--font-xs);
   font-weight: inherit;
 }
 
