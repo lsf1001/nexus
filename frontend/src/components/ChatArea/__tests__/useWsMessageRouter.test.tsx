@@ -21,6 +21,8 @@ import type { WsRouterCtx } from '../hooks/wsHandlers'
 import { useStore } from '../../../store'
 import type { ConfirmationAction } from '../../../types'
 
+type AppendAssistantPatch = (patch: Parameters<ReturnType<typeof useStore.getState>['appendAssistantPatch']>[0]) => void
+
 function makeCtx(spies?: { appendAssistantPatch: Mock }): {
   ctx: WsRouterCtx
   spies: {
@@ -34,8 +36,7 @@ function makeCtx(spies?: { appendAssistantPatch: Mock }): {
 } {
   const appendAssistantPatch = spies?.appendAssistantPatch ?? vi.fn()
   // 用一个真实 store action 替换,spy 它
-  const realAppend = useStore.getState().appendAssistantPatch
-  useStore.setState({ appendAssistantPatch: appendAssistantPatch as typeof realAppend })
+  useStore.setState({ appendAssistantPatch: appendAssistantPatch as AppendAssistantPatch })
 
   const setLastError = vi.fn()
   const setIsLoading = vi.fn()

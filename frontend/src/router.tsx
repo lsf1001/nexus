@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import {
   createHashRouter,
   Navigate,
@@ -115,6 +114,9 @@ function PlaceholderView({ title }: { title: string }) {
  *  - 路由表:/chat、/chat/:sessionId、/settings、/search、/projects、/setup。
  *  - bootstrap 守卫:/chat* 未配置模型时重定向 /setup;/ 按 bootstrap 结果分流。
  */
+// 路由表(router 常量)与路由元素同文件——react-refresh 对常量 export 不友好,
+// 但本文件是"路由表"单一职责入口,常量与元素密不可分,故加 disable。
+// eslint-disable-next-line react-refresh/only-export-components
 export const router = createHashRouter([
   {
     path: '/',

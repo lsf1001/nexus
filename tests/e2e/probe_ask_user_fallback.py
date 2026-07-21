@@ -33,9 +33,7 @@ async def main() -> int:
     subproto = make_subprotocol(TOKEN)
     print(f"[probe] token={TOKEN[:8]}... subproto={subproto[:24]}...")
 
-    async with websockets.connect(
-        f"ws://{HOST}:{PORT}/api/ws", subprotocols=[subproto]
-    ) as ws:
+    async with websockets.connect(f"ws://{HOST}:{PORT}/api/ws", subprotocols=[subproto]) as ws:
         try:
             first = await asyncio.wait_for(ws.recv(), timeout=3.0)
             print(f"[probe] first frame: {first[:200]}")
@@ -44,9 +42,7 @@ async def main() -> int:
 
         # 单字歧义指令:触发 ask_user 强约束
         prompt = "我想吃"
-        await ws.send(
-            json.dumps({"content": prompt, "session_id": SESSION_ID})
-        )
+        await ws.send(json.dumps({"content": prompt, "session_id": SESSION_ID}))
         print(f"[probe] sent prompt: {prompt!r}")
 
         deadline = time.monotonic() + 180  # 真 LLM 慢一些

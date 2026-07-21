@@ -184,18 +184,13 @@ def test_model_switch_updates_store_modelname() -> None:
     )
     assert handle_select, "未找到 handleSelect 函数体"
     body = handle_select.group(0)
-    assert "setModelName" in body, (
-        "handleSelect 切完必须调 setModelName(m.name),否则顶栏模型名不更新。"
-    )
+    assert "setModelName" in body, "handleSelect 切完必须调 setModelName(m.name),否则顶栏模型名不更新。"
 
     # 3) 失败时必须回滚 setModelName(prevName)
     assert "setModelName(prevName)" in body, (
-        "handleSelect 失败/异常时必须回滚 setModelName(prevName),"
-        "防止 modelName 跟后端激活模型不一致"
+        "handleSelect 失败/异常时必须回滚 setModelName(prevName),防止 modelName 跟后端激活模型不一致"
     )
-    assert "setCurrentModelId(prevId)" in body, (
-        "handleSelect 失败/异常时必须回滚 setCurrentModelId(prevId)"
-    )
+    assert "setCurrentModelId(prevId)" in body, "handleSelect 失败/异常时必须回滚 setCurrentModelId(prevId)"
 
 
 def test_ws_emit_chunk_realtime_not_buffered() -> None:
@@ -259,6 +254,4 @@ def test_settings_view_reads_models_from_store() -> None:
     assert "importProviderModels" in modal, "PreferencesModal 必须 import importProviderModels"
 
     # 2) 导入后调 refreshModelsIntoStore 同步 store
-    assert "refreshModelsIntoStore" in modal, (
-        "PreferencesModal 导入后必须调 refreshModelsIntoStore 同步 store"
-    )
+    assert "refreshModelsIntoStore" in modal, "PreferencesModal 导入后必须调 refreshModelsIntoStore 同步 store"

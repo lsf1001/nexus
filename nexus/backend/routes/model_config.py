@@ -356,11 +356,13 @@ async def discover_provider_models(body: DiscoverModelsRequest) -> dict[str, Any
     discovered: list[dict[str, str]] = []
     for m in raw_models:
         if isinstance(m, dict) and "id" in m:
-            discovered.append({
-                "id": m["id"],
-                "name": m.get("id", ""),
-                "owned_by": m.get("owned_by", ""),
-            })
+            discovered.append(
+                {
+                    "id": m["id"],
+                    "name": m.get("id", ""),
+                    "owned_by": m.get("owned_by", ""),
+                }
+            )
 
     # 按 id 排序
     discovered.sort(key=lambda x: x["id"])
