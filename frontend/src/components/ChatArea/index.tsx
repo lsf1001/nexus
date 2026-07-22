@@ -71,18 +71,6 @@ export function ChatArea({
     sessionIdRef.current = conversationIdProp;
   }, [conversationIdProp]);
 
-  // === resetTrigger 同步状态 ===
-  useEffect(() => {
-    if (resetTrigger && resetTrigger > resetTriggerRef.current) {
-      clearConversationMessages();
-      setInput('');
-      setPendingClarification(null);
-      setPendingConfirmation(null);
-      setLastError(null);
-    }
-    resetTriggerRef.current = resetTrigger ?? 0;
-  }, [resetTrigger, clearConversationMessages, setPendingConfirmation]);
-
   // === 消息流操作(替代原 messagesRef mutate) ===
   const stream: ChatStreamActions = useChatStream();
 
@@ -91,6 +79,29 @@ export function ChatArea({
     setIsLoading,
     setLastError,
   });
+
+  // === resetTrigger 同步状态 ===
+  // 2026-07-22 修复:必须重置 isLoading + disarm watchdog。否则上一轮流如果
+  // 是经 mock reflection / 已停止 路径提前结束(stoppedRef 门控掉后续 chunk,
+  // 或 mock LLM 走反思 done 帧的时序刚好让 last content 不写 store),handleDone
+  // 帧可能不会被 wsHandlers 收到 → store.isLoading 残留 true → Composer 渲染
+  // stop-button(send-button stop-button) → 用户切到新会话后 sendButton selector
+  // 命中 stop-button 而不是 send → click 不发消息(quick-prompts-and-history
+  // spec 暴露的就是这条链路)。
+  // 必须放在 useLoadingWatchdog 之后 — disarmWatchdog 是它的返回值,在
+  // 调用前 closure 引用会撞 TDZ(React 19 + Vite + ReferenceError)。
+  useEffect(() => {
+    if (resetTrigger && resetTrigger > resetTriggerRef.current) {
+      clearConversationMessages();
+      setInput('');
+      setIsLoading(false);
+      disarmWatchdog();
+      setPendingClarification(null);
+      setPendingConfirmation(null);
+      setLastError(null);
+    }
+    resetTriggerRef.current = resetTrigger ?? 0;
+  }, [resetTrigger, clearConversationMessages, setIsLoading, disarmWatchdog, setPendingConfirmation]);
 
   // === WS 连接 — 鉴权走 subprotocol ===
   // 2026-07-20:WsRouterCtx 不再含 stream — wsHandlers.handleChunk / handleThinking

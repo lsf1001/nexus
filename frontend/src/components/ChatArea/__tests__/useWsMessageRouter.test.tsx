@@ -87,12 +87,16 @@ describe('useWsMessageRouter', () => {
     // 因为 frame 没 type,narrowing 直接 return,不会调任何 handler
   })
 
-  it('thinking 帧 → store.appendAssistantPatch 写 thinking + disarmWatchdog + setIsLoading(false)', () => {
+  it('thinking 帧 → store.appendAssistantPatch 写 thinking + disarmWatchdog,流仍进行(isLoading 不关)', () => {
     const { ctx, spies } = makeCtx()
     const { result } = renderHook(() => useWsMessageRouter(ctx))
     result.current({ type: 'thinking', content: 'hmm let me think' })
     expect(spies.appendAssistantPatch).toHaveBeenCalledWith({ thinking: 'hmm let me think' })
-    expect(spies.setIsLoading).toHaveBeenCalledWith(false)
+    // 2026-07-22 修复:thinking 帧是流还在进行的标志 — 不应关闭 isLoading,
+    // 原逻辑 setIsLoading(false) 导致 stop 按钮在 mock 流 ~50ms 内消失,
+    // Playwright 抓不到持续可见状态(journey-stop-mid-stream full suite 一直 FAIL)。
+    expect(spies.setIsLoading).not.toHaveBeenCalledWith(false)
+    // 仍 disarmWatchdog 让 30s 兜底 watchdog 在每帧活动时清零重计时。
     expect(spies.disarmWatchdog).toHaveBeenCalledTimes(1)
   })
 

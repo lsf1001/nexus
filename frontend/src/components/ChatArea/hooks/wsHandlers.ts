@@ -108,7 +108,14 @@ export const handleThinking: WsHandler = (ev, ctx) => {
     // 已并入 appendAssistantPatch,这里用空 patch 调用即可。
     appendPatch(ctx, {});
   }
-  ctx.setIsLoading(false);
+  // 2026-07-22 修复:thinking 帧是"流还在进行"的标志 — 不应关闭 isLoading。
+  // 原逻辑收到第一个 thinking 帧就 setIsLoading(false),导致 stop 按钮在 mock
+  // 流 ~50ms 内就消失,Playwright 抓不到持续可见状态(journey-stop-mid-stream
+  // full suite 一直 FAIL,isolated 因 React batch 时序侥幸通过)。
+  // 流未结束期间(isLoading=true)保持,直到 handleFinal / handleDone / handleError。
+  // armWatchdog 由 handleSend 在发消息时设,这里无需重复 arm。
+  // 仍 disarmWatchdog 让 30s 兜底 watchdog 在每一帧活动时清零重计时,
+  // 避免 mock 慢 / 真 LLM 慢的场景下被误清 loading。
   ctx.disarmWatchdog();
 };
 
@@ -119,7 +126,8 @@ export const handleChunk: WsHandler = (ev, ctx) => {
   } else {
     appendPatch(ctx, {});
   }
-  ctx.setIsLoading(false);
+  // 2026-07-22 修复:chunk 帧同 thinking — 流还在出,保持 isLoading=true,
+  // 详见 handleThinking 注释。
   ctx.disarmWatchdog();
 };
 

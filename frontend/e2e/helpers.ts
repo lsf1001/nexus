@@ -61,12 +61,18 @@ export function messageInput(page: Page): Locator {
 
 /** 定位发送按钮（textarea 后面那个 SVG 按钮，aria-label 没设，用父 div 定位）。
  *
- *  空态(EmptyState)有自己的发送按钮 `.empty-state-send`;对话中则是 `.send-button`。
- *  两者 SVG path 完全相同,strict mode 会同时匹配两个。返回 `.or()`,调用方在 click
- *  前显式 .first() 取唯一的 visible 节点即可。
+ *  - 空态(EmptyState)有自己的发送按钮 `.empty-state-send`;对话中则是 `.send-button`。
+ *  - 流进行中(`isLoading=true`)Composer 渲染的是 **停止** 按钮,class 是
+ *    `send-button stop-button`。必须用 `:not(.stop-button)` 排除,否则 click 会
+ *    命中停止按钮(`.first()` 取首个匹配也会撞),导致 send 不发消息(2026-07-22
+ *    journey-quick-prompts-and-history spec 暴露的根因)。
+ *
+ *  返回 `.or()`,调用方在 click 前显式 .first() 取唯一的 visible 节点即可。
  */
 export function sendButton(page: Page): Locator {
-  return page.locator('button.empty-state-send, button.send-button');
+  return page.locator(
+    'button.empty-state-send, button.send-button:not(.stop-button)',
+  );
 }
 
 /**
