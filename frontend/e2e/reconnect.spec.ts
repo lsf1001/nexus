@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { openHome, sendMessageAndWaitForReply } from './helpers';
+import { openHome, lastAssistantBubbleText, messageInput, sendButton } from './helpers';
 
 /**
  * 断线重连 E2E：
@@ -117,6 +117,17 @@ test('断线重连：WS 断开后能自动恢复并继续收发', async ({ page 
     )
     .toBe(WebSocket.OPEN);
 
-  // 重连后能正常收发
-  await sendMessageAndWaitForReply(page, '重连后再发一条', { timeoutMs: 120_000 });
+  // 重连后能正常收发:输入 + 发送 + 等助手有非空反应。
+  // 不复用通用 helper 的 "user/assistant 行数相等"断言:真实 LLM 见"重连后再发一条"
+  // 语义模糊会走 clarification panel(assistant 同时有"思考"+"回复"两行,
+  // group "AI 正在向你确认")。这里只验证助手有非空反应即可。
+  const input = messageInput(page);
+  await expect(input).toBeEnabled({ timeout: 30_000 });
+  await input.fill('重连后再发一条');
+  await sendButton(page).first().click();
+
+  await expect(async () => {
+    const reply = await lastAssistantBubbleText(page);
+    expect(reply.length).toBeGreaterThan(0);
+  }).toPass({ timeout: 120_000, intervals: [500, 1000, 2000, 4000] });
 });
