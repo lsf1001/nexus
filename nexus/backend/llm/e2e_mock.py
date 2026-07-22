@@ -35,18 +35,58 @@ from typing import Any
 
 import httpx
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import Field
 
 
+def _home() -> Path:
+    """返回 mock 文件应该落到的根目录。
+
+    优先读 :envvar:`NEXUS_HOME`;缺省回到 ``~/.nexus``。
+
+    WHY:Playwright E2E (``playwright.config.ts``)把后端进程的 ``NEXUS_HOME``
+    指向 ``/tmp/nexus-playwright-<pid>/``,每个进程独占一份;若 mock 还硬
+    编码 ``~/.nexus/outputs/e2e_allow.md``,跨 spec 顺序跑时 :
+    - FilesystemBackend 拒绝二次写入(返回 ``Cannot write ... because it
+      already exists``)
+    - deepagents 模块级单例 ``_agent`` 累积前序 ``ToolMessage``,再次进入
+      LLM 时 ``_build_message`` 走 reflection 路径(只有 ``has_tool_result``
+      时返回 reflection),emit ``done`` 帧而不是 ``on_chat_model_stream``
+      chunk → 前端看不到 stop 按钮 / 流式输出
+    """
+    return Path(os.environ.get("NEXUS_HOME", str(Path.home() / ".nexus")))
+
+
 def _abs(path: str) -> str:
-    """展开 ``~`` 为绝对路径(deepagents FilesystemMiddleware 拒绝 ``~``)。"""
+    """展开 ``~`` 为绝对路径(deepagents FilesystemMiddleware 拒绝 ``~``)。
+
+    E2E mock 下(NEXUS_E2E_MOCK=1) ``~/.nexus/...`` 自动重定向到
+    :envvar:`NEXUS_HOME`,这样后端 deepagents FilesystemMiddleware 仍按
+    真实 ``~/.nexus/`` 语义正常放行(allow-list 命中),但文件落到 Playwright
+    注入的隔离目录;scenario 写路径保持"写 .nexus/"语义不变,
+    FilesystemBackend HITL 不会被触发。
+    """
+    is_e2e = os.environ.get("NEXUS_E2E_MOCK") == "1"
+    home_root = _home()
+    if is_e2e and "~/.nexus" in path:
+        path = path.replace("~/.nexus", str(home_root))
     return str(Path(path).expanduser().resolve())
 
 
+def _e2e_path(name: str) -> str:
+    """把 scenario 文件名挂到当前 NEXUS_HOME 上,保证 E2E 隔离 + 用户 ``~/.nexus/`` 不被污染。"""
+    return str(_home() / "outputs" / name)
+
+
 _SCENARIOS: dict[str, list[dict[str, Any]]] = {
-    # 1. 写 .nexus/ → 应 allow,无 HITL
+    # 1. 写 $NEXUS_HOME/.nexus/outputs/e2e_allow.md → 应 allow,无 HITL
+    #    E2E 下 _abs() 自动把 ``~/.nexus/...`` 重定向到
+    #    :envvar:`NEXUS_HOME` ``/outputs/...``,保证跨 spec 顺序跑时
+    #    文件不残留(避免 FilesystemBackend "already exists" → mock
+    #    _build_message 误入 reflection 路径) + 用户 ``~/.nexus/`` 不被污染。
+    #    deepagents FilesystemMiddleware 看到的仍是 ``.nexus/`` 路径语义,
+    #    命中 allow-list 无 HITL,scenario 行为不变。
     "allow_nexus_write": [
         {
             "name": "write_file",
@@ -163,6 +203,15 @@ class E2EMockChatModel(BaseChatModel):
         # 才能让用户点 stop。默认 0(mock 立即返回),NEXUS_E2E_MOCK_DELAY_SEC
         # 设成 2 可让流持续 ~2 秒,足以触发 stop 按钮交互。
         delay = float(os.environ.get("NEXUS_E2E_MOCK_DELAY_SEC", "0"))
+        # 2026-07-22 调试 hook:看 mock 是不是真 sleep + messages 长度。
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "[MOCK-DEBUG] _generate scenario=%s delay=%s messages_len=%s has_tool_result=%s",
+            self.scenario,
+            delay,
+            len(messages) if messages else 0,
+            any(isinstance(m, ToolMessage) for m in (messages or [])),
+        )
         if delay > 0:
             import time as _time
 

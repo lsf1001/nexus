@@ -39,6 +39,7 @@ deepagents 0.5.3 的 ``FilesystemPermission.mode`` 只支持
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -153,10 +154,29 @@ class PathAwareHITLMiddleware(AgentMiddleware[Any, ContextT, ResponseT]):
     ) -> None:
         self._project_root = project_root.expanduser().resolve()
         # 白名单前缀集合(以 / 结尾便于 startswith 比较)
-        self._whitelist_prefixes: tuple[str, ...] = (
+        whitelist_prefixes: list[str] = [
             str((self._project_root / ".nexus").resolve()) + "/",
-            *(str((Path.home() / ".nexus" / sub).resolve()) + "/" for sub in self._USER_WHITELIST_SUBDIRS),
+        ]
+        # 用户级 ``~/.nexus/{outputs,state,logs,skills,cache}`` 在所有平台
+        # 都是 Nexus 个人助理的合法归宿,直接放行。
+        whitelist_prefixes.extend(
+            str((Path.home() / ".nexus" / sub).resolve()) + "/"
+            for sub in self._USER_WHITELIST_SUBDIRS
         )
+        # 2026-07-22 E2E mock 注入 ``NEXUS_HOME=/tmp/nexus-playwright-<pid>/``
+        # 时也把同套子目录加进白名单 — mock scenario ``allow_nexus_write``
+        # 必须落到隔离 ``NEXUS_HOME`` 下避免跨 spec 顺序跑时 FilesystemBackend
+        # ``already exists`` 误返 + 用户 ``~/.nexus/`` 被污染。prod 下
+        # ``NEXUS_HOME`` 缺省指向用户真实家目录,与 ``~/.nexus`` 等价,加这一
+        # 条不引入 prod 行为变化(只是冗余)。
+        nexus_home = os.environ.get("NEXUS_HOME")
+        if nexus_home:
+            home_root = Path(nexus_home).expanduser().resolve()
+            whitelist_prefixes.extend(
+                str((home_root / sub).resolve()) + "/"
+                for sub in self._USER_WHITELIST_SUBDIRS
+            )
+        self._whitelist_prefixes: tuple[str, ...] = tuple(whitelist_prefixes)
         # protected_paths 走 str 比较;resolve 后比较避免 symlink 漂移
         self._protected = {str(Path(p).expanduser().resolve()) for p in protected_paths}
         self._description_prefix = description_prefix
