@@ -1043,6 +1043,36 @@
   background: var(--paper-2);
 }
 
+/* #14 记忆面板操作按钮(2026-07-23):复制路径 / 复制内容 / 下载 + 刷新。 */
+.memory-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.memory-panel-action {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink-2);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: var(--font-xs);
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.memory-panel-action:hover:not(:disabled) {
+  background: var(--paper-2);
+}
+
+.memory-panel-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .memory-panel-body {
   flex: 1;
   min-height: 0;
