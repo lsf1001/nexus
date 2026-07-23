@@ -60,13 +60,14 @@ export function Sidebar({
   }, [conversations, starredIds]);
 
   const q = query.trim();
+  // 搜索只匹配 title — 列表接口不返 messages 正文,跨会话预取会爆内存。
+  // 行业惯例(ChatGPT / Claude Desktop)只搜标题;搜不到的关键词请去 ChatArea 里翻。
   const filteredConversations = useMemo(() => {
     if (!q) return sortedConversations;
     const lowerQ = q.toLowerCase();
     return sortedConversations.filter((conv) => {
       const title = conv.title || '新对话';
-      if (title.toLowerCase().includes(lowerQ)) return true;
-      return conv.messages.some((m) => (m.content || '').toLowerCase().includes(lowerQ));
+      return title.toLowerCase().includes(lowerQ);
     });
   }, [q, sortedConversations]);
 
