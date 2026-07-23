@@ -118,4 +118,68 @@ describe("useGlobalShortcuts (Cmd+N/K// + Esc)", () => {
     fireKey({ key: "|", metaKey: true, shiftKey: true }); // Shift+\ 产出 |
     expect(useStore.getState().artifactsCollapsed).toBe(true);
   });
+
+  // 第十一轮-3(2026-07-23,#9 键盘守卫):modKey 快捷键在文本输入元素内放行,
+  // 不再 preventDefault + 不触发 callback。让浏览器原生行为跑(Cmd+N 不再
+  // 在 textarea 内被拦 → 切会话副作用消失)。
+  describe("text input focus guard (第十一轮-3)", () => {
+    function makeTextarea(): HTMLTextAreaElement {
+      const ta = document.createElement("textarea");
+      Object.defineProperty(ta, "tagName", { value: "TEXTAREA", configurable: true });
+      return ta;
+    }
+    function makeInput(): HTMLInputElement {
+      const input = document.createElement("input");
+      Object.defineProperty(input, "tagName", { value: "INPUT", configurable: true });
+      return input;
+    }
+    function makeContentEditable(): HTMLDivElement {
+      const div = document.createElement("div");
+      Object.defineProperty(div, "isContentEditable", { value: true, configurable: true });
+      return div;
+    }
+
+    it("Cmd+N 在 textarea 内不触发 onNewTask", () => {
+      const onNewTask = vi.fn();
+      renderHook(() => useGlobalShortcuts({ onNewTask }));
+      fireKey({ key: "n", metaKey: true, target: makeTextarea() });
+      expect(onNewTask).not.toHaveBeenCalled();
+    });
+
+    it("Cmd+K 在 input 内不触发 onFocusSearch", () => {
+      const onFocusSearch = vi.fn();
+      renderHook(() => useGlobalShortcuts({ onFocusSearch }));
+      fireKey({ key: "k", metaKey: true, target: makeInput() });
+      expect(onFocusSearch).not.toHaveBeenCalled();
+    });
+
+    it("Cmd+/ 在 contenteditable 内不触发 onFocusComposer", () => {
+      const onFocusComposer = vi.fn();
+      renderHook(() => useGlobalShortcuts({ onFocusComposer }));
+      fireKey({ key: "/", metaKey: true, target: makeContentEditable() });
+      expect(onFocusComposer).not.toHaveBeenCalled();
+    });
+
+    it("Cmd+\\ 在 textarea 内不翻转 Artifacts 折叠态", () => {
+      useStore.getState().setArtifactsCollapsed(true);
+      renderHook(() => useGlobalShortcuts({}));
+      fireKey({ key: "\\", metaKey: true, target: makeTextarea() });
+      expect(useStore.getState().artifactsCollapsed).toBe(true);
+    });
+
+    it("Cmd+= 在 textarea 内不触发 onZoomIn", () => {
+      const onZoomIn = vi.fn();
+      renderHook(() => useGlobalShortcuts({ onZoomIn }));
+      fireKey({ key: "=", metaKey: true, target: makeTextarea() });
+      expect(onZoomIn).not.toHaveBeenCalled();
+    });
+
+    it("focus 在 div(非输入元素)时 Cmd+N 仍正常触发 onNewTask", () => {
+      const onNewTask = vi.fn();
+      const div = document.createElement("div");
+      renderHook(() => useGlobalShortcuts({ onNewTask }));
+      fireKey({ key: "n", metaKey: true, target: div });
+      expect(onNewTask).toHaveBeenCalledTimes(1);
+    });
+  });
 });

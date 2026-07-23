@@ -31,15 +31,19 @@ export interface UseGlobalShortcutsOptions {
  *   - Cmd+\ / Ctrl+\ 折叠/展开右栏 Artifacts 面板
  *
  * 字号缩放(2026-07-21):Mac 浏览器风格的 Cmd+= / Cmd+- / Cmd+0 切三档字号
- * (在 user 集中反馈"Mac 快捷键 无法放大窗口及字体"后增加)。与既有 4 个快捷
- * 键的关键差异:这 3 个新增 isTextInput guard——`=`/`-`/`0` 是高频输入字符,
- * 在 textarea / input 内必须放行输入;既有的 N/K/`/`/`\` 沿用无 guard 现状。
+ * (在 user 集中反馈"Mac 快捷键 无法放大窗口及字体"后增加)。
+ *
+ * 第十一轮-3(2026-07-23,#9 键盘守卫):既有 4 个老快捷键(N/K/`/`/\)在
+ * textarea/input/contenteditable 内也会被拦截,跟输入字符冲突(Cmd+N 是
+ * textarea 高频快捷键 — 选词 / 移动到行首 / 操作系统级新建窗口等等;
+ * Cmd+K 在 sidebar 搜索外也是高频编辑组合)。修复:所有 5 个 modKey 快捷
+ * 键 + Cmd+\ 都加 isTextInput guard — focus 在文本输入元素内时,
+ * e.preventDefault() 不调 + callback 不触发,让浏览器原生行为跑。
+ *
+ * 注意:hook docstring 之前声称"在 input / textarea / [contenteditable]
+ * 内不抢键",实际 hook 从来没有这逻辑。本次才真正落实(2026-07-23)。
  *
  * modKey = e.metaKey || e.ctrlKey,让 macOS / Win / Linux 通用。
- *
- * 注意:hook docstring 之前声称"在 input / textarea / [contenteditable] 内不
- * 抢键",实际 hook 从来没有这逻辑 —— 既有 N/K/`/`/`\` 也抢。仅新增 zoom 3
- * 个补上 guard,因为输入字符冲突会影响实际写作流。
  */
 export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
   const { onNewTask, onFocusSearch, onFocusComposer, onCloseModal, onZoomIn, onZoomOut, onZoomReset } = options;
@@ -55,35 +59,38 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
     const handler = (e: KeyboardEvent): void => {
       const modKey = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
+      const inTextInput = isTextInput(e.target);
 
-      if (modKey && key === 'n' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        onNewTask?.();
-        return;
-      }
-
-      if (modKey && key === 'k' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        onFocusSearch?.();
-        return;
-      }
-
-      if (modKey && key === '/' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        onFocusComposer?.();
-        return;
-      }
-
-      // Cmd+\ / Ctrl+\ 翻转右栏折叠态(SPEC §6)
-      if (modKey && e.key === '\\' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        useStore.getState().toggleArtifactsCollapsed();
-        return;
+      // 第十一轮-3(2026-07-23,#9 键盘守卫):modKey 快捷键在文本输入元素内
+      // 放行,让浏览器原生行为跑(Cmd+N 在 textarea 不再被拦 → 不再"按 Cmd+N
+      // 切到新会话结果 textarea 焦点被吞")。
+      if (modKey && !e.altKey && !inTextInput) {
+        if (key === 'n' && !e.shiftKey) {
+          e.preventDefault();
+          onNewTask?.();
+          return;
+        }
+        if (key === 'k' && !e.shiftKey) {
+          e.preventDefault();
+          onFocusSearch?.();
+          return;
+        }
+        if (key === '/' && !e.shiftKey) {
+          e.preventDefault();
+          onFocusComposer?.();
+          return;
+        }
+        // Cmd+\ / Ctrl+\ 翻转右栏折叠态(SPEC §6)
+        if (e.key === '\\' && !e.shiftKey) {
+          e.preventDefault();
+          useStore.getState().toggleArtifactsCollapsed();
+          return;
+        }
       }
 
       // 字号缩放:Cmd+= / Cmd++ / Cmd+- / Cmd+0 —— input focus 时放行。
-      // macOS Cmd+= 给的 e.key 是 '=';若用户按了 Shift(=+ 字符),也兼容 '+'。
-      if (modKey && !e.altKey && !isTextInput(e.target)) {
+      // 第十一轮-3 起所有 modKey 快捷键都共用 isTextInput guard(上面 if 块)。
+      if (modKey && !e.altKey && !inTextInput) {
         if ((e.key === '=' || e.key === '+') && !e.shiftKey) {
           e.preventDefault();
           onZoomIn?.();
