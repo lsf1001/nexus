@@ -26,6 +26,7 @@ export interface DesktopShellContext {
   currentConversationId: string | null;
   onSelectConversation: (conv: Conversation) => void;
   onDeleteConversation: (id: string) => void;
+  onRenameConversation: (id: string, title: string) => Promise<void>;
   onNewTask: () => void;
   // 模型 / 连接
   modelName: string;
@@ -64,6 +65,7 @@ export function DesktopShell() {
     resetCounter,
     onSelectConversation,
     onDeleteConversation,
+    onRenameConversation,
     onNewTask,
     onSessionCreated,
   } = useConversationCrud();
@@ -130,6 +132,7 @@ export function DesktopShell() {
       currentConversationId,
       onSelectConversation,
       onDeleteConversation,
+      onRenameConversation,
       onNewTask: handleNewTask,
       modelName,
       wsConnected,
@@ -145,7 +148,7 @@ export function DesktopShell() {
     }),
     [
       conversations, currentConversationId, onSelectConversation, onDeleteConversation,
-      handleNewTask, modelName, wsConnected, wechatConnected, onSessionCreated,
+      onRenameConversation, handleNewTask, modelName, wsConnected, wechatConnected, onSessionCreated,
       resetCounter, isBootstrapping, isModelConfigured, handleOpenPreferences, handleOpenWechat,
     ],
   );

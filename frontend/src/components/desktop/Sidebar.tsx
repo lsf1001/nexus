@@ -8,6 +8,8 @@ export interface SidebarProps {
   currentConversationId: string | null;
   onSelectConversation: (conv: Conversation) => void;
   onDeleteConversation: (id: string) => void;
+  /** 重命名回调 — 双击 title 触发,Enter 提交,Esc 取消。后端 PUT 走 useConversationCrud。 */
+  onRenameConversation: (id: string, title: string) => void | Promise<void>;
   onNewTask: () => void;
   onOpenPreferences?: () => void;
 }
@@ -34,6 +36,7 @@ export function Sidebar({
   currentConversationId,
   onSelectConversation,
   onDeleteConversation,
+  onRenameConversation,
   onNewTask,
   onOpenPreferences,
 }: SidebarProps) {
@@ -78,6 +81,7 @@ export function Sidebar({
         starred={starred}
         onSelect={handleSelect}
         onDelete={onDeleteConversation}
+        onRename={onRenameConversation}
         onToggleStar={() => toggleStarred(conv.id)}
       />
     );
@@ -148,7 +152,7 @@ export function Sidebar({
   );
 }
 
-/** 单条会话 — 拆出来便于把删除确认态各自管 state,避免污染父级重渲染。 */
+/** 单条会话 — 拆出来便于把删除确认 + 重命名态各自管 state。 */
 interface TaskItemProps {
   conv: Conversation;
   title: string;
@@ -156,6 +160,7 @@ interface TaskItemProps {
   starred: boolean;
   onSelect: () => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void | Promise<void>;
   onToggleStar: () => void;
 }
 
@@ -166,9 +171,13 @@ function TaskItem({
   starred,
   onSelect,
   onDelete,
+  onRename,
   onToggleStar,
 }: TaskItemProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
+  const [renameState, setRenameState] = useState<
+    { mode: 'editing'; draft: string } | { mode: 'idle' }
+  >({ mode: 'idle' });
 
   // 删除确认超时自动取消 — 5s 内未点确定/取消就复位,避免误点永久占位。
   const deleteTimerRef = useRef<number | null>(null);
@@ -185,13 +194,36 @@ function TaskItem({
     };
   }, [pendingDelete]);
 
+  const handleRenameCommit = async (): Promise<void> => {
+    if (renameState.mode !== 'editing') return;
+    const next = renameState.draft.trim();
+    if (!next || next === title) {
+      setRenameState({ mode: 'idle' });
+      return;
+    }
+    await onRename(conv.id, next);
+    setRenameState({ mode: 'idle' });
+  };
+
+  const handleRenameCancel = (): void => {
+    setRenameState({ mode: 'idle' });
+  };
+
+  const startRename = (): void => {
+    setRenameState({ mode: 'editing', draft: title });
+  };
+
   return (
     <div
       role="button"
       tabIndex={0}
       className={`task-item ${active ? 'is-current' : ''} ${starred ? 'is-starred' : ''}`}
-      onClick={onSelect}
+      onClick={() => {
+        if (renameState.mode === 'editing') return;
+        onSelect();
+      }}
       onKeyDown={(event) => {
+        if (renameState.mode === 'editing') return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onSelect();
@@ -200,8 +232,40 @@ function TaskItem({
       aria-current={active ? 'true' : undefined}
       aria-label={title}
     >
-      <div className="task-item-body">
-        <strong>{title}</strong>
+      <div
+        className="task-item-body"
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          startRename();
+        }}
+      >
+        {renameState.mode === 'editing' ? (
+          <input
+            className="rename-input"
+            type="text"
+            value={renameState.draft}
+            autoFocus
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) =>
+              setRenameState({ mode: 'editing', draft: event.target.value })
+            }
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void handleRenameCommit();
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                handleRenameCancel();
+              }
+            }}
+            onBlur={() => {
+              void handleRenameCommit();
+            }}
+            aria-label={`重命名 ${title}`}
+          />
+        ) : (
+          <strong>{title}</strong>
+        )}
       </div>
       <div className="task-actions">
         <button
