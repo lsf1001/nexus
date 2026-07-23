@@ -60,15 +60,15 @@ export function Sidebar({
   }, [conversations, starredIds]);
 
   const q = query.trim();
-  const filteredConversations = useMemo(
-    () =>
-      q
-        ? sortedConversations.filter((conv) =>
-            (conv.title || '新对话').toLowerCase().includes(q.toLowerCase())
-          )
-        : sortedConversations,
-    [q, sortedConversations],
-  );
+  const filteredConversations = useMemo(() => {
+    if (!q) return sortedConversations;
+    const lowerQ = q.toLowerCase();
+    return sortedConversations.filter((conv) => {
+      const title = conv.title || '新对话';
+      if (title.toLowerCase().includes(lowerQ)) return true;
+      return conv.messages.some((m) => (m.content || '').toLowerCase().includes(lowerQ));
+    });
+  }, [q, sortedConversations]);
 
   const renderTask = (conv: Conversation) => {
     const active = conv.id === currentConversationId;
