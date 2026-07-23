@@ -103,7 +103,7 @@ export function useDraft(): UseDraftReturn {
       skipNextSaveRef.current = true; // loadOnMount 触发的 setInput → 下次 effect 跳过 save
       setInput(draft.text);
       removeDraft(); // 读出后立即清(避免 reload 又恢复)
-      useToastStore.getState().push('info', `已恢复草稿 (${formatAgo(draft.savedAt)})`, 3500);
+      useToastStore.getState().push('info', `已恢复未提交草稿 (${formatAgo(draft.savedAt)})`, 3500);
     },
     [],
   );

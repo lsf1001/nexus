@@ -108,8 +108,8 @@ describe('useDraft (第十一轮 Composer 草稿)', () => {
     expect(setInput).toHaveBeenCalledWith('restored text');
     // 读出后立即清掉(避免 reload 又恢复)
     expect(store.data.has(DRAFT_KEY)).toBe(false);
-    // toast
-    expect(pushSpy).toHaveBeenCalledWith('info', expect.stringContaining('已恢复草稿'), 3500);
+    // toast — 文案明确"未提交"(区别于已发送的历史消息,避免用户混淆)
+    expect(pushSpy).toHaveBeenCalledWith('info', expect.stringContaining('已恢复未提交草稿'), 3500);
   });
 
   it('loadOnMount(conversationId=有) → 不读草稿', () => {

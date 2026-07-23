@@ -171,6 +171,13 @@ export function ChatArea({
   //   - 读:挂载 + conversationId 为空 → 读 localStorage → 填回 input + toast
   //   - 写:input 变化 + 500ms 防抖
   //   - 清:send 成功后(走 clearInput wrapper)同步 removeItem
+  //
+  // #13 草稿文案明确化(2026-07-23):当前是 Level 1 — 单草稿跨会话不复用,
+  // 仅在 conversationId 为空(无会话)时读出。有会话时切回旧会话会丢半句 prompt,
+  // 是有意取舍(YAGNI:per-conversationId 草稿会让 localStorage 膨胀 + 多数用户
+  // 实际场景是"快速切换会话后回到最新草稿")。toast 文案 "已恢复未提交草稿" 明
+  // 确告知用户这是未发送的内容,避免和"已发送历史消息"混淆。后续如收到用户反馈
+  // "切回旧会话丢草稿"再升级到 Level 2(per-conversationId + TTL)。
   const { loadOnMount, saveDraftEffect, clearDraft } = useDraft();
   useEffect(() => {
     loadOnMount(conversationIdProp, setInput);
