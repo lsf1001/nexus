@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import sqlite3
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -134,6 +135,21 @@ async def lifespan(app: FastAPI):
     from .db import init_db
 
     init_db()
+    # Round 1 SPEC §4.2: 默认 Project 自动迁移 — DB 初始化后立即跑,
+    # 确保 sessions.project_id 不为 NULL,后续 agent 构造能立即拿到上下文。
+    try:
+        from .projects.storage import (
+            ensure_default_project,
+            migrate_sessions_to_default,
+        )
+
+        ensure_default_project()
+        migrate_sessions_to_default()
+    except (OSError, sqlite3.OperationalError, sqlite3.IntegrityError) as exc:
+        # 环境异常(磁盘满 / 权限 / FK 半迁移状态):降级 warning + 继续启动,
+        # 让旧 Nexus 安装(没有 ~/Nexus/projects/ 目录)能成功跑起来。
+        # 真正的系统错误继续向外抛,例如后续 SPEC §5.1 严格化时直接 raise。
+        logger.warning("[projects] 默认 Project 迁移失败(继续启动): %s", exc, exc_info=True)
     # 扫描运行时 skills(2026-07-15 引入)
     # WHY init_db 之后:skill 加载失败不应阻断 DB 初始化。
     # WHY 单独 try-except:用户 ~/.nexus/skills/ 损坏不该阻断整个启动。
