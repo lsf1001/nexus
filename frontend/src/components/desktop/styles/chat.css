@@ -35,6 +35,41 @@
   justify-content: safe center;
 }
 
+/* 第十一轮(2026-07-23)浮动"跳到底部"按钮 — 用户滚上看历史时出现,
+ * 点 → 平滑滚到 chat-scroll 底部 + 重置 userScrolledUp。
+ * 钉在 .chat-scroll 右下角(absolute),scroll 容器必须是 position:relative,
+ * 但 .chat-scroll 本身没设,这里用 sticky fallback 也行。简化:position:fixed
+ * 相对 viewport(chat-area-wrap 占据主区,fab 钉底部右侧,不跟消息流走)。 */
+.jump-to-bottom {
+  position: sticky;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-end;
+  margin: 0 0 12px 0;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--paper) 90%, transparent);
+  color: var(--ink-2);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: background-color 120ms ease, color 120ms ease;
+  font-family: inherit;
+  z-index: 2;
+}
+.jump-to-bottom:hover {
+  background: var(--paper);
+  color: var(--ink);
+  border-color: var(--line-2);
+}
+.nexus-desktop[data-theme="dark"] .jump-to-bottom {
+  background: color-mix(in srgb, var(--paper-2) 90%, transparent);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.30);
+}
+
 .empty-state {
   max-width: 680px;
   width: 100%;

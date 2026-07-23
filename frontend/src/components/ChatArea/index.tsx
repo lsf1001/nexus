@@ -152,7 +152,8 @@ export function ChatArea({
   // 不能是末尾空 div messagesEndRef — 那个 div 没有 overflow,smooth
   // scrollTo 不会带动父容器。2026-07-13 真 LLM multi-turn 暴露 viewport
   // ratio 0,根因就在这里。===
-  useAutoScroll({
+  // 第十一轮:返回 userScrolledUp + scrollToBottom,ChatArea 条件渲染浮动按钮。
+  const { userScrolledUp, scrollToBottom } = useAutoScroll({
     trigger: [displayMessages.length, isLoading],
     containerRef: chatScrollRef,
   });
@@ -228,6 +229,17 @@ export function ChatArea({
             onCopy={handleCopyMessage}
             onRetry={handleRetry}
           />
+        )}
+        {userScrolledUp && (
+          <button
+            type="button"
+            className="jump-to-bottom"
+            onClick={() => scrollToBottom(true)}
+            aria-label="跳到底部"
+            title="跳到底部"
+          >
+            <span aria-hidden="true">↓</span> 跳到底部
+          </button>
         )}
         {pendingClarification && (
           <ClarificationForm
