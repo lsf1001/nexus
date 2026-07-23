@@ -6,7 +6,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::{Child, Command};
 use tokio::sync::RwLock;
-use tokio::time::Instant;
+use tokio::time::{timeout, Instant};
+
+/// 等内核 reap 旧 sidecar 的兜底时长。无 timeout 时 zombie / uninterruptible IO
+/// 可永久阻塞,前端 SplashView retry 按钮因此卡在 Starting 无救济路径。
+const SIDECAR_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 // build.rs 生成的编译期常量 WS_TOKEN(64 hex 字符),从 OUT_DIR 拿
 include!(concat!(env!("OUT_DIR"), "/ws_token.rs"));
@@ -130,8 +134,16 @@ pub async fn restart_sidecar(app: AppHandle) -> Result<(), String> {
         if let Err(e) = child.start_kill() {
             log::warn!("restart_sidecar: start_kill failed: {e}");
         }
-        // 等它真正退出,避免旧进程仍占 30000 端口导致新进程健康检查失败。
-        let _ = child.wait().await;
+        // SIGKILL 已发,等内核 reap,加 2s 兜底防卡死。无 timeout 时 zombie /
+        // uninterruptible IO 可永久阻塞 child.wait。
+        match timeout(SIDECAR_WAIT_TIMEOUT, child.wait()).await {
+            Ok(_exit_status) => {}
+            Err(_elapsed) => {
+                log::warn!(
+                    "sidecar wait timed out after 2s, skipping wait for exit_code"
+                );
+            }
+        }
     }
 
     // 2. 重新拉起;start_sidecar 内部成功后 emit runtime-status: Ready。
