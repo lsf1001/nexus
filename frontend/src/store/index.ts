@@ -72,6 +72,8 @@ export const useStore = create<Store>()(
         darkMode: state.darkMode,
         showThinking: state.showThinking,
         fontScale: state.fontScale,
+        // starredIds 是用户跨会话保留的偏好(会话列表星标置顶分组),持久化
+        starredIds: state.starredIds,
       }),
       skipHydration: true,
     }

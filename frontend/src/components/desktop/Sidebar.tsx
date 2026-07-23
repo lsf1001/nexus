@@ -45,15 +45,19 @@ export function Sidebar({
   const starredIds = useStore((s) => s.starredIds);
   const appVersion = useAppVersion();
 
-  const sortedConversations = useMemo(
-    () =>
-      [...conversations].sort((a, b) => {
-        const ta = new Date(a.updatedAt || a.createdAt).getTime();
-        const tb = new Date(b.updatedAt || b.createdAt).getTime();
-        return tb - ta;
-      }),
-    [conversations],
-  );
+  const sortedConversations = useMemo(() => {
+    const byUpdated = [...conversations].sort((a, b) => {
+      const ta = new Date(a.updatedAt || a.createdAt.toISOString()).getTime();
+      const tb = new Date(b.updatedAt || b.createdAt.toISOString()).getTime();
+      return tb - ta;
+    });
+    // starred 排前(组内仍按 updatedAt 倒序)
+    return byUpdated.sort((a, b) => {
+      const aStar = starredIds.includes(a.id) ? 1 : 0;
+      const bStar = starredIds.includes(b.id) ? 1 : 0;
+      return bStar - aStar;
+    });
+  }, [conversations, starredIds]);
 
   const q = query.trim();
   const filteredConversations = useMemo(
