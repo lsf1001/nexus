@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import { useAppVersion } from '../../hooks/useAppVersion';
 import type { Conversation } from '../../types';
@@ -11,6 +11,9 @@ export interface SidebarProps {
   onNewTask: () => void;
   onOpenPreferences?: () => void;
 }
+
+/** 删除二次确认按钮停留时长(ms),超时自动取消避免永久占位。 */
+const DELETE_CONFIRM_TIMEOUT_MS = 5_000;
 
 /**
  * 左侧栏 — 极简单栏。
@@ -67,49 +70,16 @@ export function Sidebar({
     const handleSelect = (): void => onSelectConversation(conv);
 
     return (
-      <div
+      <TaskItem
         key={conv.id}
-        role="button"
-        tabIndex={0}
-        className={`task-item ${active ? 'is-current' : ''}`}
-        onClick={handleSelect}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            handleSelect();
-          }
-        }}
-        aria-current={active ? 'true' : undefined}
-        aria-label={title}
-      >
-        <div className="task-item-body">
-          <strong>{title}</strong>
-        </div>
-        <div className="task-actions">
-          <button
-            type="button"
-            aria-label={starred ? `取消星标 ${title}` : `星标 ${title}`}
-            className={`star-btn ${starred ? 'is-starred' : ''}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleStarred(conv.id);
-            }}
-          >
-            {starred ? '★' : '☆'}
-          </button>
-          <button
-            aria-label={`删除对话 ${title}`}
-            className="delete-btn"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDeleteConversation(conv.id);
-            }}
-            type="button"
-          >
-            ×
-          </button>
-        </div>
-      </div>
+        conv={conv}
+        title={title}
+        active={active}
+        starred={starred}
+        onSelect={handleSelect}
+        onDelete={onDeleteConversation}
+        onToggleStar={() => toggleStarred(conv.id)}
+      />
     );
   };
 
@@ -175,5 +145,117 @@ export function Sidebar({
         <span className="sidebar-version">v{appVersion}</span>
       </div>
     </aside>
+  );
+}
+
+/** 单条会话 — 拆出来便于把删除确认态各自管 state,避免污染父级重渲染。 */
+interface TaskItemProps {
+  conv: Conversation;
+  title: string;
+  active: boolean;
+  starred: boolean;
+  onSelect: () => void;
+  onDelete: (id: string) => void;
+  onToggleStar: () => void;
+}
+
+function TaskItem({
+  conv,
+  title,
+  active,
+  starred,
+  onSelect,
+  onDelete,
+  onToggleStar,
+}: TaskItemProps) {
+  const [pendingDelete, setPendingDelete] = useState(false);
+
+  // 删除确认超时自动取消 — 5s 内未点确定/取消就复位,避免误点永久占位。
+  const deleteTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!pendingDelete) return undefined;
+    deleteTimerRef.current = window.setTimeout(() => {
+      setPendingDelete(false);
+    }, DELETE_CONFIRM_TIMEOUT_MS);
+    return () => {
+      if (deleteTimerRef.current !== null) {
+        window.clearTimeout(deleteTimerRef.current);
+        deleteTimerRef.current = null;
+      }
+    };
+  }, [pendingDelete]);
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`task-item ${active ? 'is-current' : ''} ${starred ? 'is-starred' : ''}`}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      aria-current={active ? 'true' : undefined}
+      aria-label={title}
+    >
+      <div className="task-item-body">
+        <strong>{title}</strong>
+      </div>
+      <div className="task-actions">
+        <button
+          type="button"
+          aria-label={starred ? `取消星标 ${title}` : `星标 ${title}`}
+          className={`star-btn ${starred ? 'is-starred' : ''}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleStar();
+          }}
+        >
+          {starred ? '★' : '☆'}
+        </button>
+        {pendingDelete ? (
+          <>
+            <button
+              type="button"
+              aria-label={`确认删除 ${title}`}
+              className="delete-confirm"
+              data-testid={`delete-confirm-${conv.id}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete(conv.id);
+                setPendingDelete(false);
+              }}
+            >
+              确定?
+            </button>
+            <button
+              type="button"
+              aria-label={`取消删除 ${title}`}
+              className="delete-cancel"
+              onClick={(event) => {
+                event.stopPropagation();
+                setPendingDelete(false);
+              }}
+            >
+              ×
+            </button>
+          </>
+        ) : (
+          <button
+            aria-label={`删除对话 ${title}`}
+            className="delete-btn"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setPendingDelete(true);
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
