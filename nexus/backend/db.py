@@ -93,6 +93,34 @@ def _create_tables(conn: sqlite3.Connection) -> None:
 
     _ensure_column(conn, "sessions", "channel", "TEXT DEFAULT 'main'")
 
+    # Round 1 SPEC §4.1:Project 骨架第一步。
+    # 新表存储 Project 元数据;每个 Project 对应一个 ~/Nexus/projects/<name>/
+    # 目录,内含独立 AGENTS.md / skills/ / mcp.json。name / path 都设 UNIQUE
+    # 约束防止重复(同一台机器上不允许两个同名 Project)。
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            display_name TEXT,
+            path TEXT NOT NULL UNIQUE,
+            description TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name)")
+
+    # sessions.project_id 外键;RESTRICT 防止误删还有会话的 Project。
+    # _ensure_column 在旧库上 ALTER TABLE ADD COLUMN,新库则包含在 CREATE TABLE 里。
+    # 禁止手工 ALTER TABLE(违反 CLAUDE.md / SPEC §4.1)。
+    _ensure_column(
+        conn,
+        "sessions",
+        "project_id",
+        "TEXT REFERENCES projects(id) ON DELETE RESTRICT",
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id) WHERE deleted_at IS NULL")
+
     # Plan 5 (2026-07-12):wechat 索引化 — sessions 表加 account_id /
     # wechat_user_id / channel_meta 列,把 user_id → session_id 映射从
     # messages.content LIKE 检索迁到正经列(性能 100k 行 100-500ms → < 5ms)。
