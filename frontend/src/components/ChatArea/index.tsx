@@ -23,6 +23,7 @@ import { useAutoScroll } from './hooks/useAutoScroll';
 import { useChatAreaActions } from './hooks/useChatAreaActions';
 import { useChatSend } from './hooks/useChatSend';
 import { type ChatStreamActions, useChatStream } from './hooks/useChatStream';
+import { useDraft } from './hooks/useDraft';
 import { useWsMessageRouter, type WsRouterCtx } from './hooks/useWsMessageRouter';
 import type { LastError, PendingClarification } from './types';
 
@@ -158,7 +159,22 @@ export function ChatArea({
     containerRef: chatScrollRef,
   });
 
+  // === 草稿持久化(第十一轮,2026-07-23) ===
+  // 见 ./hooks/useDraft.ts 实现注释。Level 1 行为:
+  //   - 读:挂载 + conversationId 为空 → 读 localStorage → 填回 input + toast
+  //   - 写:input 变化 + 500ms 防抖
+  //   - 清:send 成功后(走 clearInput wrapper)同步 removeItem
+  const { loadOnMount, saveDraftEffect, clearDraft } = useDraft();
+  useEffect(() => {
+    loadOnMount(conversationIdProp, setInput);
+    // 只在挂载时跑一次(hook 内部用 ref 自管)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => saveDraftEffect(input), [input, saveDraftEffect]);
+
   // === 单一发送入口 ===
+  // clearInput 走自定义 wrapper:不仅 setInput(''),还同步清掉 localStorage
+  // 草稿(否则 debounce 500ms 内 reload 会重新读回已发送的内容)。
   const send = useChatSend({
     wsConnected,
     getReadyState,
@@ -166,7 +182,10 @@ export function ChatArea({
     send: sendFn,
     setIsLoading,
     setLastError,
-    clearInput: () => setInput(''),
+    clearInput: () => {
+      clearDraft();
+      setInput('');
+    },
     armWatchdog,
     pushUserAndPlaceholder: stream.pushUserAndPlaceholder,
   });
