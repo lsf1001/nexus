@@ -37,11 +37,14 @@
 
 /* 第十一轮(2026-07-23)浮动"跳到底部"按钮 — 用户滚上看历史时出现,
  * 点 → 平滑滚到 chat-scroll 底部 + 重置 userScrolledUp。
- * 钉在 .chat-scroll 右下角(absolute),scroll 容器必须是 position:relative,
- * 但 .chat-scroll 本身没设,这里用 sticky fallback 也行。简化:position:fixed
- * 相对 viewport(chat-area-wrap 占据主区,fab 钉底部右侧,不跟消息流走)。 */
+ * 第十一轮-2(2026-07-23)spec review 修复:position: sticky 必须有 top/bottom
+ * 锚点,否则在 flex/grid 父容器里默认锚到边界 → 按钮跟着消息流末尾,
+ * 上滚时被滚出视野 → 不符合"上滚时浮动可见"。补 bottom: 16px 让按钮在
+ * .chat-scroll 内一直贴底显示。align-self: flex-end 让 sticky 在 flex 列
+ * 里也能正确生效(否则 sticky 退化 relative)。 */
 .jump-to-bottom {
   position: sticky;
+  bottom: 16px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
