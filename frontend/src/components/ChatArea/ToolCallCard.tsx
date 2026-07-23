@@ -21,6 +21,7 @@ import { useState } from 'react';
 import type { ToolCall } from '../../types';
 import { inferArtifact, isArtifactTool } from '../Artifacts/utils/inferArtifact';
 import { useStore } from '../../store';
+import { CodeBlock } from './CodeBlock';
 
 export interface ToolCallCardProps {
   call: ToolCall;
@@ -85,16 +86,16 @@ export function ToolCallCard({ call }: ToolCallCardProps) {
         <div className="tool-call-details">
           <div className="tool-call-section">
             <div className="tool-call-section-label">参数</div>
-            <div className="tool-call-args">
-              <code>{argsJson}</code>
-            </div>
+            <CodeBlock text={argsJson} className="tool-call-code-block" ariaLabel="复制参数" />
           </div>
           {call.result !== undefined && (
             <div className="tool-call-section">
               <div className="tool-call-section-label">结果</div>
-              <div className="tool-call-result">
-                <pre>{call.result}</pre>
-              </div>
+              <CodeBlock
+                text={String(call.result)}
+                className="tool-call-code-block"
+                ariaLabel="复制结果"
+              />
               {inferred && (
                 <div className="tool-call-actions">
                   <button

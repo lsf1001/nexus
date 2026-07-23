@@ -396,30 +396,24 @@
   letter-spacing: 0.02em;
 }
 
-.tool-call-args code {
-  display: block;
-  font-family: var(--font-mono);
-  font-size: var(--font-base);
-  background: rgba(0, 0, 0, 0.04);
-  padding: 8px 10px;
-  border-radius: 6px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--ink);
+/* ToolCallCard 内的 CodeBlock —— 第十一轮用 .code-block + .code-pre,
+ * 这里只微调外边距(跟 .tool-call-section-label 留 4px 间距)+ result
+ * 段最大高度(避免超长命令输出撑爆整张卡)。 */
+.tool-call-code-block {
+  margin: 0;
 }
 
-.tool-call-result pre {
-  font-family: var(--font-mono);
-  font-size: var(--font-base);
-  background: rgba(0, 0, 0, 0.04);
-  padding: 8px 10px;
-  border-radius: 6px;
+.tool-call-section + .tool-call-section .tool-call-code-block {
+  /* 结果段限高,过长命令/文件输出可滚 */
+  max-height: 240px;
+}
+
+.tool-call-code-block .code-pre {
+  /* ToolCallCard 内的 code 跟 ChatBubble 不一样:这里的命令输出要
+   * 保留换行(wrap),且字号略小一档(跟正文协调) */
   white-space: pre-wrap;
   word-break: break-word;
-  margin: 0;
-  color: var(--ink);
-  max-height: 240px;
-  overflow: auto;
+  font-size: var(--font-base);
 }
 
 /* 联动到右栏 Artifacts 面板的入口(SPEC §5) */

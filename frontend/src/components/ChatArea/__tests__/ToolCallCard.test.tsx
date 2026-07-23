@@ -12,10 +12,11 @@
  *   - args 用 <code> JSON 序列化展示
  *   - result 用 <pre> 纯文本展示
  */
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { fireEvent, render } from '@testing-library/react';
 import { ToolCallCard } from '../ToolCallCard';
 import { useStore } from '../../../store';
+import { useToastStore } from '../../../store/useToast';
 import type { ToolCall } from '../../../types';
 
 function makeCall(overrides: Partial<ToolCall> = {}): ToolCall {
@@ -42,7 +43,7 @@ describe('ToolCallCard (第九轮)', () => {
     // SPEC:中文 state label(running / success / error → 运行中 / 成功 / 失败)
     expect(card?.textContent).toContain('成功');
     // 默认不显示 args / result
-    expect(container.querySelector('.tool-call-args')).toBeNull();
+    expect(container.querySelector('.tool-call-code-block')).toBeNull();
     expect(container.querySelector('.tool-call-result')).toBeNull();
   });
 
@@ -50,10 +51,10 @@ describe('ToolCallCard (第九轮)', () => {
     const { container } = render(<ToolCallCard call={makeCall()} />);
     const toggle = container.querySelector('.tool-call-toggle') as HTMLElement;
     fireEvent.click(toggle);
-    const args = container.querySelector('.tool-call-args');
+    const args = container.querySelector('.tool-call-code-block');
     expect(args).not.toBeNull();
     expect(args?.textContent).toContain('ls -la');
-    const result = container.querySelector('.tool-call-result');
+    const result = container.querySelectorAll('.tool-call-code-block')[1];
     expect(result).not.toBeNull();
     expect(result?.textContent).toContain('total 12');
   });
@@ -63,7 +64,7 @@ describe('ToolCallCard (第九轮)', () => {
     const toggle = container.querySelector('.tool-call-toggle') as HTMLElement;
     fireEvent.click(toggle); // 展开
     fireEvent.click(toggle); // 折叠
-    expect(container.querySelector('.tool-call-args')).toBeNull();
+    expect(container.querySelector('.tool-call-code-block')).toBeNull();
   });
 
   it('state=running → 加 .is-running 类', () => {
@@ -84,8 +85,8 @@ describe('ToolCallCard (第九轮)', () => {
     );
     const toggle = container.querySelector('.tool-call-toggle') as HTMLElement;
     fireEvent.click(toggle);
-    expect(container.querySelector('.tool-call-args')).not.toBeNull();
-    expect(container.querySelector('.tool-call-result')).toBeNull();
+    // 只有 args 一个 CodeBlock(result 区块整个不渲染)
+    expect(container.querySelectorAll('.tool-call-code-block')).toHaveLength(1);
   });
 
   it('args 序列化成 JSON 字符串(code 元素)', () => {
@@ -96,7 +97,7 @@ describe('ToolCallCard (第九轮)', () => {
     );
     const toggle = container.querySelector('.tool-call-toggle') as HTMLElement;
     fireEvent.click(toggle);
-    const args = container.querySelector('.tool-call-args code');
+    const args = container.querySelector('.tool-call-code-block code');
     expect(args).not.toBeNull();
     const parsed = JSON.parse(args!.textContent!);
     expect(parsed.command).toBe('echo');
@@ -179,5 +180,77 @@ describe('ToolCallCard (第九轮)', () => {
     );
     fireEvent.click(container.querySelector('.tool-call-toggle') as HTMLElement);
     expect(container.querySelector('.tool-call-open-artifact')).toBeNull();
+  });
+
+  // ─── 第十一轮:ToolCallCard 内 JSON / 命令 / 文件代码块加复制按钮 ───
+
+  describe('CodeBlock 复制按钮', () => {
+    let pushSpy: ReturnType<typeof vi.spyOn>;
+    let hadClipboard: boolean;
+
+    beforeEach(() => {
+      // mock navigator.clipboard.writeText — jsdom 默认没有
+      hadClipboard = 'clipboard' in navigator && !!navigator.clipboard;
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: vi.fn().mockResolvedValue(undefined) },
+        configurable: true,
+        writable: true,
+      });
+      pushSpy = vi.spyOn(useToastStore.getState(), 'push');
+    });
+
+    afterEach(() => {
+      if (hadClipboard) {
+        // 恢复原始 clipboard(本次测试不能污染其他 spec)
+        Object.defineProperty(navigator, 'clipboard', {
+          value: { writeText: vi.fn().mockResolvedValue(undefined) },
+          configurable: true,
+          writable: true,
+        });
+      } else {
+        Object.defineProperty(navigator, 'clipboard', {
+          value: undefined,
+          configurable: true,
+          writable: true,
+        });
+      }
+      pushSpy.mockRestore();
+    });
+
+    it('点 args 复制按钮 → 调 clipboard.writeText(argsJson) + 显示"已复制"气泡', () => {
+      const { container } = render(<ToolCallCard call={makeCall()} />);
+      fireEvent.click(container.querySelector('.tool-call-toggle') as HTMLElement);
+      const copyBtn = container.querySelector(
+        '.tool-call-code-block .code-copy-btn',
+      ) as HTMLElement;
+      expect(copyBtn).not.toBeNull();
+      fireEvent.click(copyBtn);
+      expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+      const calledWith = (navigator.clipboard.writeText as ReturnType<typeof vi.fn>).mock
+        .calls[0]![0] as string;
+      expect(calledWith).toContain('"command": "ls -la"');
+      // "已复制" 气泡 1000ms 内可见
+      expect(container.querySelector('.code-flash')?.textContent).toContain('已复制');
+    });
+
+    it('clipboard 抛错 → toast.warn 提示手动选择', async () => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: vi.fn().mockRejectedValue(new Error('Permission denied')) },
+        configurable: true,
+        writable: true,
+      });
+      const { container } = render(<ToolCallCard call={makeCall()} />);
+      fireEvent.click(container.querySelector('.tool-call-toggle') as HTMLElement);
+      const copyBtn = container.querySelector(
+        '.tool-call-code-block .code-copy-btn',
+      ) as HTMLElement;
+      fireEvent.click(copyBtn);
+      // microtask 队列跑完
+      await Promise.resolve();
+      await Promise.resolve();
+      const warnCalls = pushSpy.mock.calls.filter((c) => c[0] === 'warn');
+      expect(warnCalls.length).toBeGreaterThan(0);
+      expect(warnCalls[0]?.[1] ?? '').toContain('复制失败');
+    });
   });
 });
