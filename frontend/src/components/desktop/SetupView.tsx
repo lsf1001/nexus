@@ -15,6 +15,7 @@ export function SetupView({ onDone }: SetupViewProps) {
   const [temperature, setTemperature] = useState('0.7');
   const [status, setStatus] = useState('填写 API 密钥后测试连接');
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
 
   /**
    * API 密钥已配置时的右键菜单文本 — **完全隐藏**,不显示尾部 4 位。
@@ -25,6 +26,36 @@ export function SetupView({ onDone }: SetupViewProps) {
   const apiKeyContextLabel = apiKey
     ? `已设置(${secretLength(apiKey)} 字符)`
     : '(空)';
+
+  const testConnection = async () => {
+    setIsTesting(true);
+    setStatus('正在测试连接...');
+    try {
+      const response = await apiFetch('/api/models/default/test', { method: 'GET' });
+      if (!response.ok) {
+        // 复用 saveModel 的错误分类:401/403 鉴权、422 参数、5xx 后端故障、其它兜底。
+        // WHY 只取首行 + 截断:后端 body 可能含错误码,防止把长 traceback 灌进 UI。
+        const errText = (await response.text().catch(() => '')).trim();
+        const reason = errText ? `: ${(errText.split('\n')[0] ?? '').slice(0, 120)}` : '';
+        if (response.status === 401 || response.status === 403) {
+          setStatus(`测试连接鉴权失败,请检查 API 密钥${reason}`);
+        } else if (response.status === 422) {
+          setStatus(`测试连接参数错误${reason}`);
+        } else if (response.status >= 500) {
+          setStatus(`后端服务异常(${response.status})${reason}`);
+        } else {
+          setStatus(`测试失败(${response.status})${reason}`);
+        }
+        return;
+      }
+      setStatus('连接测试成功 ✓');
+    } catch {
+      // 网络层错误(后端没起 / fetch 抛异常);不暴露详情防止泄漏内部路径。
+      setStatus('连接测试失败,请检查后端状态和网络');
+    } finally {
+      setIsTesting(false);
+    }
+  };
 
   const saveModel = async () => {
     setIsSaving(true);
@@ -130,9 +161,11 @@ export function SetupView({ onDone }: SetupViewProps) {
             <button
               type="button"
               className="btn-secondary"
-              onClick={() => setStatus('连接测试将在后续版本显示详细诊断')}
+              disabled={isTesting || isSaving}
+              aria-busy={isTesting}
+              onClick={testConnection}
             >
-              测试连接
+              {isTesting ? '测试中...' : '测试连接'}
             </button>
             <button
               type="button"
