@@ -93,6 +93,13 @@ export function ChatArea({
   // 调用前 closure 引用会撞 TDZ(React 19 + Vite + ReferenceError)。
   useEffect(() => {
     if (resetTrigger && resetTrigger > resetTriggerRef.current) {
+      // 切会话前同步清草稿 + 取消 pending 防抖 timer,避免"setInput('') 触发
+      // 500ms 后 removeDraft" 跟"用户已写新草稿但 timer 尚未触发"竞争。
+      // WHY:loadedRef 让 loadOnMount 只跑一次,所以"切会话再读旧草稿"不会发生,
+      // 但 resetTrigger 内的 setInput('') → useEffect → saveDraftEffect('') →
+      // 500ms 后 removeDraft 仍会清掉草稿。这条路径是用户切到新会话时把旧会话
+      // 草稿擦掉的根因(SPEC 第十一轮-2,2026-07-23)。
+      clearDraft();
       clearConversationMessages();
       setInput('');
       setIsLoading(false);
@@ -102,7 +109,7 @@ export function ChatArea({
       setLastError(null);
     }
     resetTriggerRef.current = resetTrigger ?? 0;
-  }, [resetTrigger, clearConversationMessages, setIsLoading, disarmWatchdog, setPendingConfirmation]);
+  }, [resetTrigger, clearConversationMessages, setIsLoading, disarmWatchdog, setPendingConfirmation, clearDraft]);
 
   // === WS 连接 — 鉴权走 subprotocol ===
   // 2026-07-20:WsRouterCtx 不再含 stream — wsHandlers.handleChunk / handleThinking

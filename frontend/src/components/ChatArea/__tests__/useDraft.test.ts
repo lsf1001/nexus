@@ -190,4 +190,46 @@ describe('useDraft (第十一轮 Composer 草稿)', () => {
     });
     expect(store.data.has(DRAFT_KEY)).toBe(false);
   });
+
+  // 第十一轮-2(2026-07-23):切会话路径覆盖。
+  // WHY:ChatArea resetTrigger effect 内显式调 clearDraft,必须保证它
+  // 是"立即 + 取消 pending 防抖"的语义,而不是依赖 500ms 防抖写空串。
+  // 否则"用户在 500ms 防抖窗口内切会话 → 空 input 触发 saveDraftEffect('') →
+  // 500ms 后 removeDraft" 会清掉刚刚写下的草稿。
+  it('clearDraft 立即清 localStorage 并取消 pending timer', () => {
+    const { result } = renderHook(() => useDraft());
+    // 1) 模拟用户输入到一半 — 触发了 saveDraftEffect 但 timer 未到
+    act(() => {
+      result.current.saveDraftEffect('half written');
+    });
+    // 200ms 后还没到 500ms 防抖 → localStorage 还空
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(store.data.has(DRAFT_KEY)).toBe(false);
+    // 2) 这时切会话(模拟 resetTrigger effect 调 clearDraft)
+    act(() => {
+      result.current.clearDraft();
+    });
+    expect(store.data.has(DRAFT_KEY)).toBe(false);
+    // 3) 再推进 500ms → 原 pending timer 被清掉,不会写 localStorage
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(store.data.has(DRAFT_KEY)).toBe(false);
+  });
+
+  it('clearDraft 之后,saveDraftEffect("") 不再生效(timer 已 cancel)', () => {
+    const { result } = renderHook(() => useDraft());
+    store.data.set(DRAFT_KEY, JSON.stringify({ text: 'stale', savedAt: 0 }));
+    act(() => {
+      result.current.clearDraft();
+    });
+    // 清完后:即便父组件又触发一次 saveDraftEffect(''),也不该写空串
+    act(() => {
+      result.current.saveDraftEffect('');
+      vi.advanceTimersByTime(500);
+    });
+    expect(store.data.has(DRAFT_KEY)).toBe(false);
+  });
 });

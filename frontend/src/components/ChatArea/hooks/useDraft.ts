@@ -129,6 +129,15 @@ export function useDraft(): UseDraftReturn {
   }, []);
 
   const clearDraft = useCallback(() => {
+    // 取消 pending 防抖 timer,避免"clearDraft 后 timer 仍触发写草稿"。
+    // 第十一轮-2(2026-07-23)ChatArea resetTrigger 路径专用 — setInput('') →
+    // 500ms 防抖后会触发 saveDraftEffect(''),如果 timer 没取消,会把刚被
+    // clearDraft 删掉的 key 重新删一遍(虽然结果一致,但浪费一次 IO;更重要的是
+    // 防止后续 useEffect 链上意外写错内容)。
+    if (pendingTimerRef.current !== null) {
+      window.clearTimeout(pendingTimerRef.current);
+      pendingTimerRef.current = null;
+    }
     removeDraft();
   }, []);
 
