@@ -11,6 +11,9 @@ export interface ConversationCrud {
   resetCounter: number;
   onSelectConversation: (conv: Conversation) => void;
   onDeleteConversation: (id: string) => void;
+  /** 重命名会话 — PUT /api/sessions/{id} (后端 update_session_title)。
+   *  乐观更新 + 失败静默兜底,UI 立即反映。 */
+  onRenameConversation: (id: string, title: string) => Promise<void>;
   onNewTask: () => void;
   onSessionCreated: (sessionId: string, title: string) => void;
 }
@@ -83,6 +86,35 @@ export function useConversationCrud(): ConversationCrud {
     [currentConversationId, clearConversationMessages]
   );
 
+  /**
+   * 重命名会话 — PUT /api/sessions/{id}?title=... (后端 update_session_title 用 PUT)。
+   *
+   * 设计选择:乐观更新 + 失败兜底。先本地把 title 改了,后端调失败也不回滚
+   * (用户在 sidebar 看到的就是他们输入的值)。后端真正落库失败下次 reload
+   * 会再写一次 — 接受这种短期漂移以换取 UI 响应即时。
+   */
+  const onRenameConversation = useCallback(
+    async (id: string, title: string): Promise<void> => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+
+      // 1. 乐观本地更新
+      setConversations((previous) =>
+        previous.map((conv) => (conv.id === id ? { ...conv, title: trimmed } : conv)),
+      );
+
+      // 2. 后端持久化(失败静默,不回滚 — 用户已看到新 title)
+      try {
+        await apiFetch(`/api/sessions/${id}?title=${encodeURIComponent(trimmed)}`, {
+          method: 'PUT',
+        });
+      } catch {
+        /* 兜底:本地已更新,UI 即时反映 */
+      }
+    },
+    [],
+  );
+
   const onNewTask = useCallback(() => {
     setCurrentConversationId(null);
     setResetCounter((value) => value + 1);
@@ -141,6 +173,7 @@ export function useConversationCrud(): ConversationCrud {
     resetCounter,
     onSelectConversation,
     onDeleteConversation,
+    onRenameConversation,
     onNewTask,
     onSessionCreated,
   };
