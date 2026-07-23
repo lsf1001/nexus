@@ -45,6 +45,7 @@ fn main() {
         .manage(ws_relay::RelayState::new())
         .invoke_handler(tauri::generate_handler![
             runtime::get_runtime_status,
+            runtime::restart_sidecar,
             ws_relay::ws_open,
             ws_relay::ws_send,
             ws_relay::ws_close,

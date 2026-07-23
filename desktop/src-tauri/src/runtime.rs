@@ -114,6 +114,30 @@ pub async fn start_sidecar(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 用户手动点 SplashView「重试」时调:kill 当前 sidecar 后重新拉起。
+/// 与 supervise_sidecar 的自动重启不同 — 这是显式用户意图,**不限流**。
+/// 成功后 start_sidecar 会 emit runtime-status: Ready;失败把 Err 返回给前端(invoke reject)。
+#[tauri::command]
+pub async fn restart_sidecar(app: AppHandle) -> Result<(), String> {
+    // 1. 取出并 kill 当前 sidecar(若存在)。取出后旧 Child 归本函数所有,
+    //    随后 start_sidecar 覆盖 state.sidecar。
+    let old = {
+        let state: tauri::State<AppState> = app.state();
+        let mut guard = state.sidecar.write().await;
+        guard.take()
+    };
+    if let Some(mut child) = old {
+        if let Err(e) = child.start_kill() {
+            log::warn!("restart_sidecar: start_kill failed: {e}");
+        }
+        // 等它真正退出,避免旧进程仍占 30000 端口导致新进程健康检查失败。
+        let _ = child.wait().await;
+    }
+
+    // 2. 重新拉起;start_sidecar 内部成功后 emit runtime-status: Ready。
+    start_sidecar(&app).await
+}
+
 fn resolve_sidecar_path(_app: &AppHandle) -> Result<std::path::PathBuf, String> {
     use tauri::path::BaseDirectory;
 
