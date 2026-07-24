@@ -1,7 +1,7 @@
 /**
  * ProjectsSlice 单测 — Round 1 SPEC §4.7。
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as apiModule from '@/lib/api';
 import { createProjectsSlice, type ProjectsSlice } from '../projects';
 
@@ -26,6 +26,10 @@ function makeSlice(): { slice: ProjectsSlice; setMock: ReturnType<typeof vi.fn>;
 }
 
 describe('ProjectsSlice', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('initial', () => {
     const { slice } = makeSlice();
     expect(slice.activeProjectId).toBeNull();
@@ -62,16 +66,16 @@ describe('ProjectsSlice', () => {
     vi.spyOn(apiModule, 'activateProject').mockRejectedValue(
       new Error('boom'),
     );
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { slice } = makeSlice();
     slice.projects.push(
-      { id: 'p-a', name: 'a', display_name: 'A', path: '/a', description: '' },
+      { id: 'p-existing', name: 'a', display_name: 'A', path: '/a', description: '' },
       { id: 'p-b', name: 'b', display_name: 'B', path: '/b', description: '' },
     );
-    // 失败 fallback:store 实现当前是 await apiActivateProject,失败直接抛,
-    // 这里把 activeProjectId 先设为 null,然后捕获异常后手动 fallback,
-    // 断言 slice.setActiveProject 失败时不应把 activeProjectId 误写成入参。
-    await expect(slice.setActiveProject('p-bad')).rejects.toThrow('boom');
-    expect(slice.activeProjectId).toBeNull();
+    // 失败 fallback:API 抛错后回退到 projects[0].id('p-existing'),不会写入 bogus id。
+    await expect(slice.setActiveProject('p-bogus')).rejects.toThrow('boom');
+    expect(slice.activeProjectId).toBe('p-existing');
+    expect(errorSpy).toHaveBeenCalled();
   });
 
   it('createProject 成功后 append + 自动 activate', async () => {

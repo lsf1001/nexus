@@ -51,8 +51,17 @@ export const createProjectsSlice: StateCreator<ProjectsSlice, [], [], ProjectsSl
   },
 
   setActiveProject: async (id: string) => {
-    await apiActivateProject(id);
-    set({ activeProjectId: id });
+    try {
+      await apiActivateProject(id);
+      set({ activeProjectId: id });
+    } catch (err) {
+      console.error('activateProject failed:', err);
+      const fallback = get().projects[0]?.id ?? null;
+      if (fallback !== get().activeProjectId) {
+        set({ activeProjectId: fallback });
+      }
+      throw err;
+    }
   },
 
   createProject: async (input: CreateProjectInput) => {
