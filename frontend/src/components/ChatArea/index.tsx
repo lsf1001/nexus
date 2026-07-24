@@ -72,6 +72,13 @@ export function ChatArea({
     sessionIdRef.current = conversationIdProp;
   }, [conversationIdProp]);
 
+  // === useDraft 解构必须在所有引用 clearDraft / loadOnMount / saveDraftEffect
+  // 的 useEffect 之前声明,否则 React commit 阶段同步求值 deps 数组时撞 TDZ
+  // (ReferenceError: Cannot access 'clearDraft' before initialization),导致
+  // ErrorBoundary 卸载整个 ChatView 树(e2e settings spec 暴露的就是这条链路)。
+  // useDraft 内部三个回调都是 useCallback([]),引用稳定,提前解构不影响 hooks 状态。
+  const { loadOnMount, saveDraftEffect, clearDraft } = useDraft();
+
   // === 消息流操作(替代原 messagesRef mutate) ===
   const stream: ChatStreamActions = useChatStream();
 
@@ -178,7 +185,6 @@ export function ChatArea({
   // 实际场景是"快速切换会话后回到最新草稿")。toast 文案 "已恢复未提交草稿" 明
   // 确告知用户这是未发送的内容,避免和"已发送历史消息"混淆。后续如收到用户反馈
   // "切回旧会话丢草稿"再升级到 Level 2(per-conversationId + TTL)。
-  const { loadOnMount, saveDraftEffect, clearDraft } = useDraft();
   useEffect(() => {
     loadOnMount(conversationIdProp, setInput);
     // 只在挂载时跑一次(hook 内部用 ref 自管)
