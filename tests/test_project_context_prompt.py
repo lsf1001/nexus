@@ -139,3 +139,52 @@ def test_skills_non_ascii_name_not_escaped(tmp_path: Path, monkeypatch: pytest.M
     out = project_context.build_project_context_prompt("default")
     assert 'skills: ["画图"]' in out
     assert "\\u" not in out
+
+
+def test_project_meta_missing_id_falls_back_to_default(
+    monkeypatch: pytest.MonkeyPatch, nexus_home: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """P2-3:找不到的 project_id → warning log + fallback 到默认 project 的 meta。"""
+    import logging
+
+    _init_db_and_default(monkeypatch)
+    from nexus.backend.prompts import project_context
+
+    with caplog.at_level(logging.WARNING, logger="nexus.backend.prompts.project_context"):
+        name, path = project_context._project_meta("does-not-exist-xyz")
+
+    # fallback 到 default project,而非静默 "(未知)"
+    assert name == "default"
+    assert path  # 默认 project 有真实 path,非空
+    # warning 触发且含可排查上下文(传入的 id)
+    assert any("does-not-exist-xyz" in r.message for r in caplog.records if r.levelno == logging.WARNING)
+
+
+def test_project_meta_normal_path_no_warning(
+    monkeypatch: pytest.MonkeyPatch, nexus_home: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """正常路径:project_id 存在时直接返回,不记 warning(不污染日志)。"""
+    import logging
+
+    _init_db_and_default(monkeypatch)
+    from nexus.backend.prompts import project_context
+
+    with caplog.at_level(logging.WARNING, logger="nexus.backend.prompts.project_context"):
+        name, _path = project_context._project_meta("default")
+
+    assert name == "default"
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+
+def test_project_meta_default_missing_returns_unknown(monkeypatch: pytest.MonkeyPatch, nexus_home: Path) -> None:
+    """异常边界:连默认 project 都查不到时,退回 ("(未知)", "(未知)"),不抛异常。"""
+    from nexus.backend import db
+
+    monkeypatch.setattr(db, "_INITED", False)
+    db.init_db()
+    # 不调 ensure_default_project(),projects 表为空
+    from nexus.backend.prompts import project_context
+
+    name, path = project_context._project_meta("whatever")
+    assert name == "(未知)"
+    assert path == "(未知)"

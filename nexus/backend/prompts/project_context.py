@@ -8,12 +8,18 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from ..db import get_db
 from ..projects import storage as _storage
 from ..projects.mcp_loader import load_mcp_config_for_project
 from ..projects.skills_loader import list_skills
+
+logger = logging.getLogger(__name__)
+
+# 默认 Project id — SPEC §4.2。project_id 找不到时回退到此 Project 拿 meta。
+_DEFAULT_PROJECT_ID = "default"
 
 # AGENTS.md 截断上限 — 防止恶意/失控的 user-level 记忆把 system prompt 撑爆。
 # 200 行 ≈ 8KB,deepagents 体系内 system prompt 总预算 32KB,留足余量给
@@ -41,12 +47,35 @@ def _agents_md_for(project_id: str) -> str:
 
 
 def _project_meta(project_id: str) -> tuple[str, str]:
-    """从 DB 拿 (name, path)。project_id 不存在 → 返回 (未知, 未知)。"""
-    with get_db() as conn:
-        row = conn.execute("SELECT name, path FROM projects WHERE id = ?", (project_id,)).fetchone()
-    if row is None:
+    """从 DB 拿 (name, path)。
+
+    project_id 找不到时:记 warning(便于排查),并 fallback 到默认 Project
+    (``default``)的 meta,而非静默返回 "(未知)"。若连默认 Project 也查不到
+    (极端场景,如 DB 未初始化),才退回 ("(未知)", "(未知)")。
+    """
+    row = _query_project_row(project_id)
+    if row is not None:
+        return (row["name"], row["path"])
+
+    logger.warning(
+        "project meta 未找到 project_id=%s(active=%s),fallback 到默认 project=%s",
+        project_id,
+        _storage.read_active_project_id(),
+        _DEFAULT_PROJECT_ID,
+    )
+    if project_id == _DEFAULT_PROJECT_ID:
+        # 传入的就是 default 却查不到 → 无更好兜底,直接返回未知。
         return ("(未知)", "(未知)")
-    return (row["name"], row["path"])
+    fallback_row = _query_project_row(_DEFAULT_PROJECT_ID)
+    if fallback_row is not None:
+        return (fallback_row["name"], fallback_row["path"])
+    return ("(未知)", "(未知)")
+
+
+def _query_project_row(project_id: str) -> object | None:
+    """按 id 查 projects 表单行;不存在返回 None。"""
+    with get_db() as conn:
+        return conn.execute("SELECT name, path FROM projects WHERE id = ?", (project_id,)).fetchone()
 
 
 def build_project_context_prompt(project_id: str) -> str:
