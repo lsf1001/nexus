@@ -24,6 +24,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from ..agent._system_prompt import set_active_project_id
 from ..api.ws import require_token
 from ..config import _get_nexus_home
 from ..db import get_db
@@ -192,4 +193,5 @@ async def activate_project(project_id: str) -> dict[str, str]:
         tmp.replace(active_file)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"写入 active_project.json 失败: {exc}") from exc
+    set_active_project_id(project_id)
     return {"active_project_id": project_id}

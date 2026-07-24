@@ -12,16 +12,17 @@ WHY 不在测试里 mock storage:直接走 FastAPI TestClient 验证端到端,
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from nexus.backend import db as _db
+from nexus.backend.agent import _system_prompt
 from nexus.backend.config import CONFIG as _CONFIG
 from nexus.backend.db import init_db
-from nexus.backend.main import app
+from nexus.backend.main import app, lifespan
 from nexus.backend.projects.storage import ensure_default_project
 
 
@@ -107,6 +108,36 @@ def test_create_project_rejects_duplicate_name(client: TestClient) -> None:
         json={"name": "alpha", "display_name": "Alpha Dup"},
     )
     assert r2.status_code == 409, f"重复 name 期望 409,实际 {r2.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_lifespan_restores_active_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """启动时从 active_project.json 恢复存在于 DB 的 Project。"""
+    monkeypatch.setenv("NEXUS_HOME", str(tmp_path))
+    monkeypatch.setitem(_CONFIG, "db_path", str(tmp_path / "lifespan.db"))
+    monkeypatch.setattr(_db, "_INITED", False)
+    (tmp_path / "active_project.json").write_text(
+        '{"active_project_id": "default"}',
+        encoding="utf-8",
+    )
+    _system_prompt.set_active_project_id(None)
+
+    context: AsyncIterator[None] = lifespan(app)
+    async with context:
+        assert _system_prompt._ACTIVE_PROJECT_ID == "default"
+
+
+def test_activate_project_updates_runtime_system_prompt_state(client: TestClient) -> None:
+    """激活 Project 后同步更新 system prompt 的模块级 active id。"""
+    _system_prompt.set_active_project_id(None)
+
+    response = client.post("/api/projects/default/activate", headers=_HEADERS)
+
+    assert response.status_code == 200, response.text
+    assert _system_prompt._ACTIVE_PROJECT_ID == "default"
 
 
 def test_get_project_by_id(client: TestClient) -> None:

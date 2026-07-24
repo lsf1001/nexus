@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import sqlite3
@@ -151,6 +152,25 @@ async def lifespan(app: FastAPI):
         # 让旧 Nexus 安装(没有 ~/Nexus/projects/ 目录)能成功跑起来。
         # 真正的系统错误继续向外抛,例如后续 SPEC §5.1 严格化时直接 raise。
         logger.warning("[projects] 默认 Project 迁移失败(继续启动): %s", exc, exc_info=True)
+    # 恢复上次激活的 Project；必须在默认 Project 创建后验证 DB 行是否存在。
+    try:
+        from .agent._system_prompt import set_active_project_id
+        from .db import get_db
+        from .projects.storage import read_active_project_id
+
+        active_project_id = read_active_project_id()
+        if active_project_id is not None:
+            with get_db() as conn:
+                project_exists = conn.execute(
+                    "SELECT 1 FROM projects WHERE id = ?",
+                    (active_project_id,),
+                ).fetchone()
+            if project_exists is not None:
+                set_active_project_id(active_project_id)
+            else:
+                logger.warning("[projects] active Project 不存在,跳过恢复: %s", active_project_id)
+    except (OSError, json.JSONDecodeError, sqlite3.Error) as exc:
+        logger.warning("[projects] active Project 恢复失败(继续启动): %s", exc, exc_info=True)
     # 扫描运行时 skills(2026-07-15 引入)
     # WHY init_db 之后:skill 加载失败不应阻断 DB 初始化。
     # WHY 单独 try-except:用户 ~/.nexus/skills/ 损坏不该阻断整个启动。

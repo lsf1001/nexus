@@ -34,6 +34,16 @@ def default_project_path() -> Path:
     return _projects_root() / "default"
 
 
+def read_active_project_id() -> str | None:
+    """读取持久化的 active Project id；文件缺失或内容无效时返回 None。"""
+    active_file = _get_nexus_home() / "active_project.json"
+    if not active_file.exists():
+        return None
+    payload = json.loads(active_file.read_text(encoding="utf-8"))
+    project_id = payload.get("active_project_id")
+    return project_id if isinstance(project_id, str) and project_id else None
+
+
 def _copy_agents_md(src: Path, dst: Path) -> None:
     """把 src/AGENTS.md 拷到 dst/AGENTS.md。幂等:dst 已存在则跳过(保护用户编辑)。
 
