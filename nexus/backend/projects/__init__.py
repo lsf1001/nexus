@@ -6,9 +6,10 @@ Public surface:
   - mcp_loader:per-project mcp.json 加载 + 热更新
 """
 
+from .skills_loader import list_skills
 from .storage import (
     ensure_default_project,
     migrate_sessions_to_default,
 )
 
-__all__ = ["ensure_default_project", "migrate_sessions_to_default"]
+__all__ = ["ensure_default_project", "migrate_sessions_to_default", "list_skills"]

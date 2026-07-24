@@ -20,7 +20,7 @@ from .api.ws import (
     handle_websocket,
     require_token,
 )
-from .config import CONFIG
+from .config import CONFIG, _get_nexus_home
 from .mcp import find_mcp_config, load_all_mcp_tools
 from .memory import USER_MEMORY_PATH
 from .models_config import get_active_model
@@ -394,6 +394,42 @@ async def get_mcp_tools() -> dict[str, Any]:
         "server_count": len(server_list),
         "tool_count": len(tools),
     }
+
+
+@app.get(f"{API_PREFIX}/skills", dependencies=[Depends(require_token)])
+async def list_project_skills(project_id: str | None = None) -> dict[str, Any]:
+    """列出当前 Project 的可用 skills — SPEC §4.4。
+
+    Query:
+        ``project_id``:可选。缺省时按以下顺序回退:
+            1. ``~/.nexus/active_project.json``(前端 ``setActiveProject`` 写入)
+            2. ``"default"``
+
+    Returns:
+        ``{"project_id": str, "skills": [{"name", "path", "source"}]}``
+        失败 / Project 不存在 → ``skills=[]``(绝**不**返回 404,
+        skills 是 best-effort 特性,前端拿到空 list 自然显示空态)。
+
+    WHY 不抛错:Settings / PreferencesModal 进入 Skills tab 时如果某个
+        Project 被删了,UI 不该白屏。
+    """
+    from .projects.skills_loader import list_skills
+
+    resolved_id = project_id
+    if not resolved_id:
+        active_file = _get_nexus_home() / "active_project.json"
+        if active_file.exists():
+            try:
+                import json
+
+                payload = json.loads(active_file.read_text(encoding="utf-8"))
+                resolved_id = payload.get("active_project_id")
+            except (OSError, json.JSONDecodeError):
+                resolved_id = None
+    resolved_id = resolved_id or "default"
+
+    skills = list_skills(resolved_id)
+    return {"project_id": resolved_id, "skills": skills}
 
 
 @app.get(f"{API_PREFIX}/model", dependencies=[Depends(require_token)])
