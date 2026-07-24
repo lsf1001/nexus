@@ -26,6 +26,7 @@ from .memory import USER_MEMORY_PATH
 from .models_config import get_active_model
 from .observability import setup_logging
 from .routes import model_config as model_config_routes
+from .routes import projects as projects_routes
 from .sessions import router as sessions_router
 from .skills import scan_skills_dir
 
@@ -240,6 +241,8 @@ API_PREFIX = "/api"
 app.include_router(sessions_router)
 # 注册模型配置路由
 app.include_router(model_config_routes.router)
+# Round 1 SPEC §4.3:Project REST API(Round 1 骨架第三步)
+app.include_router(projects_routes.router)
 
 # CORS 白名单：环境变量 NEXUS_ALLOWED_ORIGINS 逗号分隔；默认本地开发地址
 _cors_origins = [
