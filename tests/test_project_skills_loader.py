@@ -147,6 +147,45 @@ def test_list_skills_for_custom_project_uses_own_dir(tmp_path: Path, monkeypatch
     assert "seo-check" in names
 
 
+def test_scan_dedups_same_inode_via_symlink(tmp_path: Path) -> None:
+    """SPEC §5.3:同 inode 不同路径 → 只返回 1 条(防御性去重)。
+
+    WHY 独立测 _scan:list_skills 的 default 短路直接跳到 ~/.nexus/skills,
+    不经过软链 → dedup 分支不可达。这个测试直接喂 _scan 一个含软链的 root,
+    让"两条路径→同 inode"真实场景跑通。
+    """
+    from nexus.backend.projects.skills_loader import _scan
+
+    # 真实目录
+    real_skill = tmp_path / "shared-skill"
+    real_skill.mkdir()
+    (real_skill / "SKILL.md").write_text("# Shared\n", encoding="utf-8")
+
+    # 软链指向同一 inode(同一目录的不同路径)
+    link = tmp_path / "shared-skill-link"
+    link.symlink_to(real_skill)
+
+    results = _scan(tmp_path)
+    # 同 inode 的不同路径必须被去重
+    assert len(results) == 1, f"expected 1, got {len(results)}: {results}"
+    assert results[0]["name"] == "shared-skill"
+
+
+def test_scan_does_not_dedup_distinct_skills(tmp_path: Path) -> None:
+    """对照测试:不同 inode 必须保留为独立 skill。"""
+    from nexus.backend.projects.skills_loader import _scan
+
+    for name in ("alpha", "beta"):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    results = _scan(tmp_path)
+    assert len(results) == 2
+    names = sorted(r["name"] for r in results)
+    assert names == ["alpha", "beta"]
+
+
 def test_list_skills_filters_entries_without_skill_md(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """目录下有无 SKILL.md 的杂项文件 → 只列含 SKILL.md 的子目录。"""
     nexus_home = tmp_path / "NexusHome"
