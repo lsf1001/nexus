@@ -254,11 +254,24 @@ export async function activateProject(id: string): Promise<void> {
   }
 }
 
-/** 读取某项目下可用的 skills 列表。 */
-export async function fetchSkills(projectId: string): Promise<Array<{name: string; path: string; source: string}>> {
+/** 单条 skill 记录。source 由后端 skills_loader 给出:`"local"`(本地目录)或 `"project"`(链接到项目)。 */
+export interface SkillItem {
+  name: string;
+  path: string;
+  source: 'local' | 'project';
+}
+
+/** `GET /api/skills` 返回的包装 — 与 MCP 的 `McpToolsResponse` 对齐结构。 */
+export interface SkillsResponse {
+  project_id: string;
+  skills: SkillItem[];
+}
+
+/** 读取某项目下可用的 skills 列表。后端返的是 `{project_id, skills[]}` 包装对象,不要直接当成数组用。 */
+export async function fetchSkills(projectId: string): Promise<SkillsResponse> {
   const res = await apiFetch(`/api/skills?project_id=${encodeURIComponent(projectId)}`);
   if (!res.ok) throw new Error(`读取 skills 失败: ${res.status}`);
-  return (await res.json()) as Array<{name: string; path: string; source: string}>;
+  return (await res.json()) as SkillsResponse;
 }
 
 /** 读取某项目作用域下的 MCP 工具(与无参 fetchMcpTools 不同 — 后者走全局默认)。 */

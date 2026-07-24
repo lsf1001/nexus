@@ -3,22 +3,19 @@
  *
  * 列出当前 active project 的 skills;切 project 后 store.activeProjectId
  * 变 → 此组件重 mount(reload)。
+ *
+ * 后端 `GET /api/skills` 返 `{project_id, skills[]}` 包装对象,与 MCP 端点
+ * 结构对齐(Round 2 P0 修复)。
  */
 import { useEffect, useState } from 'react';
-import { fetchSkills } from '../../lib/api';
-
-interface SkillInfo {
-  name: string;
-  path: string;
-  source: string;
-}
+import { fetchSkills, type SkillsResponse } from '../../lib/api';
 
 export interface SkillsPanelProps {
   projectId: string;
 }
 
 export function SkillsPanel({ projectId }: SkillsPanelProps) {
-  const [skills, setSkills] = useState<SkillInfo[]>([]);
+  const [data, setData] = useState<SkillsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,9 +24,9 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
     setLoading(true);
     setError(null);
     fetchSkills(projectId)
-      .then((data) => {
+      .then((d) => {
         if (!cancelled) {
-          setSkills(data);
+          setData(d);
           setLoading(false);
         }
       })
@@ -44,12 +41,14 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
 
   if (loading) return <div className="skills-panel-loading">加载中…</div>;
   if (error) return <div className="skills-panel-error">{error}</div>;
-  if (skills.length === 0) {
+  // 容错:后端万一返了不完整对象(缺 skills 字段)也不崩 — 走空态文案。
+  const items = data?.skills ?? [];
+  if (items.length === 0) {
     return <div className="skills-panel-empty">当前项目暂无 skills</div>;
   }
   return (
     <ul className="skills-panel-list">
-      {skills.map((s) => (
+      {items.map((s) => (
         <li key={s.name} className="skills-panel-item">
           <span className="skills-panel-name">{s.name}</span>
           <span className="skills-panel-path">{s.path}</span>
