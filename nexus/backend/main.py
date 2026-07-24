@@ -21,7 +21,7 @@ from .api.ws import (
     require_token,
 )
 from .config import CONFIG, _get_nexus_home
-from .mcp import find_mcp_config, load_all_mcp_tools
+from .mcp import _load_tools_for_server, load_all_mcp_tools
 from .memory import USER_MEMORY_PATH
 from .models_config import get_active_model
 from .observability import setup_logging
@@ -364,35 +364,69 @@ async def get_memory() -> dict[str, Any]:
 
 
 @app.get(f"{API_PREFIX}/mcp/tools", dependencies=[Depends(require_token)])
-async def get_mcp_tools() -> dict[str, Any]:
-    """列出已连接的 MCP 服务器与加载到的工具(供前端工具面板展示)。
+async def get_mcp_tools(project_id: str | None = None) -> dict[str, Any]:
+    """列出当前 Project 的 MCP 服务器与工具(供前端工具面板展示)— SPEC §4.5。
 
-    复用主进程已加载的 ``_mcp_tools`` 全局(agent 构造时由 load_all_mcp_tools
-    填充),不重新 spawn stdio server,避免每次请求 8s 超时。find_mcp_config
-    给出服务器配置来源,用于展示"已配置但未加载"的服务器。
+    Query:
+        ``project_id``:可选。缺省时按以下顺序回退(与 ``/skills`` 端点一致):
+            1. ``~/.nexus/active_project.json``(前端 ``setActiveProject`` 写入)
+            2. ``"default"``
+
+    per-project mcp.json 由 :func:`load_mcp_config_for_project` 解析,
+    再走现有 ``_load_tools_for_server`` 临时加载每个 server 的 tools(本轮"够用"
+    标准;agent 热重建复用 ``_mcp_tools`` 全局的路径留后续轮)。单个 server 失败
+    只记 warning 并跳过,不整体报错(工具面板容错优先)。
+
+    返回结构保持不变(``servers`` / ``tools`` / ``server_count`` / ``tool_count``),
+    前端 ``McpToolsResponse`` 依赖;仅新增 ``project_id`` 字段。
     """
-    global _mcp_tools
-    servers = find_mcp_config()
+    from .projects.mcp_loader import load_mcp_config_for_project
+
+    resolved_id = project_id
+    if not resolved_id:
+        active_file = _get_nexus_home() / "active_project.json"
+        if active_file.exists():
+            try:
+                import json
+
+                payload = json.loads(active_file.read_text(encoding="utf-8"))
+                resolved_id = payload.get("active_project_id")
+            except (OSError, json.JSONDecodeError):
+                resolved_id = None
+    resolved_id = resolved_id or "default"
+
+    server_cfgs = load_mcp_config_for_project(resolved_id)
     server_list = [
         {
             "name": s.get("name", "unknown"),
             "source": s.get("source", ""),
             "enabled": s.get("disabled", False) is False,
         }
-        for s in servers
+        for s in server_cfgs
     ]
-    tools = [
-        {
-            "name": getattr(t, "name", str(t)),
-            "description": (getattr(t, "description", "") or "").strip(),
-        }
-        for t in (_mcp_tools or [])
-    ]
+
+    tools_out: list[dict[str, str]] = []
+    for cfg in server_cfgs:
+        name = cfg.get("name", "unknown")
+        try:
+            server_tools = await _load_tools_for_server(name, cfg)
+        except OSError as exc:
+            logger.warning("加载 MCP 服务器 %s 失败: %s", name, exc)
+            continue
+        for t in server_tools:
+            tools_out.append(
+                {
+                    "name": getattr(t, "name", str(t)),
+                    "description": (getattr(t, "description", "") or "").strip(),
+                }
+            )
+
     return {
+        "project_id": resolved_id,
         "servers": server_list,
-        "tools": tools,
+        "tools": tools_out,
         "server_count": len(server_list),
-        "tool_count": len(tools),
+        "tool_count": len(tools_out),
     }
 
 
