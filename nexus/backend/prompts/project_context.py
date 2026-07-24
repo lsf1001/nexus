@@ -27,19 +27,15 @@ def _projects_root() -> Path:
 
 def _agents_md_for(project_id: str) -> str:
     """读 Project 的 AGENTS.md,截断到 200 行。"""
-    if project_id == "default":
-        # 默认 Project 的 AGENTS.md 路径直接经 _projects_root 算出,
-        # 便于测试 monkeypatch 本模块的 _projects_root。
-        path = _projects_root() / "default" / "AGENTS.md"
-    else:
-        path = _projects_root() / project_id / "AGENTS.md"
+    path = _projects_root() / project_id / "AGENTS.md"
     if not path.exists():
         return "(无)"
     text = path.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
-    if len(lines) > _AGENTS_MD_MAX_LINES:
+    total = len(lines)
+    if total > _AGENTS_MD_MAX_LINES:
         lines = lines[:_AGENTS_MD_MAX_LINES]
-        lines.append(f"... [截断,共 {len(lines)} 行]")
+        lines.append(f"... [截断,原文共 {total} 行]")
     return "\n".join(lines)
 
 

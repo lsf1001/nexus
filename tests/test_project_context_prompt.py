@@ -59,3 +59,26 @@ def test_truncates_agents_md_to_200_lines(tmp_path: Path, monkeypatch: pytest.Mo
     out = project_context.build_project_context_prompt("default")
     assert "line 199" in out
     assert "line 200" not in out  # 截断到 200 行
+
+
+def test_truncation_marker_shows_original_line_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nexus_home: Path
+) -> None:
+    """截断标记应反映原文行数,而非切片后的 200。"""
+    from nexus.backend import db
+
+    monkeypatch.setattr(db, "_INITED", False)
+    db.init_db()
+    ensure_default_project()
+
+    from nexus.backend.prompts import project_context
+
+    monkeypatch.setattr(project_context, "_projects_root", lambda: tmp_path / "projects")
+    default_dir = tmp_path / "projects" / "default"
+    default_dir.mkdir(parents=True, exist_ok=True)
+    (default_dir / "AGENTS.md").write_text("\n".join(f"line {i}" for i in range(500)))
+
+    out = project_context.build_project_context_prompt("default")
+    assert "原文共 500 行" in out
+    assert "line 199" in out
+    assert "line 200" not in out
