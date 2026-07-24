@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from ..db import get_db
@@ -68,12 +69,14 @@ def build_project_context_prompt(project_id: str) -> str:
     skill_names = [s["name"] for s in skills]
     server_names = [s["name"] for s in mcp_servers]
 
+    # WHY json.dumps 而非 Python list repr:repr 会输出单引号 ['a', 'b'],
+    # LLM 易误判为字符串字面量;JSON 双引号数组更规范,与 path 等字段风格一致。
     return (
         "<project_context>\n"
         f"name: {name}\n"
         f"path: {path}\n"
         f"AGENTS.md: {agents_md}\n"
-        f"skills: {skill_names}\n"
-        f"mcp_servers: {server_names}\n"
+        f"skills: {json.dumps(skill_names, ensure_ascii=False)}\n"
+        f"mcp_servers: {json.dumps(server_names, ensure_ascii=False)}\n"
         "</project_context>"
     )
