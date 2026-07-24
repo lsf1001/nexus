@@ -1,0 +1,302 @@
+/* ===== Project 切换 dropdown + 新建 Project 抽屉 =====
+ * 形态对齐 preferences-modal.css 的 workbuddy 极简风格:
+ *   - 圆角 12px / 14px 字号 / var(--paper) 背景 / var(--line) 描边
+ *   - 浅 dark 模式都走 :root[data-theme="dark"] 双选择器
+ *
+ * ProjectDropdown 是 inline 锚定(.project-dropdown relative + .menu absolute),
+ * NewProjectDrawer 是 fixed 全屏浮层(脱离 Sidebar 文档流)。两个组件共用
+ * 这一个 stylesheet,因为它们的视觉语言同源(都是 project-skeleton 设施)。
+ */
+
+:root[data-theme="dark"] .project-dropdown-menu {
+  background: var(--paper-2);
+}
+
+/* chip:跟 Sidebar recent item 同一档(紧凑 chip) */
+.project-dropdown {
+  position: relative;
+  display: block;
+}
+
+.project-dropdown-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: var(--font-sm);
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.project-dropdown-chip:hover {
+  background: var(--sidebar-hover-bg);
+  border-color: var(--sidebar-divider);
+}
+
+.project-dropdown-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.project-dropdown-name {
+  flex: 1;
+  text-align: left;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-dropdown-caret {
+  font-size: 10px;
+  color: var(--ink-3);
+  line-height: 1;
+}
+
+/* menu:浮在 chip 下方,12px 圆角 + 阴影 */
+.project-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 200;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow:
+    0 12px 28px -6px rgba(0, 0, 0, 0.12),
+    0 0 0 1px rgba(0, 0, 0, 0.02);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+:root[data-theme="dark"] .project-dropdown-menu {
+  background: var(--paper-2);
+  box-shadow:
+    0 12px 28px -6px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.project-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: var(--font-sm);
+  color: var(--ink);
+  transition: background 0.12s ease;
+}
+
+.project-dropdown-item:hover {
+  background: var(--sidebar-hover-bg);
+}
+
+.project-dropdown-item.is-active {
+  background: var(--accent-soft);
+  font-weight: 500;
+}
+
+:root[data-theme="dark"] .project-dropdown-item.is-active {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.project-dropdown-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  flex: 0 0 auto;
+}
+
+.project-dropdown-item.is-active .project-dropdown-dot {
+  background: var(--accent);
+}
+
+.project-dropdown-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-dropdown-create {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: var(--font-sm);
+  color: var(--ink-2);
+  background: transparent;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.project-dropdown-create:hover {
+  background: var(--sidebar-hover-bg);
+  color: var(--ink);
+}
+
+/* ===== NewProjectDrawer:fixed 全屏浮层 + 居中表单 =====
+ * Drawer 组件的 root div 直接当 overlay 容器(`.new-project-drawer`),
+ * 用 position: fixed 脱离 Sidebar 文档流。内嵌表单/标题/按钮自然成 panel。 */
+.new-project-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  animation: new-project-drawer-in 180ms ease-out;
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+:root[data-theme="dark"] .new-project-drawer {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+@keyframes new-project-drawer-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* panel:直接子元素(h3 / label / actions)的视觉容器由 Drawer 组件内部
+ * 顺序控制,h3 / label / input / textarea / actions 都需要 panel 化的
+ * 卡片背景。这里给 * 套一层 panel 感(给直接子设 panel 样式除外)。 */
+.new-project-drawer h3,
+.new-project-drawer > label,
+.new-project-drawer > .new-project-drawer-actions {
+  width: min(440px, 92vw);
+  align-self: center;
+}
+
+/* panel 卡片容器:把 .new-project-drawer 子元素视觉收束。
+ * 用 `> h3` 作为 panel "header",`> .new-project-drawer-actions` 作为
+ * "footer",中间 label 自然填充。三段卡片化需要共同背景,这里用
+ * .new-project-drawer 直接当 panel wrapper:把 h3 / label / actions
+ * 重置左右内边距,由 .new-project-drawer 自带的 440px+padding 控制。 */
+.new-project-drawer h3 {
+  margin: 0 0 8px;
+  padding: 16px 20px;
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+}
+
+.new-project-drawer > label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 20px;
+  background: var(--paper);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+
+.new-project-drawer > label > span:first-child {
+  font-size: var(--font-xs);
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+.new-project-drawer input,
+.new-project-drawer textarea {
+  padding: 8px 10px;
+  font-size: var(--font-sm);
+  color: var(--ink);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.new-project-drawer input:focus,
+.new-project-drawer textarea:focus {
+  border-color: var(--ink-2);
+  background: var(--paper);
+}
+
+.new-project-drawer textarea {
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
+}
+
+.field-error {
+  margin-top: 2px;
+  font-size: var(--font-xs);
+  color: #c2410c;
+}
+
+:root[data-theme="dark"] .field-error {
+  color: #f87171;
+}
+
+.new-project-drawer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px 20px 16px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 12px 12px;
+}
+
+.new-project-drawer-actions button {
+  padding: 7px 16px;
+  font-size: var(--font-sm);
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.new-project-drawer-actions button:hover:not(:disabled) {
+  background: var(--sidebar-hover-bg);
+  color: var(--ink);
+}
+
+.new-project-drawer-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.new-project-drawer-actions button.primary {
+  background: var(--accent);
+  color: var(--paper);
+  border-color: var(--accent);
+}
+
+.new-project-drawer-actions button.primary:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+}
