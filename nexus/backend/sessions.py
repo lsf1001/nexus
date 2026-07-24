@@ -134,9 +134,14 @@ def get_session_manager() -> SessionManager:
 
 
 @router.get("")
-async def get_sessions(limit: int = 50) -> list[dict]:
-    """获取会话列表。"""
-    return list_sessions(limit=limit)
+async def get_sessions(
+    limit: int = 50, project_id: str | None = None
+) -> list[dict]:
+    """获取会话列表。可选按 project_id 过滤(前端 useConversationCrud 在切
+    activeProjectId 时会带上) — 未传则保持旧行为(全量),便于无项目概念的
+    调用方(测试 / 微信通道会话检索等)。
+    """
+    return list_sessions(limit=limit, project_id=project_id)
 
 
 @router.post("")

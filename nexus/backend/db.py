@@ -322,6 +322,7 @@ def create_session(
     account_id: str | None = None,
     wechat_user_id: str | None = None,
     channel_meta: dict[str, Any] | None = None,
+    project_id: str | None = None,
 ) -> dict:
     """创建新会话(idempotent — 已存在则复用,避免 FK constraint)。
 
@@ -332,25 +333,39 @@ def create_session(
     failed,WS 连接异常断开。
 
     现改为 ``INSERT OR IGNORE``:已存在则不写,再 SELECT 拿回真实行
-    (title / channel / account_id / wechat_user_id 保留原值,新传入的
-    这些参数仅在新行生效)。
+    (title / channel / account_id / wechat_user_id / project_id 保留原值,
+    新传入的这些参数仅在新行生效)。
 
     Plan 5 (2026-07-12):加 ``account_id`` / ``wechat_user_id`` / ``channel_meta``
     三个可选参。channel_meta 是 dict(用 json.dumps 序列化为 TEXT 存储),
     留给未来 feishu / telegram 通道的元数据扩展;旧调用方不传则保持原行为
     (None → NULL)。
 
+    Round 1 SPEC §4.4:加 ``project_id`` 参。调用方若传,新会话以此挂载;
+    若未传(None),回落到当前 active project(active_project.json)— 避免
+    无 project 上下文时写出 project_id=NULL 的孤儿会话(否则 list_sessions
+    按 project_id 过滤时无法命中)。
+
     Returns:
         实际写入或已存在的 sessions 行 dict。
     """
     now = datetime.now().isoformat()
     channel_meta_json = json.dumps(channel_meta, ensure_ascii=False) if channel_meta is not None else None
+    # active project fallback:空调用方不会得到 project_id=NULL 的孤儿会话
+    if project_id is None:
+        try:
+            from .projects.storage import read_active_project_id
+
+            project_id = read_active_project_id() or "default"
+        except (ImportError, OSError, sqlite3.OperationalError):
+            # storage 还没就绪(早期启动)时退到 default,留给迁移脚本再清理
+            project_id = "default"
     with get_db() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO sessions "
-            "(id, title, created_at, updated_at, channel, account_id, wechat_user_id, channel_meta) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, title, now, now, channel, account_id, wechat_user_id, channel_meta_json),
+            "(id, title, created_at, updated_at, channel, account_id, wechat_user_id, channel_meta, project_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, title, now, now, channel, account_id, wechat_user_id, channel_meta_json, project_id),
         )
         row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if row is None:
@@ -436,10 +451,12 @@ def find_latest_session_by_user(
         return row["id"] if row else None
 
 
-def list_sessions(limit: int = 50) -> list[dict]:
-    """列出所有未删除会话，按更新时间倒序。
+def list_sessions(limit: int = 50, project_id: str | None = None) -> list[dict]:
+    """列出未删除会话,按更新时间倒序;可选按 project_id 过滤。
 
-    微信会话按 account_id 分组，每组只返回最新一个。
+    微信会话按 account_id 分组,每组只返回最新一个;``project_id=None``
+    时不过滤(后端 route 在未传参场景保持旧行为 — 方便无 project 概念的
+    单元测试与外部调用)。
     """
     with get_db() as conn:
         rows = conn.execute(
@@ -456,12 +473,13 @@ def list_sessions(limit: int = 50) -> list[dict]:
                          ) AS rn
                     FROM sessions s
                    WHERE s.deleted_at IS NULL
+                     AND (? IS NULL OR s.project_id = ?)
               )
              WHERE channel != 'wechat' OR rn = 1
              ORDER BY updated_at DESC
              LIMIT ?
             """,
-            (limit,),
+            (project_id, project_id, limit),
         ).fetchall()
         return [dict(row) for row in rows]  # ``rn`` 仅作过滤,不返回给调用方
 
