@@ -11,28 +11,42 @@ import {
 import { useStore } from '../../store';
 import { useAppVersion } from '../../hooks/useAppVersion';
 import { FONT_SCALES, FONT_SCALE_LABEL, type FontScale } from '../../store/slices/uiPrefs';
+import { SkillsPanel } from './SkillsPanel';
+import { McpPanel } from './McpPanel';
 
 export interface PreferencesModalProps {
   open: boolean;
   onClose: () => void;
 }
 
+type TabId = 'general' | 'skills' | 'mcp';
+
+interface TabDef {
+  id: TabId;
+  label: string;
+}
+
 /**
- * 设置弹窗 — 只管理供应商配置 + 界面偏好 + 关于。模型选择已移至输入框
- * 上方（ModelSelector）。
+ * 设置弹窗 — 含三 tab:常规(供应商 + 界面 + 关于) / Skills / MCP。
  *
- * 三个区块用分割线清晰隔开：
- *   §1 PROVIDER — Base URL + API Key → 发现模型 → 导入全部
- *   §2 界面     — 思考模式 toggle + 深色模式 toggle + 字号 radio
- *   §3 关于     — Nexus 版本号
+ * Skills / MCP panels 接 useStore.activeProjectId,无 active 时降级显示
+ * 'default' 兜底(后端永远保证 default project 存在)。
  *
- * 模型选择已移至输入框上方（ModelSelector），设置弹窗只管理供应商配置。
  * 硬编码颜色：toggle 激活态用 #2563eb（蓝），不使用 CSS 变量，避免打包 APP 中失效。
  */
 export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.Element | null {
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // === store: 界面偏好 ===
+  // === tabs ===
+  const tabs: TabDef[] = [
+    { id: 'general', label: '常规' },
+    { id: 'skills', label: 'Skills' },
+    { id: 'mcp', label: 'MCP' },
+  ];
+  const [activeTab, setActiveTab] = useState<TabId>('general');
+
+  // === store: 项目 + 界面偏好 ===
+  const activeProjectId = useStore((s) => s.activeProjectId);
   const showThinking = useStore((s) => s.showThinking);
   const setShowThinking = useStore((s) => s.setShowThinking);
   const darkMode = useStore((s) => s.darkMode);
@@ -116,6 +130,9 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
 
   const isError = discoverStatus.includes('失败') || discoverStatus.includes('错误') || discoverStatus.includes('请');
 
+  // Skills / MCP 走的 projectId:无 active → 兜底 'default'(后端保证存在)
+  const panelProjectId = activeProjectId ?? 'default';
+
   return (
     <div
       className="modal-overlay preferences-modal-overlay"
@@ -145,176 +162,236 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
           </button>
         </header>
 
-        <div className="preferences-modal-body">
-          {/* ===== §1 PROVIDER ===== */}
-          <div className="settings-section">
-            <div className="settings-section-title">PROVIDER</div>
-            <p className="provider-hint">
-              填写 API 地址和密钥，自动发现并导入所有可用模型。
-            </p>
+        <nav className="preferences-tabs" role="tablist" aria-label="设置分类">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === t.id}
+              aria-controls={`preferences-tab-panel-${t.id}`}
+              id={`preferences-tab-${t.id}`}
+              className={`preferences-tab ${activeTab === t.id ? 'is-active' : ''}`}
+              onClick={() => setActiveTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
 
-            <div className="provider-form">
-              <div className="setting-row">
-                <label htmlFor="pv-base">Base URL</label>
-                <input
-                  id="pv-base"
-                  type="text"
-                  value={providerBase}
-                  onChange={(e) => setProviderBase(e.target.value)}
-                  placeholder="https://api.openai.com/v1"
-                />
+        <div className="preferences-modal-body">
+          {/* ===== Tab: 常规 ===== */}
+          {activeTab === 'general' && (
+            <div
+              role="tabpanel"
+              id={`preferences-tab-panel-general`}
+              aria-labelledby={`preferences-tab-general`}
+            >
+              {/* ===== §1 PROVIDER ===== */}
+              <div className="settings-section">
+                <div className="settings-section-title">PROVIDER</div>
+                <p className="provider-hint">
+                  填写 API 地址和密钥，自动发现并导入所有可用模型。
+                </p>
+
+                <div className="provider-form">
+                  <div className="setting-row">
+                    <label htmlFor="pv-base">Base URL</label>
+                    <input
+                      id="pv-base"
+                      type="text"
+                      value={providerBase}
+                      onChange={(e) => setProviderBase(e.target.value)}
+                      placeholder="https://api.openai.com/v1"
+                    />
+                  </div>
+                  <div className="setting-row">
+                    <label htmlFor="pv-key">API Key</label>
+                    <input
+                      id="pv-key"
+                      type="password"
+                      value={providerKey}
+                      onChange={(e) => { setProviderKey(e.target.value); if (e.target.value.trim()) setKeyError(false); }}
+                      placeholder="sk-..."
+                      className={keyError ? 'is-error' : ''}
+                    />
+                  </div>
+                  <div className="provider-actions">
+                    <button
+                      type="button"
+                      className="setting-btn-primary"
+                      onClick={() => { void handleDiscover(); }}
+                      disabled={discoverBusy}
+                    >
+                      {discoverBusy ? '连接中...' : '发现模型'}
+                    </button>
+                    {discovered.length > 0 && (
+                      <button
+                        type="button"
+                        className="setting-btn-success"
+                        onClick={() => { void handleImport(); }}
+                        disabled={discoverBusy}
+                      >
+                        导入全部 ({discovered.length})
+                      </button>
+                    )}
+                  </div>
+
+                  {discovered.length > 0 && (
+                    <div className="provider-discovered-list">
+                      {discovered.map((dm) => (
+                        <div key={dm.id} className="provider-model-item">
+                          <span className="provider-model-id">{dm.id}</span>
+                          {dm.owned_by && <span className="provider-model-owner">{dm.owned_by}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {discoverStatus && (
+                    <div className={`setting-status ${isError ? 'is-error' : ''}`}>
+                      {discoverStatus}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="setting-row">
-                <label htmlFor="pv-key">API Key</label>
-                <input
-                  id="pv-key"
-                  type="password"
-                  value={providerKey}
-                  onChange={(e) => { setProviderKey(e.target.value); if (e.target.value.trim()) setKeyError(false); }}
-                  placeholder="sk-..."
-                  className={keyError ? 'is-error' : ''}
-                />
-              </div>
-              <div className="provider-actions">
-                <button
-                  type="button"
-                  className="setting-btn-primary"
-                  onClick={() => { void handleDiscover(); }}
-                  disabled={discoverBusy}
-                >
-                  {discoverBusy ? '连接中...' : '发现模型'}
-                </button>
-                {discovered.length > 0 && (
-                  <button
-                    type="button"
-                    className="setting-btn-success"
-                    onClick={() => { void handleImport(); }}
-                    disabled={discoverBusy}
-                  >
-                    导入全部 ({discovered.length})
-                  </button>
+
+              {/* ===== §1.5 已导入模型 ===== */}
+              <div className="settings-section settings-section-imported">
+                <div className="settings-section-title">已导入模型</div>
+                {models.length === 0 ? (
+                  <p className="provider-hint">尚未导入任何模型。先在上方发现并导入。</p>
+                ) : (
+                  <div className="imported-model-list">
+                    {models.map((m) => {
+                      const id = m.id;
+                      const active = id === currentModelId;
+                      return (
+                        <div
+                          key={id}
+                          className={`imported-model-item ${active ? 'is-active' : ''}`}
+                          title={active ? '当前激活模型' : '点击切换到此模型'}
+                          onClick={() => { if (!active) void handleSwitchModel(id); }}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          <span className="imported-model-name">{id}</span>
+                          {active && <span className="imported-model-badge">激活</span>}
+                          <button
+                            type="button"
+                            className="imported-model-delete"
+                            aria-label={`删除 ${id}`}
+                            onClick={(e) => { e.stopPropagation(); void handleDeleteModel(id); }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
 
-              {discovered.length > 0 && (
-                <div className="provider-discovered-list">
-                  {discovered.map((dm) => (
-                    <div key={dm.id} className="provider-model-item">
-                      <span className="provider-model-id">{dm.id}</span>
-                      {dm.owned_by && <span className="provider-model-owner">{dm.owned_by}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {discoverStatus && (
-                <div className={`setting-status ${isError ? 'is-error' : ''}`}>
-                  {discoverStatus}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* ===== §1.5 已导入模型 ===== */}
-          <div className="settings-section settings-section-imported">
-            <div className="settings-section-title">已导入模型</div>
-            {models.length === 0 ? (
-              <p className="provider-hint">尚未导入任何模型。先在上方发现并导入。</p>
-            ) : (
-              <div className="imported-model-list">
-                {models.map((m) => {
-                  const id = m.id;
-                  const active = id === currentModelId;
-                  return (
-                    <div
-                      key={id}
-                      className={`imported-model-item ${active ? 'is-active' : ''}`}
-                      title={active ? '当前激活模型' : '点击切换到此模型'}
-                      onClick={() => { if (!active) void handleSwitchModel(id); }}
-                      role="button"
-                      tabIndex={0}
-                    >
-                      <span className="imported-model-name">{id}</span>
-                      {active && <span className="imported-model-badge">激活</span>}
-                      <button
-                        type="button"
-                        className="imported-model-delete"
-                        aria-label={`删除 ${id}`}
-                        onClick={(e) => { e.stopPropagation(); void handleDeleteModel(id); }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* ===== §2 界面 ===== */}
-          <div className="settings-section settings-section-interface">
-            <div className="settings-section-title">界面</div>
-            <div className="setting-row">
-              <div className="setting-row-label">
-                <span className="setting-row-label-main">显示思考过程</span>
-                <span className="setting-row-label-hint">展开模型的内部推理步骤</span>
-              </div>
-              <button
-                type="button"
-                className="setting-toggle"
-                role="switch"
-                aria-checked={showThinking}
-                aria-pressed={showThinking}
-                aria-label={showThinking ? '已开启' : '已关闭'}
-                title="显示思考过程"
-                onClick={() => setShowThinking(!showThinking)}
-              />
-            </div>
-            <div className="setting-row">
-              <div className="setting-row-label">
-                <span className="setting-row-label-main">深色模式</span>
-                <span className="setting-row-label-hint">使用暗色背景和浅色文字</span>
-              </div>
-              <button
-                type="button"
-                className="setting-toggle"
-                role="switch"
-                aria-checked={darkMode}
-                aria-pressed={darkMode}
-                aria-label={darkMode ? '已开启' : '已关闭'}
-                title="深色模式"
-                onClick={() => toggleDarkMode()}
-              />
-            </div>
-            <div className="setting-row">
-              <div className="setting-row-label">
-                <span className="setting-row-label-main">字号</span>
-                <span className="setting-row-label-hint">
-                  小 / 中(默认)/ 大;按 ⌘= / ⌘- / ⌘0 切换
-                </span>
-              </div>
-              <div className="radio-group" role="radiogroup" aria-label="字号">
-                {FONT_SCALES.map((v: FontScale) => (
+              {/* ===== §2 界面 ===== */}
+              <div className="settings-section settings-section-interface">
+                <div className="settings-section-title">界面</div>
+                <div className="setting-row">
+                  <div className="setting-row-label">
+                    <span className="setting-row-label-main">显示思考过程</span>
+                    <span className="setting-row-label-hint">展开模型的内部推理步骤</span>
+                  </div>
                   <button
-                    key={v}
                     type="button"
-                    role="radio"
-                    aria-checked={fontScale === v}
-                    className={fontScale === v ? 'is-active' : ''}
-                    onClick={() => setFontScale(v)}
-                  >
-                    {FONT_SCALE_LABEL[v]}
-                  </button>
-                ))}
+                    className="setting-toggle"
+                    role="switch"
+                    aria-checked={showThinking}
+                    aria-pressed={showThinking}
+                    aria-label={showThinking ? '已开启' : '已关闭'}
+                    title="显示思考过程"
+                    onClick={() => setShowThinking(!showThinking)}
+                  />
+                </div>
+                <div className="setting-row">
+                  <div className="setting-row-label">
+                    <span className="setting-row-label-main">深色模式</span>
+                    <span className="setting-row-label-hint">使用暗色背景和浅色文字</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="setting-toggle"
+                    role="switch"
+                    aria-checked={darkMode}
+                    aria-pressed={darkMode}
+                    aria-label={darkMode ? '已开启' : '已关闭'}
+                    title="深色模式"
+                    onClick={() => toggleDarkMode()}
+                  />
+                </div>
+                <div className="setting-row">
+                  <div className="setting-row-label">
+                    <span className="setting-row-label-main">字号</span>
+                    <span className="setting-row-label-hint">
+                      小 / 中(默认)/ 大;按 ⌘= / ⌘- / ⌘0 切换
+                    </span>
+                  </div>
+                  <div className="radio-group" role="radiogroup" aria-label="字号">
+                    {FONT_SCALES.map((v: FontScale) => (
+                      <button
+                        key={v}
+                        type="button"
+                        role="radio"
+                        aria-checked={fontScale === v}
+                        className={fontScale === v ? 'is-active' : ''}
+                        onClick={() => setFontScale(v)}
+                      >
+                        {FONT_SCALE_LABEL[v]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* ===== §3 关于 ===== */}
+              <div className="settings-section settings-section-about">
+                <div className="settings-section-title">关于</div>
+                <div className="about-version">Nexus v{version}</div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* ===== §3 关于 ===== */}
-          <div className="settings-section settings-section-about">
-            <div className="settings-section-title">关于</div>
-            <div className="about-version">Nexus v{version}</div>
-          </div>
+          {/* ===== Tab: Skills ===== */}
+          {activeTab === 'skills' && (
+            <div
+              role="tabpanel"
+              id={`preferences-tab-panel-skills`}
+              aria-labelledby={`preferences-tab-skills`}
+            >
+              <div className="settings-section">
+                <div className="settings-section-title">SKILLS</div>
+                <p className="provider-hint">
+                  当前项目:{panelProjectId}
+                </p>
+                <SkillsPanel projectId={panelProjectId} />
+              </div>
+            </div>
+          )}
+
+          {/* ===== Tab: MCP ===== */}
+          {activeTab === 'mcp' && (
+            <div
+              role="tabpanel"
+              id={`preferences-tab-panel-mcp`}
+              aria-labelledby={`preferences-tab-mcp`}
+            >
+              <div className="settings-section">
+                <div className="settings-section-title">MCP</div>
+                <p className="provider-hint">
+                  当前项目:{panelProjectId}
+                </p>
+                <McpPanel projectId={panelProjectId} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

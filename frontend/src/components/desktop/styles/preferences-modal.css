@@ -685,3 +685,106 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ===== Tabs 导航(Round 1 §4.4 / §4.5)— Skills / MCP ===== */
+.preferences-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.preferences-tab {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--ink-3);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  margin-bottom: -1px;
+}
+
+.preferences-tab:hover {
+  color: var(--ink-2);
+}
+
+.preferences-tab.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.preferences-tab:focus-visible {
+  outline: 2px solid var(--ink-2);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+/* ===== Skills / MCP 面板列表 ===== */
+.skills-panel-list,
+.mcp-panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skills-panel-item,
+.mcp-panel-item {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) 1fr auto;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  font-size: var(--font-sm);
+  align-items: center;
+}
+
+.skills-panel-name,
+.mcp-panel-name {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.skills-panel-path,
+.mcp-panel-source {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-panel-source.is-project {
+  color: var(--accent);
+}
+
+.mcp-panel-summary {
+  font-size: var(--font-xs);
+  color: var(--ink-2);
+  margin-bottom: 8px;
+}
+
+.skills-panel-loading,
+.skills-panel-error,
+.skills-panel-empty,
+.mcp-panel-loading,
+.mcp-panel-error,
+.mcp-panel-empty {
+  font-size: var(--font-sm);
+  color: var(--ink-2);
+  padding: 16px 8px;
+}
+
+.skills-panel-error,
+.mcp-panel-error {
+  color: #d44;
+}
