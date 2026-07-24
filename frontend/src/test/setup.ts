@@ -29,6 +29,9 @@ beforeEach(() => {
     isLoading: false,
     channelInbox: {},
     pendingConfirmation: null,
+    projects: [],
+    activeProjectId: null,
+    loading: false,
   } as never)
   // Persist middleware 写的 localStorage 清掉,避免跨 test 状态污染
   try {

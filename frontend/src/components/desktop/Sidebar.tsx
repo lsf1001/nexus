@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import { useAppVersion } from '../../hooks/useAppVersion';
 import type { Conversation } from '../../types';
+import { ProjectDropdown } from './ProjectDropdown';
+import { NewProjectDrawer } from './NewProjectDrawer';
 
 export interface SidebarProps {
   conversations: Conversation[];
@@ -41,6 +43,7 @@ export function Sidebar({
   onOpenPreferences,
 }: SidebarProps) {
   const [query, setQuery] = useState('');
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
   const toggleStarred = useStore((s) => s.toggleStarred);
   const starredIds = useStore((s) => s.starredIds);
   const appVersion = useAppVersion();
@@ -101,6 +104,8 @@ export function Sidebar({
         <span className="sidebar-brand-name">Nexus</span>
       </div>
 
+      <ProjectDropdown onCreateProject={() => setNewProjectOpen(true)} />
+
       <div className="sidebar-section">
         <button
           className="btn-new-task"
@@ -153,6 +158,11 @@ export function Sidebar({
         </button>
         <span className="sidebar-version">v{appVersion}</span>
       </div>
+
+      <NewProjectDrawer
+        open={newProjectOpen}
+        onClose={() => setNewProjectOpen(false)}
+      />
     </aside>
   );
 }

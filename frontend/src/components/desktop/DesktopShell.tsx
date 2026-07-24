@@ -125,6 +125,14 @@ export function DesktopShell() {
     // 让 toast 出现一次也无害。
   }, [fontScale]);
 
+  // 启动期拉一次 Projects 列表 + 写 activeProjectId。失败不阻断 — 用户可在
+  // ProjectDropdown 重建时再拉(loadProjects 内部 set loading:true,前端
+  // 不会卡死)。
+  const loadProjects = useStore((s) => s.loadProjects);
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
+
   // useMemo 必须在 early return 之前调用(React Hooks 规则)
   const shellCtx = useMemo<DesktopShellContext>(
     () => ({

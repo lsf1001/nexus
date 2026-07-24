@@ -203,3 +203,67 @@ export async function switchModel(id: string): Promise<void> {
     throw new Error(`切换模型失败: ${res.status} ${detail}`);
   }
 }
+
+// ============ Projects ============
+
+export interface Project {
+  id: string;
+  name: string;
+  display_name: string;
+  path: string;
+  description?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateProjectInput {
+  name: string;
+  display_name: string;
+  description?: string;
+}
+
+/** 列出所有项目。 */
+export async function fetchProjects(): Promise<Project[]> {
+  const res = await apiFetch('/api/projects');
+  if (!res.ok) throw new Error(`读取 Projects 失败: ${res.status}`);
+  return (await res.json()) as Project[];
+}
+
+/** 创建一个新项目,返回后端持久化的对象(含 path)。 */
+export async function createProject(input: CreateProjectInput): Promise<Project> {
+  const res = await apiFetch('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`创建 Project 失败: ${res.status} ${detail}`);
+  }
+  return (await res.json()) as Project;
+}
+
+/** 把指定项目置为全局 active,后端落盘到 ~/.nexus/active_project.json。 */
+export async function activateProject(id: string): Promise<void> {
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(id)}/activate`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`切换 Project 失败: ${res.status} ${detail}`);
+  }
+}
+
+/** 读取某项目下可用的 skills 列表。 */
+export async function fetchSkills(projectId: string): Promise<Array<{name: string; path: string; source: string}>> {
+  const res = await apiFetch(`/api/skills?project_id=${encodeURIComponent(projectId)}`);
+  if (!res.ok) throw new Error(`读取 skills 失败: ${res.status}`);
+  return (await res.json()) as Array<{name: string; path: string; source: string}>;
+}
+
+/** 读取某项目作用域下的 MCP 工具(与无参 fetchMcpTools 不同 — 后者走全局默认)。 */
+export async function fetchMcpToolsForProject(projectId: string): Promise<McpToolsResponse> {
+  const res = await apiFetch(`/api/mcp/tools?project_id=${encodeURIComponent(projectId)}`);
+  if (!res.ok) throw new Error(`读取 MCP 工具失败: ${res.status}`);
+  return (await res.json()) as McpToolsResponse;
+}
