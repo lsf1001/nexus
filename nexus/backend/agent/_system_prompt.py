@@ -17,9 +17,44 @@ from __future__ import annotations
 from pathlib import Path
 
 from nexus.backend.identity.directives import DIRECTIVES
+from nexus.backend.prompts.project_context import build_project_context_prompt
 from nexus.backend.skills import REGISTRY, render_skills_for_prompt
 
 logger = __import__("logging").getLogger(__name__)
+
+# 当前激活 Project id(由 Task 7 前端切换调 set_active_project_id 写入)。
+# WHY module-level 单例:避免改 get_system_prompt(model_name) 签名,
+# 调用方依赖面太广(WS handlers / agent.py / e2e driver 都直接调)。
+_ACTIVE_PROJECT_ID: str | None = None
+
+
+def set_active_project_id(project_id: str | None) -> None:
+    """切换当前激活 Project —— 供 Task 7 前端切换面板调用。
+
+    同步清空 ``_CACHED_PROMPT`` —— project 上下文变了,旧缓存的
+    ``<project_context>`` 段必须丢弃,否则会拼接到新 project 上。
+    """
+    global _ACTIVE_PROJECT_ID
+    _ACTIVE_PROJECT_ID = project_id
+    reload_system_prompt()
+
+
+def _append_project_context(base: str, active_project_id: str | None) -> str:
+    """把 ``<project_context>`` 段追加到 base system prompt 后。
+
+    WHY 兜底 ``except Exception``:构建失败不能让整个 agent 挂掉。
+    这是异常路径(system prompt 丢失 = 整个 agent 拒服务),降级保留
+    base 是最安全的兜底。``# noqa: BLE001`` 标记 CLAUDE.md 1.6
+    "禁止 bare except" 的有意豁免。
+    """
+    if not active_project_id:
+        return base
+    try:
+        ctx = build_project_context_prompt(active_project_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("build_project_context_prompt 失败(继续用 base): %s", exc)
+        return base
+    return f"{base}\n\n{ctx}" if ctx else base
 
 
 # 训练记忆黑名单(单源从 ``DIRECTIVES.training_bias_blacklist`` 派生)。
@@ -220,16 +255,21 @@ def get_system_prompt(model_name: str = "") -> str:
       目的是"切模型时强制重算 prompt 让新 prompt 里的 FACT 反映新模型";
       现在 FACT 已经从 prompt 字符串里移走,缓存滞留问题从根上消失。
 
+      2026-07-23 增加第二段拼接 ``<project_context>``,但 project 切换
+      已经通过 ``set_active_project_id`` 清缓存,base + context 拼好后
+      一起缓存,单 bucket 即可。
+
     Args:
         model_name: **保留参数仅为向后兼容**,不再影响缓存键。
 
     Returns:
-        与激活模型无关的 system prompt 字符串(单 bucket 缓存)。
+        与激活模型无关 + 当前激活 Project 的 system prompt 完整字符串。
     """
     global _CACHED_PROMPT
     cached = _CACHED_PROMPT.get("__default__")
     if cached is None:
-        cached = _build_system_prompt(model_name)
+        base = _build_system_prompt(model_name)
+        cached = _append_project_context(base, _ACTIVE_PROJECT_ID)
         _CACHED_PROMPT["__default__"] = cached
     return cached
 
