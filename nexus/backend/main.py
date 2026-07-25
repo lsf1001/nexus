@@ -263,6 +263,10 @@ app.include_router(sessions_router)
 app.include_router(model_config_routes.router)
 # Round 1 SPEC §4.3:Project REST API(Round 1 骨架第三步)
 app.include_router(projects_routes.router)
+# Round 2 SPEC §4.3:附件上传 REST API(POST/GET/DELETE /api/attachments)
+from .routes.attachments import router as attachments_router  # noqa: E402
+
+app.include_router(attachments_router)
 
 # CORS 白名单：环境变量 NEXUS_ALLOWED_ORIGINS 逗号分隔；默认本地开发地址
 _cors_origins = [

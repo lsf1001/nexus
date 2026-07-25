@@ -110,6 +110,26 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name)")
 
+    # Round 2 SPEC §4.3:attachments 表(per-project 上传文件元数据)。
+    # file_path 指向 ~/Nexus/projects/{project_id}/uploads/{att_<uuid>.<ext>};
+    # ON DELETE CASCADE 配合 Project 删除时一起清,避免孤儿文件。
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attachments (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            original_name TEXT NOT NULL,
+            stored_filename TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            mime TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            uploaded_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_attachments_project ON attachments(project_id)")
+
     # sessions.project_id 外键;RESTRICT 防止误删还有会话的 Project。
     # _ensure_column 在旧库上 ALTER TABLE ADD COLUMN,新库则包含在 CREATE TABLE 里。
     # 禁止手工 ALTER TABLE(违反 CLAUDE.md / SPEC §4.1)。
