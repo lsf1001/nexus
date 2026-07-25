@@ -87,20 +87,30 @@ class SessionManager:
         """
         return find_latest_session_by_user(user_id, channel=channel, account_id=account_id)
 
-    def build_prompt(self, session_id: str, user_message: str) -> dict:
+    def build_prompt(
+        self,
+        session_id: str,
+        user_message: str,
+        attachment_ids: list[str] | None = None,
+    ) -> dict:
         """构建带对话历史的 prompt。
 
         身份 / 规则 / 长期记忆由 deepagents :class:`MemoryMiddleware` 从
         AGENTS.md 注入 system prompt;本方法只组装历史 + 当前 user 消息。
 
+        WHY attachment_ids 可选:无附件时必须走原纯 text 路径(零回归),
+        仅当传入 attachment_ids 时才拉元数据拼 multi-part,让 LLM 看到附件。
+
         Args:
             session_id: 会话 ID
             user_message: 用户消息
+            attachment_ids: 附件 ID 列表(可选),对应 /api/attachments 落库记录
 
         Returns:
             包含 session_id、messages 的字典
         """
-        from .db import get_conversation_history
+        from .agent import build_messages_with_attachments
+        from .db import get_conversation_history, get_db
 
         # 若最后一条就是当前 user 消息（调用方先入库再调本方法），去掉以免重复
         history = get_conversation_history(session_id)
@@ -110,7 +120,19 @@ class SessionManager:
         # 组装消息：身份由 AGENTS.md 注入,这里 system 段留空
         messages: list[dict] = [{"role": "system", "content": ""}]
         messages.extend(history)
-        messages.append({"role": "user", "content": user_message})
+
+        # 拉附件元数据(若有),再拼成 multi-part user 消息
+        attachments_meta: list[dict] = []
+        if attachment_ids:
+            with get_db() as conn:
+                placeholders = ",".join("?" * len(attachment_ids))
+                rows = conn.execute(
+                    f"SELECT file_path, mime, original_name FROM attachments WHERE id IN ({placeholders})",
+                    attachment_ids,
+                ).fetchall()
+            attachments_meta = [dict(r) for r in rows]
+
+        messages.extend(build_messages_with_attachments(user_message, attachments_meta))
 
         return {
             "session_id": session_id,
@@ -134,9 +156,7 @@ def get_session_manager() -> SessionManager:
 
 
 @router.get("")
-async def get_sessions(
-    limit: int = 50, project_id: str | None = None
-) -> list[dict]:
+async def get_sessions(limit: int = 50, project_id: str | None = None) -> list[dict]:
     """获取会话列表。可选按 project_id 过滤(前端 useConversationCrud 在切
     activeProjectId 时会带上) — 未传则保持旧行为(全量),便于无项目概念的
     调用方(测试 / 微信通道会话检索等)。
