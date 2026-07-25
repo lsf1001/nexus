@@ -1589,3 +1589,119 @@
   border-color: #2f3a30;
   color: #e5e7e0;
 }
+
+/* ===== Attachment bar（SPEC §4.2）===== */
+.attachment-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  max-height: 110px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+
+.attachment-bar[hidden] {
+  display: none;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 48px;
+  padding: 0 6px 0 0;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 180px;
+  max-width: 240px;
+}
+
+.attachment-chip.is-failed {
+  border-color: #c2410c;
+}
+
+.attachment-chip-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--paper);
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--ink-2);
+  font-weight: 600;
+  font-size: var(--font-sm);
+  flex: 0 0 auto;
+}
+
+.attachment-chip-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachment-chip-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.attachment-chip-name {
+  font-size: var(--font-sm);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-chip-meta {
+  font-size: var(--font-xs);
+  color: var(--ink-3);
+}
+
+.attachment-chip-remove {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: transparent;
+  border: 0;
+  color: var(--ink-3);
+  font-size: 14px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.attachment-chip-remove:hover {
+  background: var(--sidebar-hover-bg);
+  color: var(--ink);
+}
+
+.attachment-image-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 24px;
+  cursor: zoom-out;
+}
+
+.attachment-image-dialog img {
+  max-width: 92vw;
+  max-height: 92vh;
+  object-fit: contain;
+}
