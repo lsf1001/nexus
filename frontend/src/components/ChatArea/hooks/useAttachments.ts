@@ -12,7 +12,7 @@
  *   - 进度条:20MB 以内本地直传够快,无进度条需求
  *   - retry:失败 toast 用户手动重传;不静默重试
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToastStore } from '@/store/useToast'
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
@@ -70,6 +70,13 @@ export interface UseAttachmentsReturn {
 
 export function useAttachments(projectId: string): UseAttachmentsReturn {
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
+  /**
+   * 已创建但尚未 revoke 的 previewUrl 集合。
+   * 闭包 attachments 在卸载时读到的是陈旧值，所以另起 ref 记号。
+   * remove / clear 时同步从 ref 移除已 revoke 的 url，
+   * 最终 useEffect cleanup 兜底 revoke 剩余的（用户直接卸载 Composer 而没 remove 的场景）。
+   */
+  const previewUrlsRef = useRef<Set<string>>(new Set())
 
   const uploadOne = useCallback(
     async (att: LocalAttachment): Promise<void> => {
@@ -153,6 +160,10 @@ export function useAttachments(projectId: string): UseAttachmentsReturn {
         })
       }
       if (newOnes.length === 0) return
+      // 注册 previewUrl 到 ref 供 unmount cleanup 兜底 revoke
+      for (const att of newOnes) {
+        if (att.previewUrl) previewUrlsRef.current.add(att.previewUrl)
+      }
       setAttachments((prev) => [...prev, ...newOnes])
       // 立即开始上传
       for (const att of newOnes) {
@@ -168,7 +179,12 @@ export function useAttachments(projectId: string): UseAttachmentsReturn {
       if (!target) return
       setAttachments((prev) => prev.filter((a) => a.id !== id))
       // 卸载时 revoke previewUrl;若已 uploaded 则调 DELETE
-      if (target.previewUrl) URL.revokeObjectURL(target.previewUrl)
+      if (target.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl)
+        // 从 ref 注销，避免 unmount cleanup 重复 revoke (revoke 一个已 revoke 的 url 是无害的
+        // 但保持 ref 干净更利于断言)
+        previewUrlsRef.current.delete(target.previewUrl)
+      }
       if (target.serverId) {
         void fetch(`/api/attachments/${target.serverId}`, {
           method: 'DELETE',
@@ -183,7 +199,10 @@ export function useAttachments(projectId: string): UseAttachmentsReturn {
   const clear = useCallback(() => {
     // 卸载所有 previewUrl + 异步 DELETE 所有 uploaded(读当前 attachments)
     for (const a of attachments) {
-      if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+      if (a.previewUrl) {
+        URL.revokeObjectURL(a.previewUrl)
+        previewUrlsRef.current.delete(a.previewUrl)
+      }
       if (a.serverId) {
         void fetch(`/api/attachments/${a.serverId}`, {
           method: 'DELETE',
@@ -192,6 +211,22 @@ export function useAttachments(projectId: string): UseAttachmentsReturn {
     }
     setAttachments([])
   }, [attachments])
+
+  // 卸载时 revoke 任何仍持有的 previewUrl —— 用户添加 image 后不点 remove 直接卸载
+  // Composer 也不提交的场景，否则 blob URL 会泄漏到 GC。
+  // 用 ref 而非闭包 attachments，因为 cleanup 读到的是 render 闭包的旧值，
+  // 而 ref 始终持有 addFiles 时登记的最新 url 集合。
+  useEffect(() => {
+    // 局部拷贝一份 url 集合：cleanup 执行时 ref.current 仍指向原 Set，
+    // 但若后续 React 复用该 ref 对象，snapshot 能确保 revoke 的是这次 effect 看到过的 url
+    const urlsSnapshot = previewUrlsRef.current
+    return () => {
+      for (const url of urlsSnapshot) {
+        URL.revokeObjectURL(url)
+      }
+      urlsSnapshot.clear()
+    }
+  }, [])
 
   const uploadedServerIds = useCallback(
     () =>
