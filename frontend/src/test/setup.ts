@@ -10,6 +10,31 @@ import { afterEach, beforeEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import { useStore } from '../store'
 
+// jsdom 未实现 <dialog>.showModal() / close() / open — AttachmentBar 用
+// 受控 ref 模式,需要补齐让 onClick → showModal → onClick → close 流程跑通。
+if (typeof HTMLDialogElement !== 'undefined') {
+  const proto = HTMLDialogElement.prototype as HTMLDialogElement & {
+    showModal?: () => void
+    close?: () => void
+  }
+  if (!proto.showModal) {
+    proto.showModal = function (this: HTMLDialogElement) {
+      this.setAttribute('open', '')
+    }
+  }
+  if (!proto.close) {
+    proto.close = function (this: HTMLDialogElement) {
+      this.removeAttribute('open')
+    }
+  }
+  Object.defineProperty(HTMLDialogElement.prototype, 'open', {
+    get(this: HTMLDialogElement) {
+      return this.hasAttribute('open')
+    },
+    configurable: true,
+  })
+}
+
 afterEach(() => {
   cleanup()
 })

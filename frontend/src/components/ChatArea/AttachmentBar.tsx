@@ -11,7 +11,7 @@
  *   - × → onRemove(id)
  *   - chip 主体 → 图片全屏 dialog;非图片弹 tooltip
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { LocalAttachment } from './hooks/useAttachments'
 
 const formatSize = (bytes: number): string => {
@@ -32,6 +32,16 @@ interface AttachmentBarProps {
 
 export function AttachmentBar({ attachments, onRemove }: AttachmentBarProps): JSX.Element | null {
   const [viewingImage, setViewingImage] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    if (viewingImage) {
+      if (!dialog.open) dialog.showModal()
+    } else {
+      if (dialog.open) dialog.close()
+    }
+  }, [viewingImage])
   if (attachments.length === 0) {
     return <div data-testid="attachment-bar" hidden aria-hidden="true" />
   }
@@ -78,15 +88,17 @@ export function AttachmentBar({ attachments, onRemove }: AttachmentBarProps): JS
           </div>
         )
       })}
-      {viewingImage && (
-        <dialog
-          open
-          className="attachment-image-dialog"
-          onClick={() => setViewingImage(null)}
-        >
-          <img src={viewingImage} alt="" />
-        </dialog>
-      )}
+      <dialog
+        ref={dialogRef}
+        className="attachment-image-dialog"
+        onClick={() => setViewingImage(null)}
+        onCancel={(e) => {
+          e.preventDefault()
+          setViewingImage(null)
+        }}
+      >
+        {viewingImage && <img src={viewingImage} alt="" />}
+      </dialog>
     </div>
   )
 }
