@@ -6,8 +6,6 @@ WHY 独立模块:``agent`` 已是拆分后的包,把"附件拼 multi-part"这一
 
 from __future__ import annotations
 
-import base64
-
 from ..attachments import read_attachment_image_b64, read_attachment_text
 
 # 除 image/* 外,允许提取全文注入的 mime(其余交由路由层 415 拦截,这里防御兜底)
@@ -38,14 +36,14 @@ def build_messages_with_attachments(
     for att in attachments:
         mime = att.get("mime", "")
         if mime.startswith("image/"):
-            detected_mime, raw = read_attachment_image_b64(att["file_path"])
+            detected_mime, b64 = read_attachment_image_b64(att["file_path"])
             content.append(
                 {
                     "type": "image",
                     "source": {
                         "type": "base64",
                         "media_type": detected_mime,
-                        "data": base64.b64encode(raw).decode("ascii"),
+                        "data": b64,
                     },
                 }
             )

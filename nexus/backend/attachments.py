@@ -104,11 +104,10 @@ def read_attachment_text(file_path: str, max_chars: int = 20000) -> str:
     return text
 
 
-def read_attachment_image_b64(file_path: str) -> tuple[str, bytes]:
-    """读图片附件,返 (mime, base64-decoded bytes)。mime 从 file_path 后缀推。
+def read_attachment_image_b64(file_path: str) -> tuple[str, str]:
+    """读图片附件,返 (mime, base64-encoded str)。mime 从 file_path 后缀推。"""
+    import base64 as _b64
 
-    返回 bytes 是为了让 caller 自己 encode,避免本模块引 base64。
-    """
     p = Path(file_path)
     ext = p.suffix.lower()
     mime = {
@@ -118,4 +117,4 @@ def read_attachment_image_b64(file_path: str) -> tuple[str, bytes]:
         ".gif": "image/gif",
         ".webp": "image/webp",
     }.get(ext, "application/octet-stream")
-    return mime, p.read_bytes()
+    return mime, _b64.b64encode(p.read_bytes()).decode("ascii")

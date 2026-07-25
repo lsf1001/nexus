@@ -28,7 +28,9 @@ def test_read_attachment_text_truncates(tmp_path: Path) -> None:
 
 
 def test_read_attachment_image_b64_roundtrip(tmp_path: Path) -> None:
-    """图片按后缀判 mime + 返原 bytes。"""
+    """图片按后缀判 mime + 返 base64 str(可直接喂给 Anthropic image source)。"""
+    import base64
+
     from nexus.backend.attachments import read_attachment_image_b64
 
     p = tmp_path / "x.png"
@@ -36,7 +38,7 @@ def test_read_attachment_image_b64_roundtrip(tmp_path: Path) -> None:
     p.write_bytes(raw)
     mime, data = read_attachment_image_b64(str(p))
     assert mime == "image/png"
-    assert data == raw
+    assert data == base64.b64encode(raw).decode("ascii")
 
 
 def test_build_messages_with_attachment_text(tmp_path: Path) -> None:
@@ -90,7 +92,7 @@ def test_build_messages_with_attachment_image(tmp_path: Path) -> None:
     src = content[1]["source"]
     assert src["type"] == "base64"
     assert src["media_type"] == "image/png"
-    assert base64.b64decode(src["data"]) == raw
+    assert src["data"] == base64.b64encode(raw).decode("ascii")
 
 
 def test_build_messages_no_attachments_returns_text() -> None:
