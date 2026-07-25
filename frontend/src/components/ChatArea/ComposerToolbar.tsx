@@ -20,22 +20,24 @@ const STYLE_OPTIONS = ['默认', '简洁', '专业'] as const;
 type StyleOption = (typeof STYLE_OPTIONS)[number];
 
 /**
- * Composer 左侧工具条:附件占位 / 思考开关 / 风格选择器。
+ * Composer 左侧工具条:附件 / 思考开关 / 风格选择器。
  *
- * 当前均为 UI-only:
- *   - 附件:占位按钮,本期不接真实上传 / 截图 / skill 选择。
- *   - 思考开关:绑定 store 顶层 showThinking(来自 uiPrefs 切片)。
- *   - 风格选择器:本地 state 驱动,仅改 UI。
+ * 附件按钮由父组件 Composer 注入 onAttach 回调接成 file picker;
+ * 不传 onAttach 时按钮退化为占位(aria-disabled),保持向后兼容。
+ *
+ * 思考开关:绑定 store 顶层 showThinking(来自 uiPrefs 切片)。
+ * 风格选择器:本地 state 驱动,UI-only,本期未下发后端。
  * // TODO: wire to backend style param(将 style 作为请求参数下发)。
  */
-export function ComposerToolbar() {
+export function ComposerToolbar({ onAttach }: { onAttach?: () => void } = {}) {
   const showThinking = useStore((s) => s.showThinking);
   const setShowThinking = useStore((s) => s.setShowThinking);
   const [style, setStyle] = useState<StyleOption>('默认');
 
   return (
     <div className="composer-toolbar flex items-center gap-1">
-      {/* 附件占位:本期不接真实上传,无点击行为 */}
+      {/* 附件按钮:父组件传 onAttach 时 → 真触发 file picker;
+          未传 → 占位按钮(aria-disabled),保持向后兼容 */}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -43,17 +45,17 @@ export function ComposerToolbar() {
             variant="ghost"
             size="icon"
             className={cn('composer-plus')}
-            aria-label="添加附件 / 截图 / 选 skill"
-            aria-disabled="true"
-            tabIndex={-1}
-            onClick={() => {
+            aria-label={onAttach ? '上传附件' : '添加附件 / 截图 / 选 skill'}
+            aria-disabled={onAttach ? undefined : 'true'}
+            tabIndex={onAttach ? undefined : -1}
+            onClick={onAttach ?? (() => {
               /* 占位:无行为,后续 PR 接入上传 / 截图 / skill 选择 */
-            }}
+            })}
           >
             <Plus />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>附件 / 截图 / 选 skill（即将开放）</TooltipContent>
+        <TooltipContent>{onAttach ? '上传附件' : '附件 / 截图 / 选 skill（即将开放）'}</TooltipContent>
       </Tooltip>
 
       {/* 思考开关:绑定 store 顶层 showThinking */}
