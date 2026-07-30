@@ -24,7 +24,9 @@ import { useChatAreaActions } from './hooks/useChatAreaActions';
 import { useChatSend } from './hooks/useChatSend';
 import { type ChatStreamActions, useChatStream } from './hooks/useChatStream';
 import { useDraft } from './hooks/useDraft';
+import { useDraftConflict } from './hooks/useDraftConflict';
 import { useWsMessageRouter, type WsRouterCtx } from './hooks/useWsMessageRouter';
+import { useToastStore } from '../../store/useToast';
 import type { LastError, PendingClarification } from './types';
 
 export interface ChatAreaProps {
@@ -197,6 +199,22 @@ export function ChatArea({
   // 时落 localStorage;activeProjectId 通过 closure 捕获,每次 render 都最新。
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => saveDraftEffect(activeProjectId, input), [input, saveDraftEffect]);
+
+  // === 多 tab 草稿冲突提示(Round 2,2026-07-30,SPEC §4.6)===
+  // 另一 tab 改了同 project 的 nexus-draft-{pid} → toast 提示用户。
+  // 降级为 warn(8000ms):useToast store API 仅 (kind, message, durationMs),
+  // 不支持 plan 模板里的 {title, body, actions} 结构 — actions 是 nice-to-have,
+  // 让用户手动对比/恢复即可(useDraft 已自动 writeDraft,reload 后能恢复)。
+  useDraftConflict({
+    projectId: activeProjectId,
+    onConflict: ({ remoteText }) => {
+      const preview =
+        remoteText.length > 60 ? `${remoteText.slice(0, 60)}…` : remoteText
+      useToastStore
+        .getState()
+        .push('warn', `另一窗口刚修改草稿: ${preview}`, 8000)
+    },
+  });
 
   // === 单一发送入口 ===
   // 第十三轮(2026-07-30):Composer 提交时把已上传附件的 server ids 一并传给
