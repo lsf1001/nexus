@@ -14,6 +14,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToastStore } from '@/store/useToast'
+import { apiFetch } from '@/lib/api'
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
 const ALLOWED_MIME_PREFIXES = ['image/', 'text/']
@@ -89,7 +90,11 @@ export function useAttachments(projectId: string): UseAttachmentsReturn {
       form.append('file', att.file, att.originalName)
       form.append('project_id', projectId)
       try {
-        const res = await fetch('/api/attachments', {
+        // WHY(2026-07-30 T11):不能裸 fetch('/api/attachments')。
+        // 后端 router 挂了 ``Depends(require_token)``,没有 ``Authorization: Bearer <token>``
+        // 必 401;同时相对 URL 在 Tauri webview 里走 tauri:// 会被 CSP 拦。
+        // 必须走 ``apiFetch`` —— 它自动注入 Bearer 头并 resolveApiUrl 补全绝对地址。
+        const res = await apiFetch('/api/attachments', {
           method: 'POST',
           body: form,
         })
@@ -186,7 +191,7 @@ export function useAttachments(projectId: string): UseAttachmentsReturn {
         previewUrlsRef.current.delete(target.previewUrl)
       }
       if (target.serverId) {
-        void fetch(`/api/attachments/${target.serverId}`, {
+        void apiFetch(`/api/attachments/${target.serverId}`, {
           method: 'DELETE',
         }).catch(() => {
           /* 静默:删不删无所谓 */
@@ -204,7 +209,7 @@ export function useAttachments(projectId: string): UseAttachmentsReturn {
         previewUrlsRef.current.delete(a.previewUrl)
       }
       if (a.serverId) {
-        void fetch(`/api/attachments/${a.serverId}`, {
+        void apiFetch(`/api/attachments/${a.serverId}`, {
           method: 'DELETE',
         }).catch(() => {})
       }

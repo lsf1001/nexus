@@ -121,14 +121,16 @@ ArtifactsPanel 默认折叠(`artifactsCollapsed=true`),只有 ToolCallCard 联�
 | `Sidebar` | `components/desktop/Sidebar.tsx` | 多会话 + 搜索 + 新对话 + 设置入口 |
 | `ChatView` | `components/desktop/ChatView.tsx` | 主对话容器（空态 / MessageList / Composer 切换） |
 | `ChatArea` | `components/ChatArea/index.tsx` | 对话流核心（含 EmptyState / MessageList / Composer） |
-| `Composer` | `components/ChatArea/Composer.tsx` | 输入框 + 发送 + 停止按钮 |
+| `Composer` | `components/ChatArea/Composer.tsx` | 输入框 + 发送 + 停止按钮 + 附件入口(+ 按钮 / 拖拽 / paste) |
 | `MessageList` | `components/ChatArea/MessageList.tsx` | 消息渲染（user / assistant / thinking 折叠 / tool_call） |
 | `ModelSelector` | `components/ChatArea/ModelSelector.tsx` | 输入框上方模型选择器（chip + dropdown） |
 | `CommandPalette` | `components/desktop/CommandPalette.tsx` | ⌘K 全局命令面板 |
-| `PreferencesModal` | `components/desktop/PreferencesModal.tsx` | 设置弹窗（Provider 发现/导入 + 界面 + 关于） |
+| `PreferencesModal` | `components/desktop/PreferencesModal.tsx` | 设置弹窗（Provider 发现/导入 + 界面 + 关于 + 草稿 tab） |
 | `StatusBar` | `components/desktop/StatusBar.tsx` | 14px 底栏状态条 |
 | `MemoryPanel` | `components/desktop/MemoryPanel.tsx` | ⌘K 调出的记忆面板 |
 | `ArtifactsPanel` | `components/Artifacts/ArtifactsPanel.tsx` | 右栏产物面板（默认折叠,⌘+\ 展开;Code/Md/SVG/HTML 四种渲染器） |
+| `AttachmentBar` | `components/ChatArea/AttachmentBar.tsx` | Composer 上方附件预览条（chip 列表 + 失败标记 + 图片 dialog） |
+| `useAttachments` | `components/ChatArea/hooks/useAttachments.ts` | 本地附件 state + 上传 + 移除 + 卸载 revoke |
 
 ### 4.1 快捷键
 
@@ -139,6 +141,37 @@ ArtifactsPanel 默认折叠(`artifactsCollapsed=true`),只有 ToolCallCard 联�
 | ⌘/ / Ctrl+/ | 聚焦 composer 输入框 |
 | **⌘\ / Ctrl+\** | **折叠/展开右栏 Artifacts 面板** |
 | Esc | 关闭最上层 modal |
+
+### 4.1.1 Composer 附件交互(2026-07-30 加)
+
+Composer 三路附件入口汇入 `useAttachments.addFiles(files: File[])`:
+
+| 入口 | DOM 选择器 | 备注 |
+| ---- | ---------- | ---- |
+| 左侧 + 按钮(ComposerToolbar.onAttach) | 触发 hidden `<input data-testid="composer-file-input">` click | `accept` 与前后端白名单交集同步 |
+| 整区拖拽 | `.composer` 的 `onDragEnter/Over/Leave/Drop` | 用 `dragDepthRef` 深度计数防子元素冒泡抖动;`.is-drag-over` 高亮 |
+| textarea paste | `<textarea className="composer-textarea">` 的 `onPaste` | 不 preventDefault,允许 text + file 同时 paste |
+
+`useAttachments.addFiles` 立即 push `LocalAttachment{uploadStatus: 'pending'}` → 异步走 `apiFetch('POST /api/attachments', FormData)` → 成功后回填 `serverId` + `uploadStatus: 'uploaded'`。失败标 `failed` + 弹 toast,**不静默重试**。
+
+提交链路:`Composer.handleSend` 把 `uploadedServerIds()` 传给 `ChatArea.onSubmit(serverIds)` → `ChatArea.send` 拼到 WSMessage 的 `attachment_ids` 字段 → 后端 `handlers.py` 透传给 `session_manager.build_prompt(session_id, content, attachment_ids)` → 拉附件元数据拼 multi-part 让 LLM 真的看到附件。
+
+`apiFetch` 而不是裸 `fetch` —— 后端 router 挂了 `Depends(require_token)`,没 `Authorization: Bearer <token>` 必 401;同时相对 URL 在 Tauri webview 里走 `tauri://` 会被 CSP 拦。
+
+预览条(`AttachmentBar`)位于 textarea 上方:chip 形态(`48px 高 + 缩略图 + 文件名 + 大小 + × 按钮`);图片 chip 点击放大弹 `<dialog>`;失败 chip 加 `.is-failed` 类名。
+
+### 4.1.2 草稿持久化与跨 tab 同步(2026-07-30 加)
+
+| 维度 | 实现 |
+| ---- | ---- |
+| 落盘 key | `nexus-draft-{projectId}`(无 active 时回落 `nexus-draft-_none`,扫描时排除) |
+| 写时机 | `useDraft.saveDraftEffect(projectId, input)` —— `input` 变化 + 500ms 防抖,空文本 = `removeItem` |
+| 读时机 | `useDraft.loadOnMount(conversationId)` —— 挂载且 conversation 为空时读 localStorage,填回 input + toast |
+| 跨 tab | `useDraftConflict` —— 监听 `window.storage` 事件,8s 内同 project key 被另一 tab 改写 → 弹 toast 询问是否同步 |
+| 草稿 tab | `PreferencesModal` 第 4 tab `草稿`,扫 localStorage 列出所有 `nexus-draft-{id}`(排除 `_none`),每 2s 重扫;行内"跳回"按钮切 active project + 跳 `/chat` + 关弹窗,"删除"按钮从 localStorage 移除 |
+| 触发偏好 modal | `window.dispatchEvent(new CustomEvent('nexus:open-preferences'))`(DesktopShell 监听) |
+
+提交成功后由 ChatArea 主动调 `useDraft.clearDraft(projectId)` 清掉当前草稿(不走 500ms 防抖)。
 
 ### 4.2 已删除的旧组件（仅供历史参考）
 

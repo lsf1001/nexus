@@ -154,8 +154,10 @@ describe('Composer 第十三轮 (附件接入)', () => {
     fireEvent.paste(ta, { clipboardData: dt });
     // 等 useAttachments 内部 setState 完成
     await waitFor(() => {
+      // 路径必须含 /api/attachments(useAttachments 走 apiFetch,
+      // 它内部 resolveApiUrl 会把 'http://localhost:...' 补全)
       expect(fetchSpy).toHaveBeenCalledWith(
-        '/api/attachments',
+        expect.stringContaining('/api/attachments'),
         expect.objectContaining({ method: 'POST' }),
       );
     });
@@ -178,7 +180,7 @@ describe('Composer 第十三轮 (附件接入)', () => {
     expect(composer.className).not.toContain('is-drag-over');
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledWith(
-        '/api/attachments',
+        expect.stringContaining('/api/attachments'),
         expect.objectContaining({ method: 'POST' }),
       );
     });

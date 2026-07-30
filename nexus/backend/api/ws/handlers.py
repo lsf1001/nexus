@@ -478,7 +478,23 @@ async def handle_websocket(
             )
 
             # 使用 SessionManager 构建带记忆的 prompt
-            prompt = session_manager.build_prompt(session_id, user_content)
+            #
+            # WHY 显式透传 attachment_ids(2026-07-30 修):前端 useChatSend 在
+            # idsArr 非空时给 WSMessage 挂 ``attachment_ids``,后端
+            # ``sessions.build_prompt`` 也已支持该参数(拉附件元数据拼 multi-part
+            # 让 LLM 真的看到附件),但本处一直是裸调 —— 前端发了等于静默丢弃,
+            # 用户传的文件/图片 LLM 完全看不见。
+            #
+            # None / 空列表都走原纯 text 路径(零回归):空 list 若透传下去会让
+            # build_prompt 拿空 placeholders 去查 attachments 表,拉不到元数据
+            # 反而多一次无谓查询。
+            _raw_attachment_ids = data.get("attachment_ids")
+            attachment_ids: list[str] | None = (
+                [str(x) for x in _raw_attachment_ids]
+                if isinstance(_raw_attachment_ids, list) and _raw_attachment_ids
+                else None
+            )
+            prompt = session_manager.build_prompt(session_id, user_content, attachment_ids)
 
             # 可选:客户端在消息帧中携带 resume_token(兼容旧客户端)
             resume_from_event_id: int | None = None
