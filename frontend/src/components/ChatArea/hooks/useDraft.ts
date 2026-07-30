@@ -5,8 +5,15 @@
  * 用户写到一半的 prompt 经常丢。Claude Desktop / ChatGPT 都把"草稿"作为
  * 单值跨会话保留(input 没提交前都视为草稿,提交后清掉)。
  *
- * Level 1 实现(精简,YAGNI):
- *   - key: `nexus-draft`,JSON.stringify({ text, savedAt })
+ * Round 2(2026-07-24)升级 — per-project 隔离:
+ *   - key: `nexus-draft-{projectId ?? '_none'}`,每个 project 独立
+ *   - WHY:Round 1 引入 projects,用户切 project 时草稿会跟过去 — 期望是
+ *     "A project 写到一半,切 B project,回来 A 还在"。无 active project
+ *     时 fallback `_none`(初始化期 / projects 加载失败时)。
+ *   - 旧 `nexus-draft`(无后缀)数据不再读 — 主动放弃兼容,因为那是从
+ *     single-tenant era 留下的,迁到任何 project 都会有语义歧义。
+ *
+ * Level 1 行为(YAGNI):
  *   - 写:input 变化 + 500ms 防抖;空文本 = removeItem
  *   - 读:仅当 conversationIdProp 为空时(无会话);有会话则不读,避免污染
  *     别人会话上下文
@@ -22,17 +29,20 @@
 import { useCallback, useRef } from 'react';
 import { useToastStore } from '../../../store/useToast';
 
-const DRAFT_KEY = 'nexus-draft';
 const SAVE_DEBOUNCE_MS = 500;
+
+/** Per-project storage key。无 active project 时用 `_none` 兜底。 */
+const draftKey = (projectId: string | null | undefined): string =>
+  `nexus-draft-${projectId ?? '_none'}`;
 
 interface DraftShape {
   text?: unknown;
   savedAt?: unknown;
 }
 
-function readDraftRaw(): { text: string; savedAt: number } | null {
+function readDraftRaw(key: string): { text: string; savedAt: number } | null {
   try {
-    const raw = window.localStorage.getItem(DRAFT_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as DraftShape;
     if (typeof parsed.text !== 'string' || parsed.text.trim() === '') return null;
@@ -45,10 +55,10 @@ function readDraftRaw(): { text: string; savedAt: number } | null {
   }
 }
 
-function writeDraft(text: string): void {
+function writeDraft(key: string, text: string): void {
   try {
     window.localStorage.setItem(
-      DRAFT_KEY,
+      key,
       JSON.stringify({ text, savedAt: Date.now() }),
     );
   } catch {
@@ -56,9 +66,9 @@ function writeDraft(text: string): void {
   }
 }
 
-function removeDraft(): void {
+function removeDraft(key: string): void {
   try {
-    window.localStorage.removeItem(DRAFT_KEY);
+    window.localStorage.removeItem(key);
   } catch {
     /* ignore */
   }
@@ -74,13 +84,14 @@ function formatAgo(savedAt: number): string {
 export interface UseDraftReturn {
   /** 父组件 mount 后调用:仅当 conversationIdProp 为空时尝试读草稿 → setInput + toast */
   loadOnMount: (
+    projectId: string | null | undefined,
     conversationIdProp: string | null | undefined,
     setInput: (next: string) => void,
   ) => void;
-  /** 父组件 useEffect(() => saveDraftEffect(input), [input]) 写入即可 */
-  saveDraftEffect: (input: string) => void;
+  /** 父组件 useEffect(() => saveDraftEffect(projectId, input), [input]) 写入即可 */
+  saveDraftEffect: (projectId: string | null | undefined, input: string) => void;
   /** 父组件 send 成功后主动调:同步清草稿 */
-  clearDraft: () => void;
+  clearDraft: (projectId: string | null | undefined) => void;
 }
 
 export function useDraft(): UseDraftReturn {
@@ -92,43 +103,49 @@ export function useDraft(): UseDraftReturn {
 
   const loadOnMount = useCallback(
     (
+      projectId: string | null | undefined,
       conversationIdProp: string | null | undefined,
       setInput: (next: string) => void,
     ) => {
       if (loadedRef.current) return;
       loadedRef.current = true;
       if (conversationIdProp) return; // 有会话 → 不读
-      const draft = readDraftRaw();
+      const key = draftKey(projectId);
+      const draft = readDraftRaw(key);
       if (!draft) return;
       skipNextSaveRef.current = true; // loadOnMount 触发的 setInput → 下次 effect 跳过 save
       setInput(draft.text);
-      removeDraft(); // 读出后立即清(避免 reload 又恢复)
+      removeDraft(key); // 读出后立即清(避免 reload 又恢复)
       useToastStore.getState().push('info', `已恢复未提交草稿 (${formatAgo(draft.savedAt)})`, 3500);
     },
     [],
   );
 
-  const saveDraftEffect = useCallback((input: string) => {
-    // 先取消前一次 pending,实现"input 持续变化 → 防抖"
-    if (pendingTimerRef.current !== null) {
-      window.clearTimeout(pendingTimerRef.current);
-      pendingTimerRef.current = null;
-    }
-    if (skipNextSaveRef.current) {
-      skipNextSaveRef.current = false;
-      return;
-    }
-    pendingTimerRef.current = window.setTimeout(() => {
-      if (input.trim() === '') {
-        removeDraft();
-      } else {
-        writeDraft(input);
+  const saveDraftEffect = useCallback(
+    (projectId: string | null | undefined, input: string) => {
+      // 先取消前一次 pending,实现"input 持续变化 → 防抖"
+      if (pendingTimerRef.current !== null) {
+        window.clearTimeout(pendingTimerRef.current);
+        pendingTimerRef.current = null;
       }
-      pendingTimerRef.current = null;
-    }, SAVE_DEBOUNCE_MS);
-  }, []);
+      if (skipNextSaveRef.current) {
+        skipNextSaveRef.current = false;
+        return;
+      }
+      const key = draftKey(projectId);
+      pendingTimerRef.current = window.setTimeout(() => {
+        if (input.trim() === '') {
+          removeDraft(key);
+        } else {
+          writeDraft(key, input);
+        }
+        pendingTimerRef.current = null;
+      }, SAVE_DEBOUNCE_MS);
+    },
+    [],
+  );
 
-  const clearDraft = useCallback(() => {
+  const clearDraft = useCallback((projectId: string | null | undefined) => {
     // 取消 pending 防抖 timer,避免"clearDraft 后 timer 仍触发写草稿"。
     // 第十一轮-2(2026-07-23)ChatArea resetTrigger 路径专用 — setInput('') →
     // 500ms 防抖后会触发 saveDraftEffect(''),如果 timer 没取消,会把刚被
@@ -138,7 +155,7 @@ export function useDraft(): UseDraftReturn {
       window.clearTimeout(pendingTimerRef.current);
       pendingTimerRef.current = null;
     }
-    removeDraft();
+    removeDraft(draftKey(projectId));
   }, []);
 
   return { loadOnMount, saveDraftEffect, clearDraft };

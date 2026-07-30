@@ -67,6 +67,8 @@ export function ChatArea({
   const clearConversationMessages = useStore((s) => s.clearConversationMessages);
   const pendingConfirmation = useStore((s) => s.pendingConfirmation);
   const setPendingConfirmation = useStore((s) => s.setPendingConfirmation);
+  // Round 2(2026-07-24):草稿按 project 隔离 — 切 project 后各自草稿独立保留。
+  const activeProjectId = useStore((s) => s.activeProjectId);
 
   useEffect(() => {
     sessionIdRef.current = conversationIdProp;
@@ -106,7 +108,7 @@ export function ChatArea({
       // 但 resetTrigger 内的 setInput('') → useEffect → saveDraftEffect('') →
       // 500ms 后 removeDraft 仍会清掉草稿。这条路径是用户切到新会话时把旧会话
       // 草稿擦掉的根因(SPEC 第十一轮-2,2026-07-23)。
-      clearDraft();
+      clearDraft(activeProjectId);
       clearConversationMessages();
       setInput('');
       setIsLoading(false);
@@ -116,7 +118,7 @@ export function ChatArea({
       setLastError(null);
     }
     resetTriggerRef.current = resetTrigger ?? 0;
-  }, [resetTrigger, clearConversationMessages, setIsLoading, disarmWatchdog, setPendingConfirmation, clearDraft]);
+  }, [resetTrigger, clearConversationMessages, setIsLoading, disarmWatchdog, setPendingConfirmation, clearDraft, activeProjectId]);
 
   // === WS 连接 — 鉴权走 subprotocol ===
   // 2026-07-20:WsRouterCtx 不再含 stream — wsHandlers.handleChunk / handleThinking
@@ -186,11 +188,15 @@ export function ChatArea({
   // 确告知用户这是未发送的内容,避免和"已发送历史消息"混淆。后续如收到用户反馈
   // "切回旧会话丢草稿"再升级到 Level 2(per-conversationId + TTL)。
   useEffect(() => {
-    loadOnMount(conversationIdProp, setInput);
+    loadOnMount(activeProjectId, conversationIdProp, setInput);
     // 只在挂载时跑一次(hook 内部用 ref 自管)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => saveDraftEffect(input), [input, saveDraftEffect]);
+  // activeProjectId 故意不放 deps:切 project 时 hook 内部 saveDraftEffect
+  // 会被新 callback 调一次(send/clear 路径),此 effect 仅在 input 文本变化
+  // 时落 localStorage;activeProjectId 通过 closure 捕获,每次 render 都最新。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => saveDraftEffect(activeProjectId, input), [input, saveDraftEffect]);
 
   // === 单一发送入口 ===
   // 第十三轮(2026-07-30):Composer 提交时把已上传附件的 server ids 一并传给
@@ -206,7 +212,7 @@ export function ChatArea({
     setIsLoading,
     setLastError,
     clearInput: () => {
-      clearDraft();
+      clearDraft(activeProjectId);
       setInput('');
     },
     armWatchdog,
