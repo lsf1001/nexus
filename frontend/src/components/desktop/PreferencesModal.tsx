@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { DEFAULT_API_BASE } from '../../lib/config';
 import {
   refreshModelsIntoStore,
@@ -19,7 +20,7 @@ export interface PreferencesModalProps {
   onClose: () => void;
 }
 
-type TabId = 'general' | 'skills' | 'mcp';
+type TabId = 'general' | 'skills' | 'mcp' | 'drafts';
 
 interface TabDef {
   id: TabId;
@@ -27,13 +28,127 @@ interface TabDef {
 }
 
 /**
- * 设置弹窗 — 含三 tab:常规(供应商 + 界面 + 关于) / Skills / MCP。
+ * 设置弹窗 — 含四 tab:常规(供应商 + 界面 + 关于) / Skills / MCP / 草稿。
  *
  * Skills / MCP panels 接 useStore.activeProjectId,无 active 时降级显示
  * 'default' 兜底(后端永远保证 default project 存在)。
+ * 草稿 tab 扫 localStorage 中所有 `nexus-draft-*` key(过滤兜底 `_none`),
+ * 提供跳回(切 active project + 跳路由 /chat + 关闭弹窗)与删除。
  *
  * 硬编码颜色：toggle 激活态用 #2563eb（蓝），不使用 CSS 变量，避免打包 APP 中失效。
  */
+
+interface DraftListItem {
+  projectId: string;
+  text: string;
+  savedAt: number;
+}
+
+/** 草稿 per-project key。无 active project 时用 `_none` 兜底。 */
+const DRAFT_KEY_PREFIX = 'nexus-draft-';
+const DRAFT_NONE_KEY = 'nexus-draft-_none';
+
+function scanDrafts(): DraftListItem[] {
+  const items: DraftListItem[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key || !key.startsWith(DRAFT_KEY_PREFIX) || key === DRAFT_NONE_KEY) continue;
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as { text?: unknown; savedAt?: unknown };
+      if (typeof parsed.text !== 'string' || parsed.text.trim() === '') continue;
+      items.push({
+        projectId: key.slice(DRAFT_KEY_PREFIX.length),
+        text: parsed.text,
+        savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now(),
+      });
+    } catch {
+      /* 非 nexus-draft JSON 格式 → 忽略 */
+    }
+  }
+  return items.sort((a, b) => b.savedAt - a.savedAt);
+}
+
+/**
+ * formatAgo — useDraft.ts 内部已实现同样函数。
+ * 这里复制一份(不抽 utils)是因为:
+ *   1. 草稿 tab 只是读 useEffect 之外的独立入口,utils 抽离会动到 useDraft 的私有 API
+ *   2. 两边都是"读 savedAt → 友好时间",未来真要统一再抽;YAGNI
+ */
+function formatAgo(savedAt: number): string {
+  const minutesAgo = Math.max(0, Math.round((Date.now() - savedAt) / 60_000));
+  if (minutesAgo < 1) return '刚刚';
+  if (minutesAgo < 60) return `${minutesAgo} 分钟前`;
+  return `${Math.round(minutesAgo / 60)} 小时前`;
+}
+
+interface DraftsTabProps {
+  onJumpToProject: (projectId: string) => void;
+}
+
+function DraftsTab({ onJumpToProject }: DraftsTabProps): JSX.Element {
+  const projects = useStore((s) => s.projects);
+  const [items, setItems] = useState<DraftListItem[]>(() => scanDrafts());
+
+  // 每 2 秒重扫(同一 tab 内其它地方改草稿也能跟上,实测够轻量)
+  useEffect(() => {
+    const handle = setInterval(() => setItems(scanDrafts()), 2000);
+    return () => clearInterval(handle);
+  }, []);
+
+  if (items.length === 0) {
+    return (
+      <div className="settings-section">
+        <div className="settings-section-title">草稿</div>
+        <div className="drafts-empty">暂无草稿</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">草稿</div>
+      <div className="drafts-list">
+        {items.map((d) => {
+          const project = projects.find((p) => p.id === d.projectId);
+          return (
+            <div key={d.projectId} className="drafts-row">
+              <div className="drafts-row-project">{project?.name ?? d.projectId}</div>
+              <div className="drafts-row-preview" title={d.text}>
+                {d.text.length > 60 ? `${d.text.slice(0, 60)}…` : d.text}
+              </div>
+              <div className="drafts-row-time">{formatAgo(d.savedAt)}</div>
+              <div className="drafts-row-actions">
+                <button
+                  type="button"
+                  className="drafts-row-jump"
+                  onClick={() => onJumpToProject(d.projectId)}
+                >
+                  跳回
+                </button>
+                <button
+                  type="button"
+                  className="drafts-row-delete"
+                  onClick={() => {
+                    try {
+                      localStorage.removeItem(`${DRAFT_KEY_PREFIX}${d.projectId}`);
+                    } catch {
+                      /* quota / private mode — 静默 */
+                    }
+                    setItems(scanDrafts());
+                  }}
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.Element | null {
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +157,7 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
     { id: 'general', label: '常规' },
     { id: 'skills', label: 'Skills' },
     { id: 'mcp', label: 'MCP' },
+    { id: 'drafts', label: '草稿' },
   ];
   const [activeTab, setActiveTab] = useState<TabId>('general');
 
@@ -55,7 +171,21 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
   const setFontScale = useStore((s) => s.setFontScale);
   const models = useStore((s) => s.models);
   const currentModelId = useStore((s) => s.currentModelId);
+  const setActiveProject = useStore((s) => s.setActiveProject);
   const version = useAppVersion();
+
+  // 路由跳转(草稿 tab 跳回项目用,react-router v7 HashRouter)
+  const navigate = useNavigate();
+
+  // 草稿"跳回"= 切 active project + 跳到 /chat + 关闭弹窗。
+  // setActiveProject 是 async(写 ~/.nexus/active_project.json),失败用 toast 兜底。
+  const handleJumpToProject = (projectId: string): void => {
+    void setActiveProject(projectId).catch(() => {
+      /* 失败时 store 内部已回滚到 fallback,无需再处理 */
+    });
+    navigate('/chat');
+    onClose();
+  };
 
   // === 模型管理 ===
   const handleSwitchModel = async (id: string): Promise<void> => {
@@ -390,6 +520,17 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
                 </p>
                 <McpPanel projectId={panelProjectId} />
               </div>
+            </div>
+          )}
+
+          {/* ===== Tab: 草稿 ===== */}
+          {activeTab === 'drafts' && (
+            <div
+              role="tabpanel"
+              id={`preferences-tab-panel-drafts`}
+              aria-labelledby={`preferences-tab-drafts`}
+            >
+              <DraftsTab onJumpToProject={handleJumpToProject} />
             </div>
           )}
         </div>

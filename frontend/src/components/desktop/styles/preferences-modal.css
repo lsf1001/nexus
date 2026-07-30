@@ -788,3 +788,73 @@
 .mcp-panel-error {
   color: #d44;
 }
+
+/* ===== Drafts tab(SPEC §4.6,2026-07-24)===== */
+.drafts-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--ink-3);
+  font-size: var(--font-sm);
+}
+
+.drafts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drafts-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 80px auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.drafts-row-project {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drafts-row-preview {
+  font-size: var(--font-xs);
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drafts-row-time {
+  font-size: var(--font-xs);
+  color: var(--ink-3);
+}
+
+.drafts-row-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.drafts-row-jump,
+.drafts-row-delete {
+  padding: 4px 8px;
+  font-size: var(--font-xs);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.drafts-row-jump:hover,
+.drafts-row-delete:hover {
+  background: var(--sidebar-hover-bg);
+  color: var(--ink);
+}
