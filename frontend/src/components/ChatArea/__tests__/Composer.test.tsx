@@ -12,6 +12,8 @@
  * 第十三轮(2026-07-24)新增:paste / drop / + 按钮 / onSubmit 收 ids。
  * useAttachments 内部调 fetch — 测试用 vi.spyOn(globalThis, 'fetch') mock 掉,
  * 避免 jsdom 网络调用 + 跟 hook 单测保持一致 mock 风格。
+ *
+ * Review 修复(2026-07-30)新增:dragenter/dragleave 深度计数防子元素冒泡抖动。
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, waitFor } from '@testing-library/react';
@@ -196,5 +198,32 @@ describe('Composer 第十三轮 (附件接入)', () => {
     // 第一参数是 attachment ids 数组(空,因没附件)
     const callArgs = onSubmit.mock.calls[0];
     expect(Array.isArray(callArgs?.[0])).toBe(true);
+  });
+
+  /**
+   * dragenter/dragleave 深度计数:光标从 Composer 移到其子元素(textarea)时,
+   * 浏览器派发的是"子元素 dragenter + 父元素 dragleave"一对冒泡事件。
+   * 只看 dragleave 就撤高亮会让边框抖动 —— 这里断言高亮在此期间保持。
+   */
+  it('子元素冒泡的 dragleave 不撤高亮(counter 未归零)', () => {
+    const { container } = render(<Harness onKeyDown={() => {}} />);
+    const composer = container.querySelector('.composer') as HTMLDivElement;
+    const ta = container.querySelector('textarea') as HTMLTextAreaElement;
+
+    // 拖进 Composer → 高亮
+    fireEvent.dragEnter(composer);
+    expect(composer.className).toContain('is-drag-over');
+
+    // 拖进子元素 textarea(冒泡到 composer 记 +1),同时 composer 收到 dragleave(-1)
+    fireEvent.dragEnter(ta);
+    fireEvent.dragLeave(composer);
+    expect(
+      composer.className,
+      'counter 仍 > 0,高亮必须保持(否则抖动)',
+    ).toContain('is-drag-over');
+
+    // 真正离开整区:最后一个 dragleave 让 counter 归零 → 撤高亮
+    fireEvent.dragLeave(ta);
+    expect(composer.className).not.toContain('is-drag-over');
   });
 });

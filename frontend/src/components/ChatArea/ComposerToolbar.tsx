@@ -24,6 +24,8 @@ type StyleOption = (typeof STYLE_OPTIONS)[number];
  *
  * 附件按钮由父组件 Composer 注入 onAttach 回调接成 file picker;
  * 不传 onAttach 时按钮退化为占位(aria-disabled),保持向后兼容。
+ * 类名双挂:`composer-plus` 是测试锁定的结构类名,`composer-attach-btn`
+ * 承载 chat.css 里的圆形描边样式(两者都不能删)。
  *
  * 思考开关:绑定 store 顶层 showThinking(来自 uiPrefs 切片)。
  * 风格选择器:本地 state 驱动,UI-only,本期未下发后端。
@@ -44,7 +46,7 @@ export function ComposerToolbar({ onAttach }: { onAttach?: () => void } = {}) {
             type="button"
             variant="ghost"
             size="icon"
-            className={cn('composer-plus')}
+            className={cn('composer-plus', 'composer-attach-btn')}
             aria-label={onAttach ? '上传附件' : '添加附件 / 截图 / 选 skill'}
             aria-disabled={onAttach ? undefined : 'true'}
             tabIndex={onAttach ? undefined : -1}

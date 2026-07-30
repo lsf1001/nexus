@@ -6,6 +6,7 @@
  *   - 提交时把已上传的 server ids 一并交给父组件(ChatArea 拼到 WS / REST 请求)
  *   - + 按钮(file picker,通过 ComposerToolbar.onAttach 回调)+ 整区拖拽 + textarea paste
  *     三路汇入 useAttachments.addFiles
+ *   - 拖拽高亮用 dragenter/dragleave 深度计数(dragDepthRef)防子元素冒泡抖动
  *   - onSubmit 签名扩成 (attachmentIds: string[]) => void;
  *     旧调用方传入的空函数 0-arg 仍兼容(TS 函数参数协变,JS 默默丢弃多余实参)
  *
@@ -36,9 +37,17 @@ import { ComposerToolbar } from './ComposerToolbar';
 import { useAttachments } from './hooks/useAttachments';
 import type { RefObject } from 'react';
 
-/** Composer 接受的附件 mime / 扩展名列表(给 file picker accept 用) */
+/**
+ * file picker 的 accept 列表。
+ *
+ * 必须与两层白名单的**交集**保持一致,否则用户能在 picker 里选中却被拒:
+ *   - 前端 useAttachments.isAllowedMime:image/* + text/* + application/pdf + application/json
+ *   - 后端 attachments.py SUPPORTED_MIMES
+ * 这里只列纯 mime、不列扩展名 —— 扩展名(如 .py / .ts)绕过 accept 的 mime 过滤,
+ * 但浏览器给出的 file.type 往往为空串或 application/*,反而在 addFiles 里被 reject。
+ */
 const ACCEPT_ATTR =
-  'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,.py,.js,.ts,.tsx,.jsx'
+  'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json'
 
 export interface ComposerProps {
   value: string;
@@ -71,6 +80,8 @@ export function Composer({
     useAttachments(activeProjectId);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
+  /** dragenter/dragleave 冒泡深度计数(见 handleDragEnter 注释),放 ref 避免多余重渲染 */
+  const dragDepthRef = useRef(0);
 
   const handleSend = (): void => {
     const serverIds = uploadedServerIds();
@@ -89,20 +100,46 @@ export function Composer({
     if (files.length > 0) addFiles(files);
   };
 
-  /** Composer 整区 dropzone。drop 时取 dataTransfer.files;preventDefault 防浏览器打开文件。 */
+  /**
+   * Composer 整区 dropzone。drop 时取 dataTransfer.files;preventDefault 防浏览器打开文件。
+   * drop 结束一次性清零 counter(浏览器不会为 drop 补发对应的 dragleave)。
+   */
   const handleDrop = (e: DragEvent<HTMLDivElement>): void => {
     e.preventDefault();
+    dragDepthRef.current = 0;
     setDragging(false);
     const files = Array.from(e.dataTransfer.files ?? []);
     if (files.length > 0) addFiles(files);
   };
 
-  const handleDragOver = (e: DragEvent<HTMLDivElement>): void => {
+  /**
+   * dragenter/dragleave 会从子元素(AttachmentBar / textarea / 按钮)冒泡上来,
+   * 光标在子元素之间移动时会收到"离开旧子元素 + 进入新子元素"一对事件。
+   * 只看 dragleave 就 setDragging(false) 会让高亮抖动,所以用深度计数:
+   * 进入 +1 / 离开 -1,只有归零(真正离开 Composer 整区)才撤高亮。
+   */
+  const handleDragEnter = (e: DragEvent<HTMLDivElement>): void => {
     e.preventDefault();
+    dragDepthRef.current += 1;
     setDragging(true);
   };
 
-  const handleDragLeave = (): void => setDragging(false);
+  /**
+   * dragover 必须 preventDefault,否则浏览器不认这里是合法 drop 目标(不触发 onDrop)。
+   * 同时兜底:若没收到过 dragenter(拖拽中途才挂载 / 测试直接派发 dragover),
+   * 把 counter 垫到 1 再置高亮,免得随后第一个子元素 dragleave 就把高亮撤掉。
+   */
+  const handleDragOver = (e: DragEvent<HTMLDivElement>): void => {
+    e.preventDefault();
+    if (dragDepthRef.current === 0) dragDepthRef.current = 1;
+    setDragging(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>): void => {
+    e.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragging(false);
+  };
 
   /** 触发 hidden <input type="file"> click → 用户选文件 → onChange 转 addFiles */
   const openFilePicker = (): void => fileInputRef.current?.click();
@@ -113,6 +150,7 @@ export function Composer({
         <div className="composer-shell">
           <div
             className={`composer ${dragging ? 'is-drag-over' : ''}`}
+            onDragEnter={handleDragEnter}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
