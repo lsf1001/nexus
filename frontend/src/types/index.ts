@@ -116,6 +116,9 @@ export interface WSMessage {
   content: string;
   session_id?: string;
   title?: string;  // 用于创建新会话时传递标题
+  /** 已上传附件的 server id 列表(可空);后端 sessions.build_prompt 按需拼 multi-part。
+   *  空数组时后端走原纯 text 路径(SPEC §4.4 零回归)。 */
+  attachment_ids?: string[];
 }
 
 export interface Model {

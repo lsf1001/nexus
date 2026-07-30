@@ -29,14 +29,17 @@ export interface UseChatSendArgs {
 }
 
 /**
- * 单一发送入口(供 textarea 回车 / send 按钮 / 澄清表单 / 重试共用)。
+ * 单一发送入口(供 textarea 回车 / send 按钮 / 澄清表单 / 重试 / 附件提交共用)。
  *
- * 行为不变(与原 handleSend 等价):
- *   1. trim 内容,空 / WS 未连 / readyState !== OPEN → setLastError 并 return
+ * 行为(与原 handleSend 等价):
+ *   1. trim 内容 + 检查附件 ids,空 / WS 未连 / readyState !== OPEN → setLastError 并 return
  *   2. setIsLoading(true) + armWatchdog() + 清 input
  *   3. push user + 空 assistant,确保流式 chunk 有地方写
- *   4. 拼 WSMessage,新会话带 title(<=30 字),旧会话带 session_id
- *   5. send(msg)
+ *   4. 拼 WSMessage,新会话带 title(<=30 字;纯附件时 fallback "附件消息"),旧会话带 session_id
+ *   5. 附件 ids 非空时挂到 WSMessage.attachment_ids(后端 sessions.build_prompt 拼 multi-part)
+ *   6. send(msg)
+ *
+ * 第十三轮(2026-07-30):扩成 `(content, attachmentIds?)` 双参;1 参调用等价旧行为。
  */
 export function useChatSend(args: UseChatSendArgs) {
   const {
@@ -59,9 +62,11 @@ export function useChatSend(args: UseChatSendArgs) {
   getReadyStateRef.current = getReadyState;
 
   return useCallback(
-    (content: string) => {
+    (content: string, attachmentIds?: readonly string[]) => {
       const trimmed = content.trim();
-      if (!trimmed) return;
+      // 无文本 + 无附件 → 等价空消息,不发
+      const idsArr = attachmentIds ?? [];
+      if (!trimmed && idsArr.length === 0) return;
       if (!wsConnectedRef.current) {
         setLastError({ message: '连接尚未就绪，请稍后再试', retryable: true, code: 'ws_not_open', at: Date.now() });
         return;
@@ -86,9 +91,14 @@ export function useChatSend(args: UseChatSendArgs) {
       const msg: WSMessage = { content: trimmed };
       const sid = getSessionId();
       if (!sid) {
-        msg.title = trimmed.slice(0, 30);
+        msg.title = trimmed ? trimmed.slice(0, 30) : '附件消息';
       } else {
         msg.session_id = sid;
+      }
+      // 第十三轮:透传 attachment_ids(仅在非空时加字段 — 后端 sessions.build_prompt
+      // 用 truthy 判断,空数组 / 缺字段等价"无附件",走纯 text 路径零回归)。
+      if (idsArr.length > 0) {
+        msg.attachment_ids = [...idsArr];
       }
       send(msg);
     },

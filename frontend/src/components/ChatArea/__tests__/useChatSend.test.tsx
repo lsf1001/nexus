@@ -149,4 +149,55 @@ describe('useChatSend', () => {
     expect((spies.send.mock.calls[0]?.[0] as WSMessage).content).toBe('hello')
     expect((spies.pushUserAndPlaceholder.mock.calls[0]?.[0] as Message).content).toBe('hello')
   })
+
+  /**
+   * 第十三轮(2026-07-30):附件 ids 透传。
+   *   - 无附件 + 空文本 → 不发(零操作)
+   *   - 有附件 + 空文本 → 仍可发(纯附件路径)
+   *   - 有附件 + 文本 → WSMessage.attachment_ids 字段被正确填入
+   */
+  describe('attachment_ids 透传 (第十三轮)', () => {
+    it('无附件 + 空文本不发送', () => {
+      const { args, spies } = makeArgs()
+      const { result } = renderHook(() => useChatSend(args))
+      result.current('', [])
+      expect(spies.send).not.toHaveBeenCalled()
+    })
+
+    it('空文本但有附件 → 仍发送(title fallback "附件消息")', () => {
+      const { args, spies } = makeArgs({ getSessionId: () => null })
+      const { result } = renderHook(() => useChatSend(args))
+      result.current('', ['att_a', 'att_b'])
+      expect(spies.send).toHaveBeenCalledTimes(1)
+      const wsMsg = spies.send.mock.calls[0]?.[0] as WSMessage
+      expect(wsMsg.content).toBe('')
+      expect(wsMsg.title).toBe('附件消息')
+      expect(wsMsg.attachment_ids).toEqual(['att_a', 'att_b'])
+      expect(wsMsg.session_id).toBeUndefined()
+    })
+
+    it('有文本 + 有附件 → attachment_ids 字段透传 + session_id 优先', () => {
+      const { args, spies } = makeArgs({ getSessionId: () => 'sid-1' })
+      const { result } = renderHook(() => useChatSend(args))
+      result.current('看这个文件', ['att_x'])
+      expect(spies.send).toHaveBeenCalledTimes(1)
+      const wsMsg = spies.send.mock.calls[0]?.[0] as WSMessage
+      expect(wsMsg.content).toBe('看这个文件')
+      expect(wsMsg.session_id).toBe('sid-1')
+      expect(wsMsg.attachment_ids).toEqual(['att_x'])
+      expect(wsMsg.title).toBeUndefined()
+    })
+
+    it('有文本但附件数组为空 → 不挂 attachment_ids 字段(走纯 text 路径)', () => {
+      // 后端 sessions.build_prompt 用 truthy 判断,空数组等价"无附件"
+      // → 既能走纯 text 零回归路径,也避免传一个空数组触发意外分支
+      const { args, spies } = makeArgs({ getSessionId: () => 'sid-2' })
+      const { result } = renderHook(() => useChatSend(args))
+      result.current('hello', [])
+      const wsMsg = spies.send.mock.calls[0]?.[0] as WSMessage
+      expect(wsMsg.attachment_ids).toBeUndefined()
+      expect(wsMsg.content).toBe('hello')
+      expect(wsMsg.session_id).toBe('sid-2')
+    })
+  })
 })

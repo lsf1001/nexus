@@ -193,8 +193,11 @@ export function ChatArea({
   useEffect(() => saveDraftEffect(input), [input, saveDraftEffect]);
 
   // === 单一发送入口 ===
-  // clearInput 走自定义 wrapper:不仅 setInput(''),还同步清掉 localStorage
-  // 草稿(否则 debounce 500ms 内 reload 会重新读回已发送的内容)。
+  // 第十三轮(2026-07-30):Composer 提交时把已上传附件的 server ids 一并传给
+  // useChatSend,由它写到 WSMessage.attachment_ids(后端 sessions.build_prompt
+  // 按需拼 multi-part;空数组走纯 text 路径零回归)。clearInput 走自定义
+  // wrapper:不仅 setInput(''),还同步清掉 localStorage 草稿(否则 debounce
+  // 500ms 内 reload 会重新读回已发送的内容)。
   const send = useChatSend({
     wsConnected,
     getReadyState,
@@ -328,7 +331,10 @@ export function ChatArea({
         <Composer
           value={input}
           onChange={setInput}
-          onSubmit={() => send(input)}
+          // 第十三轮:Composer 提交时把已上传附件的 server ids 一并 forward 给 useChatSend,
+          // 由 useChatSend 写到 WSMessage.attachment_ids 字段。Composer's onSubmit 实际
+          // 永远以 (serverIds: string[]) 单参调用,我们接住它传给 send 的第 2 个参数。
+          onSubmit={(serverIds: readonly string[]) => send(input, serverIds)}
           onKeyDown={handleKeyDown}
           placeholder={composerPlaceholder}
           disabled={!wsConnected}

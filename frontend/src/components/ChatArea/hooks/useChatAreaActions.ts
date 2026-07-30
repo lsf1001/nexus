@@ -19,7 +19,10 @@ export interface UseChatAreaActionsArgs {
   setInput: (next: string) => void;
   setIsLoading: (loading: boolean) => void;
   setLastError: (err: null) => void;
-  send: (content: string) => void;
+  /** 第十三轮:send 收 (content, attachmentIds?) 双参。useChatAreaActions 内
+   *  三个调用点都不传附件,旧 1 参签名仍兼容 — TS 函数参数协变,子类型(忽略第 2 参)
+   *  可赋给父类型(声明可传第 2 参)。 */
+  send: (content: string, attachmentIds?: readonly string[]) => void;
   stream: ChatStreamActions;
   armWatchdog: () => void;
 }

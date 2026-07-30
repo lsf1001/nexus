@@ -20,7 +20,13 @@ export interface PendingClarification {
 }
 
 /** 客户端发送入口签名(handleSend / handleRetry / handleClarificationSubmit 都用它) */
-export type SendFn = (msg: { content: string; session_id?: string; title?: string }) => void;
+export type SendFn = (msg: {
+  content: string;
+  session_id?: string;
+  title?: string;
+  /** 已上传附件的 server id 列表(第十三轮 / SPEC §4.1)。可选,空/undefined 时走纯 text 路径。 */
+  attachment_ids?: string[];
+}) => void;
 
 /** WS 帧联合别名(实际 type 是 StreamEvent['type'],这里收窄方便 dispatcher 分发) */
 export type WsFrame = StreamEvent;
