@@ -12,6 +12,7 @@
  *   - chip 主体 → 图片全屏 dialog;非图片弹 tooltip
  */
 import { useEffect, useRef, useState } from 'react'
+import type { ReactElement } from 'react'
 import type { LocalAttachment } from './hooks/useAttachments'
 
 const formatSize = (bytes: number): string => {
@@ -30,7 +31,7 @@ interface AttachmentBarProps {
   onRemove: (id: string) => void
 }
 
-export function AttachmentBar({ attachments, onRemove }: AttachmentBarProps): JSX.Element | null {
+export function AttachmentBar({ attachments, onRemove }: AttachmentBarProps): ReactElement | null {
   const [viewingImage, setViewingImage] = useState<string | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   useEffect(() => {
