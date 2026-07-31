@@ -17,9 +17,11 @@ import {
   createProject as apiCreateProject,
   fetchProjects,
   type CreateProjectInput,
-  type Project,
 } from '@/lib/api';
+import type { Project } from '@/lib/api';
 import { useStore } from '../../store';
+
+export type { Project };
 
 export interface ProjectsSlice {
   projects: Project[];
