@@ -15,6 +15,7 @@
  *      (跨会话预取超出范围,见 Sidebar.tsx 的注释)。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/react';
 import { Sidebar } from '../Sidebar';
 import { useStore } from '../../../store';
@@ -35,21 +36,24 @@ function makeConv(
   };
 }
 
+// WHY 显式签名:vi.fn() 在 TS 5.x 推断为 Mock<Procedure|Constructable>,
+      // 与 SidebarProps 上的精确回调签名不兼容,30 处 TS2322。每字段用
+      // vi.fn<T>() 显式声明参数/返回类型 → Mock<T> 直接可赋值给对应回调 prop。
 interface Harness {
-  onSelectConversation: ReturnType<typeof vi.fn>;
-  onDeleteConversation: ReturnType<typeof vi.fn>;
-  onRenameConversation: ReturnType<typeof vi.fn>;
-  onNewTask: ReturnType<typeof vi.fn>;
-  onOpenPreferences?: ReturnType<typeof vi.fn>;
+  onSelectConversation: Mock<(conv: Conversation) => void>;
+  onDeleteConversation: Mock<(id: string) => void>;
+  onRenameConversation: Mock<(id: string, title: string) => void | Promise<void>>;
+  onNewTask: Mock<() => void>;
+  onOpenPreferences?: Mock<() => void>;
 }
 
 function makeHarness(overrides: Partial<Harness> = {}): Harness {
   return {
-    onSelectConversation: vi.fn(),
-    onDeleteConversation: vi.fn(),
-    onRenameConversation: vi.fn(),
-    onNewTask: vi.fn(),
-    onOpenPreferences: vi.fn(),
+    onSelectConversation: vi.fn<(conv: Conversation) => void>(),
+    onDeleteConversation: vi.fn<(id: string) => void>(),
+    onRenameConversation: vi.fn<(id: string, title: string) => void | Promise<void>>(),
+    onNewTask: vi.fn<() => void>(),
+    onOpenPreferences: vi.fn<() => void>(),
     ...overrides,
   };
 }
