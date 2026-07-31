@@ -81,6 +81,7 @@ function Harness() {
         onSelectConversation={vi.fn()}
         onDeleteConversation={vi.fn()}
         onNewTask={vi.fn()}
+        onRenameConversation={vi.fn()}
         onOpenPreferences={() => setOpen(true)}
       />
       <PreferencesModal open={open} onClose={() => setOpen(false)} />
@@ -118,6 +119,7 @@ describe('模拟人工:设置按钮入口', () => {
         onSelectConversation={vi.fn()}
         onDeleteConversation={vi.fn()}
         onNewTask={vi.fn()}
+        onRenameConversation={vi.fn()}
         onOpenPreferences={vi.fn()}
       />,
     );
@@ -137,6 +139,7 @@ describe('模拟人工:设置按钮入口', () => {
         onSelectConversation={vi.fn()}
         onDeleteConversation={vi.fn()}
         onNewTask={vi.fn()}
+        onRenameConversation={vi.fn()}
         onOpenPreferences={spy}
       />,
     );

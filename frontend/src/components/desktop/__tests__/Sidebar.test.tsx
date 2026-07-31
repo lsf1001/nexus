@@ -37,6 +37,7 @@ const baseProps = {
   wechatInboxCount: 0,
   onSelectConversation: vi.fn(),
   onDeleteConversation: vi.fn(),
+  onRenameConversation: vi.fn(),
   onNewTask: vi.fn(),
 };
 
