@@ -133,14 +133,18 @@ export function useDraft(): UseDraftReturn {
         return;
       }
       const key = draftKey(projectId);
-      pendingTimerRef.current = window.setTimeout(() => {
+      // WHY ((): void => {}):window.setTimeout 返回 number,ref 类型是
+      // ReturnType<typeof setTimeout>(在 node 环境会推为 NodeJS.Timeout),两者
+      // 不直接兼容;用显式 void 返回 + unknown 断言统一两者,避免 lib.dom 和
+      // @types/node 双声明下的 TS2322。
+      pendingTimerRef.current = window.setTimeout((): void => {
         if (input.trim() === '') {
           removeDraft(key);
         } else {
           writeDraft(key, input);
         }
         pendingTimerRef.current = null;
-      }, SAVE_DEBOUNCE_MS);
+      }, SAVE_DEBOUNCE_MS) as unknown as ReturnType<typeof setTimeout>;
     },
     [],
   );
