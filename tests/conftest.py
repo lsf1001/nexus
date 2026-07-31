@@ -32,6 +32,11 @@ def isolate_runtime_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setattr(db, "_INITED", False)
     monkeypatch.setattr(models_config, "MODELS_FILE", models_path)
 
+    # 默认 Project 行由 db.get_db() 首次进入时自动 ensure(避免 28 个 db 测试
+    # FK 失败 — 早期只在 FastAPI lifespan 调,单测无 lifespan)。这里不再显式调
+    # `ensure_default_project`,因为部分测试用自己 fixture 重置 db_path,autouse
+    # 时拿到的 db_path 已被改写,反而写错库。
+
 
 @pytest.fixture(autouse=True)
 def reset_checkpointer_cache() -> None:

@@ -177,13 +177,17 @@ def test_project_meta_normal_path_no_warning(
 
 
 def test_project_meta_default_missing_returns_unknown(monkeypatch: pytest.MonkeyPatch, nexus_home: Path) -> None:
-    """异常边界:连默认 project 都查不到时,退回 ("(未知)", "(未知)"),不抛异常。"""
-    from nexus.backend import db
+    """异常边界:连默认 project 都查不到时,退回 ("(未知)", "(未知)"),不抛异常。
 
-    monkeypatch.setattr(db, "_INITED", False)
-    db.init_db()
-    # 不调 ensure_default_project(),projects 表为空
+    实现细节:_project_meta 找不到传入 id 时先 fallback 到 default;只有 default
+    也查不到时才返 ("(未知)", "(未知)")。
+    本测试验证第二条分支:query_project_row 始终返 None,fallback default 也查不到。
+    WHY mock _query_project_row 而非真的清空 DB:get_db() 现在会自动 ensure
+    default project,projects 表永远有 default 行,无法构造空 DB 场景。
+    """
     from nexus.backend.prompts import project_context
+
+    monkeypatch.setattr(project_context, "_query_project_row", lambda pid: None)
 
     name, path = project_context._project_meta("whatever")
     assert name == "(未知)"

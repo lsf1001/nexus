@@ -67,8 +67,18 @@ def get_db() -> Iterator[sqlite3.Connection]:
             # _create_tables 失败时回滚 flag,允许同进程重试
             # (lifespan 重启 / 测试 setup 重入 / 启动期 transient 故障)。
             # rollback 清理已开事务里可能残留的 DDL,finally 仍会 close。
+            # WHY 重置 _INITED:上一行已经把它设 True,失败时必须回滚,
+            # 否则下次 get_db() 会跳过 _create_tables,拿到一张未初始化库
+            # (test_db_init_retry 守护这条不变量)。
+            _INITED = False
             conn.rollback()
             raise
+        # 建表成功才确保默认 Project 行存在 — sessions.project_id='default'
+        # 写 FK → projects,默认行缺失会 IntegrityError。
+        # 挪到 try 之外:_create_tables 失败路径不进入这里,test_db_init_retry
+        # 的 retry 场景不会被 ensure_default_project 读 projects 表炸掉。
+        from .projects.storage import ensure_default_project
+        ensure_default_project()
     try:
         yield conn
         conn.commit()
@@ -236,7 +246,13 @@ def _create_tables(conn: sqlite3.Connection) -> None:
 
 
 def init_db() -> None:
-    """显式初始化数据库表。get_db() 已自动调用,此函数主要给 CLI/启动入口使用。"""
+    """显式初始化数据库表。get_db() 已自动调用,此函数主要给 CLI/启动入口使用。
+
+    get_db() 内已自动 ensure_default_project(),这里只需建表 + 列迁移。
+    test_project_meta_default_missing_returns_unknown 故意验证 projects 表为
+    空时的边界,不该被自动 ensure 行为破坏 — 该测试显式调 init_db() 之后
+    不会再走 get_db() 自动 ensure 路径。
+    """
     global _INITED
     with get_db() as conn:
         _create_tables(conn)

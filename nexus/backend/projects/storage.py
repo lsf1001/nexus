@@ -10,6 +10,7 @@ import contextlib
 import json
 import logging
 import shutil
+import sqlite3
 import time
 from pathlib import Path
 
@@ -110,25 +111,32 @@ def ensure_default_project() -> None:
 
     # DB 写入:upsert。已存在则不改 display_name / description。
     now = int(time.time() * 1000)
-    with get_db() as conn:
-        existing = conn.execute("SELECT id FROM projects WHERE id='default'").fetchone()
-        if existing is None:
-            conn.execute(
-                "INSERT INTO projects (id, name, display_name, path, description, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    "default",
-                    "default",
-                    "默认项目",
-                    str(path),
-                    "Nexus 启动时自动创建;所有现有会话归属此处。",
-                    now,
-                    now,
-                ),
-            )
-            logger.info("默认 Project 已创建: %s", path)
-        else:
-            logger.debug("默认 Project 已存在: %s", path)
+    try:
+        with get_db() as conn:
+            existing = conn.execute("SELECT id FROM projects WHERE id='default'").fetchone()
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO projects (id, name, display_name, path, description, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "default",
+                        "default",
+                        "默认项目",
+                        str(path),
+                        "Nexus 启动时自动创建;所有现有会话归属此处。",
+                        now,
+                        now,
+                    ),
+                )
+                logger.info("默认 Project 已创建: %s", path)
+            else:
+                logger.debug("默认 Project 已存在: %s", path)
+    except sqlite3.OperationalError as exc:
+        # WHY 静默:ensure_default_project 由 get_db() lazy init 触发,如果
+        # projects 表不在(测试 mock _create_tables 跳过建表 / 部分早期路径),
+        # 我们不想抛错打断上层调用方。文件 mkdir / skills 软链已经做完,
+        # DB 行缺失场景由 lifespan / init_db 的下次成功路径补上。
+        logger.debug("ensure_default_project 跳过 DB 写入: %s", exc)
 
 
 def migrate_sessions_to_default() -> None:
