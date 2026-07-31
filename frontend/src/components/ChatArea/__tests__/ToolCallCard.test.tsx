@@ -248,7 +248,7 @@ describe('ToolCallCard (第九轮)', () => {
       // microtask 队列跑完
       await Promise.resolve();
       await Promise.resolve();
-      const warnCalls = pushSpy.mock.calls.filter((c) => c[0] === 'warn');
+      const warnCalls = pushSpy.mock.calls.filter((c: [unknown, ...unknown[]]) => c[0] === 'warn');
       expect(warnCalls.length).toBeGreaterThan(0);
       expect(warnCalls[0]?.[1] ?? '').toContain('复制失败');
     });

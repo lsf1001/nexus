@@ -85,13 +85,14 @@ describe('MemoryPanel (#14 增强)', () => {
 
   it('点"刷新" → 调 fetchMemory + 期间按钮 disabled', async () => {
     // 让 fetchMemory 挂起 → 期间按钮 disabled
-    let resolveFetch: (() => void) | null = null;
+    // 用对象包装,避免 TS closure narrowing 把 resolveFetch 推成 never
+    const resolveHolder: { fn: (() => void) | undefined } = { fn: undefined };
     const fetchSpy = vi
       .spyOn(useStore.getState(), 'fetchMemory')
       .mockImplementation(
         () =>
           new Promise<void>((resolve) => {
-            resolveFetch = resolve;
+            resolveHolder.fn = resolve;
           }),
       );
     const { container } = render(<MemoryPanel />);
@@ -103,7 +104,7 @@ describe('MemoryPanel (#14 增强)', () => {
     expect(btn.textContent).toContain('刷新中');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     // 完成后按钮恢复
-    if (resolveFetch) resolveFetch();
+    if (resolveHolder.fn) resolveHolder.fn();
     await waitFor(() => {
       expect(btn.disabled).toBe(false);
     });

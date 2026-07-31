@@ -30,7 +30,7 @@ function makeEl(scrollHeight: number, scrollTop: number, clientHeight: number) {
   Object.defineProperty(el, 'clientHeight', { configurable: true, value: clientHeight });
   el.scrollTo = vi.fn(function (this: HTMLElement, opts: { top: number; behavior?: string }) {
     scrollTop = opts.top;
-  });
+  }) as unknown as HTMLElement['scrollTo'];
   return el;
 }
 

@@ -109,7 +109,7 @@ describe('AttachmentBar', () => {
       />,
     )
     const removeButtons = screen.getAllByRole('button', { name: '移除附件' })
-    fireEvent.click(removeButtons[1])
+    fireEvent.click(removeButtons[1]!)
     expect(onRemove).toHaveBeenCalledWith('a2')
   })
 

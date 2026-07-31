@@ -26,7 +26,7 @@ const mockCtx: DesktopShellContext = {
   currentConversationId: null,
   onSelectConversation: () => {},
   onDeleteConversation: () => {},
-  onRenameConversation: () => {},
+  onRenameConversation: async (_id: string, _title: string): Promise<void> => {},
   onNewTask: () => {},
   modelName: 'MiniMax-M3',
   wsConnected: false,
