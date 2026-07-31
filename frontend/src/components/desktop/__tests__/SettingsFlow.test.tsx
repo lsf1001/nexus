@@ -11,6 +11,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
+import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { Sidebar } from '../Sidebar';
 import { PreferencesModal } from '../PreferencesModal';
@@ -88,7 +89,7 @@ function Harness() {
 }
 
 /** 用 MemoryRouter 包一层,因为 PreferencesModal 内 useNavigate 需要 Router 上下文(草稿 tab 用)。 */
-function RoutedHarness(): JSX.Element {
+function RoutedHarness(): ReactElement {
   return (
     <MemoryRouter initialEntries={['/chat']}>
       <Harness />
