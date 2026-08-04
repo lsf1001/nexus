@@ -143,6 +143,99 @@ class TestProfiles:
         register_nexus_profiles()
         assert profiles_module._PROFILES_REGISTERED is True
 
+    def test_harness_profile_field_set_matches_deepagents_0_6_12(self) -> None:
+        """HarnessProfile 字段集合 == 0.6.12 真实签名。
+
+        WHY:0.6.x 之间字段集可能变化(excluded_tools / excluded_middleware /
+        extra_middleware 在 0.6 中期才加)。一旦 deepagents 升 0.7,Nexus 必须
+        重新对照。这个 case 是版本基线,任何字段增删都让 case RED 提醒。
+        """
+        import inspect
+
+        from deepagents.profiles.harness.harness_profiles import HarnessProfile
+
+        actual = set(inspect.signature(HarnessProfile.__init__).parameters)
+        # 7 字段 + self,扣除 self
+        actual.discard("self")
+        expected = {
+            "base_system_prompt",
+            "system_prompt_suffix",
+            "tool_description_overrides",
+            "excluded_tools",
+            "excluded_middleware",
+            "extra_middleware",
+            "general_purpose_subagent",
+        }
+        assert actual == expected, (
+            f"deepagents 0.6.12 HarnessProfile 字段集漂移:actual={sorted(actual)}, "
+            f"expected={sorted(expected)}"
+        )
+
+    def test_general_purpose_subagent_field_set_matches_0_6_12(self) -> None:
+        """GeneralPurposeSubagentProfile 字段集合 == 0.6.12 真实签名。"""
+        import inspect
+
+        from deepagents.profiles.harness.harness_profiles import GeneralPurposeSubagentProfile
+
+        actual = set(inspect.signature(GeneralPurposeSubagentProfile.__init__).parameters)
+        actual.discard("self")
+        expected = {"enabled", "description", "system_prompt"}
+        assert actual == expected, (
+            f"GeneralPurposeSubagentProfile 字段漂移:actual={sorted(actual)}, "
+            f"expected={sorted(expected)}"
+        )
+
+    def test_create_deep_agent_signature_0_6_12(self) -> None:
+        """create_deep_agent 参数集合 == 0.6.12 真实签名(基线)。"""
+        import inspect
+
+        from deepagents.graph import create_deep_agent
+
+        actual = set(inspect.signature(create_deep_agent).parameters)
+        actual.discard("self")
+        expected = {
+            "model",
+            "tools",
+            "system_prompt",
+            "middleware",
+            "subagents",
+            "skills",
+            "memory",
+            "permissions",
+            "backend",
+            "interrupt_on",
+            "response_format",
+            "state_schema",
+            "context_schema",
+            "checkpointer",
+            "store",
+            "debug",
+            "name",
+            "cache",
+        }
+        assert actual == expected, (
+            f"create_deep_agent 参数集漂移:actual={sorted(actual)}, "
+            f"expected={sorted(expected)}\ndiff: actual-only={sorted(actual - expected)}, "
+            f"expected-only={sorted(expected - actual)}"
+        )
+
+    def test_subagent_typeddict_required_keys_0_6_12(self) -> None:
+        """SubAgent / CompiledSubAgent / AsyncSubAgent TypedDict required == 0.6.12。
+
+        这是 2026-08-04 对齐报告 §3/§4 的事实基线:required 字段决定启动期
+        是否需要校验。``AsyncSubAgent`` 把 ``url`` 从 required 降级为
+        optional 是 0.6.12 的事实(报告 §7 TODO 1 的依据)。
+        """
+        from deepagents.middleware.async_subagents import AsyncSubAgent
+        from deepagents.middleware.subagents import CompiledSubAgent, SubAgent
+
+        assert set(SubAgent.__required_keys__) == {"name", "description", "system_prompt"}
+        assert set(CompiledSubAgent.__required_keys__) == {"name", "description", "runnable"}
+        assert set(AsyncSubAgent.__required_keys__) == {"name", "description", "graph_id"}
+        # url 在 0.6.12 降级为 optional(报告 §7 TODO 1)
+        assert "url" not in set(AsyncSubAgent.__required_keys__)
+        assert "url" in set(AsyncSubAgent.__optional_keys__)
+
 
 # ============================================================================
 # _load_async_subagent_specs
