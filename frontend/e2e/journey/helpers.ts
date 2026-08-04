@@ -57,11 +57,17 @@ export function hitlConfirmCard(page: Page): Locator {
   return page.locator('.confirm-card');
 }
 
-/** HITL 批准按钮定位(与 hitl-confirm.spec.ts:86 一致)。
- *  拒绝按钮 selector 在实施时按需从源码 grep 确认(本 plan 不预定义,避免死代码)。
- */
+/** HITL 批准按钮定位(与 hitl-confirm.spec.ts:86 一致) */
 export function hitlApproveButton(page: Page): Locator {
   return page.locator('.confirm-card button.confirm-approve');
+}
+
+/** HITL 拒绝按钮定位(journey-delete-hitl 验证 reject 后文件保留用)。
+ *  selector 与 ConfirmationCard.tsx:56 ``confirm-${opt.decision}`` 对齐;
+ *  options.decision 是后端固定 'approve' / 'reject'(HITL 三态路由)。
+ */
+export function hitlRejectButton(page: Page): Locator {
+  return page.locator('.confirm-card button.confirm-reject');
 }
 
 /** 后端进程是否还活着(/health 200) */

@@ -4,7 +4,7 @@
 平时不加载,不影响生产。
 
 设计:NEXUS_E2E_SCENARIO 环境变量决定返回哪种预定义 AIMessage(tool_calls)。
-支持 7 类工具场景 + 2 类错误注入场景,覆盖 HITL 全部路径 + 错误兜底:
+支持 8 类工具场景 + 2 类错误注入场景,覆盖 HITL 全部路径 + 错误兜底:
 
 工具场景:
   - allow_nexus_write:返回 write_file 写到 .nexus/(应直接 allow,无 HITL)
@@ -14,6 +14,8 @@
   - multi_tool_calls:返回 2 个 tool_calls(1 allow + 1 interrupt)— HITL 批处理
   - reject_then_reflect:返回 write_file 写源码 → HITL → reject → 反思不再写
   - edit_file_interrupt:返回 edit_file 改源码(应 HITL)
+  - delete_interrupt:返回 delete 删 nexus/backend/x.py(deepagents 0.7.4 新增
+    ``delete`` 工具;验证 ``is_write_tool("delete") is True`` → 弹 HITL)
 
 错误注入场景(每次 invoke 都 raise,不走 _build_message):
   - auth_401:抛 openai.AuthenticationError(密钥失效)→ 走 stream_guard → error 帧
@@ -163,6 +165,17 @@ _SCENARIOS: dict[str, list[dict[str, Any]]] = {
                 "file_path": "/Users/yxb/projects/nexus/nexus/backend/agent/_system_prompt.py",
                 "old_string": "def get_project_root() -> Path:",
                 "new_string": "def get_project_root() -> Path:  # E2E mock comment",
+            },
+        },
+    ],
+    # 8. delete 删项目源码 → HITL(deepagents 0.7.4 新增 ``delete`` 工具)
+    # 验证 PathAwareHITLMiddleware 识别 ``is_write_tool("delete") is True`` →
+    # 弹 .confirm-card。spec 在 beforeAll 先创建目标文件,afterAll 兜底删除。
+    "delete_interrupt": [
+        {
+            "name": "delete",
+            "args": {
+                "file_path": "/Users/yxb/projects/nexus/nexus/backend/e2e_delete_target.py",
             },
         },
     ],
