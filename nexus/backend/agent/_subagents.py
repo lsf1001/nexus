@@ -34,6 +34,10 @@ def build_interrupt_on_for_agent(project_root: Path) -> None:
     ``FilesystemPermission`` 的 ``mode="interrupt"`` rules,让 deepagents
     自动从 permissions 生成 ``interrupt_on``(语义最权威)。
 
+    NOTE:0.7.4 的内部实现可能改名 / 改位置,但 Nexus 行为对齐的是
+    :class:`FilesystemPermission` ``mode="interrupt"`` 公开 API,
+    不再依赖内部 ``_make_exact_when_predicate`` 函数。
+
     本函数保留为空签名(返回 ``None``)以兼容历史调用方;``create_agent``
     """
     return None
@@ -52,10 +56,11 @@ def _load_compiled_subagent_specs() -> list[Any]:
       - ``module_path`` (必填,Nexus 自定义):Python 模块路径,如 ``nexus.backend.my_agent``
       - ``factory`` (必填,Nexus 自定义):模块内的可调用名(返回 ``Runnable``)
 
-    0.6.12 对齐事实:``CompiledSubAgent`` TypedDict required={name, description,
-    runnable}。Nexus 把 ``module_path`` + ``factory`` 在加载期合成为 ``runnable``,
-    等价于把字段从"用户视角"重命名为"框架视角",所以 Nexus 校验的 required
-    是 {name, description, module_path, factory},与框架 required 兼容。
+    0.6.12 → 0.7.4 字段集未变:``CompiledSubAgent`` TypedDict required={name,
+    description, runnable}。Nexus 把 ``module_path`` + ``factory`` 在加载期合
+    成为 ``runnable``,等价于把字段从"用户视角"重命名为"框架视角",所以
+    Nexus 校验的 required 是 {name, description, module_path, factory},与框
+    架 required 兼容。
 
     加载失败时记 warning + 跳过该条;不让单条坏配置炸整个 ``create_agent``。
 
@@ -125,15 +130,16 @@ def _load_async_subagent_specs() -> list[Any]:
     服务器,需要 ``LANGGRAPH_API_KEY`` / 自托管 URL / headers 等额外配置。
     没这些就跑不起来。
 
-    JSON 字段(对应 :class:`deepagents.AsyncSubAgent` 0.6.12 TypedDict):
+    JSON 字段(对应 :class:`deepagents.AsyncSubAgent` 0.6.12 → 0.7.4 字段集
+    未变,TypedDict):
       - ``name`` (必填):subagent 唯一标识
       - ``description`` (必填):主代理看到的描述
       - ``graph_id`` (必填):Agent Protocol 服务器上的部署 ID(deployment_id)
       - ``url`` (可选):Agent Protocol server URL;缺省走 LangGraph Platform 默认地址
       - ``headers`` (可选 dict):自托管鉴权 headers
 
-    0.6.12 对齐事实:``AsyncSubAgent`` TypedDict required={name, description,
-    graph_id},url/headers 是 optional。Nexus 历史上允许 url 缺省,
+    0.6.12 → 0.7.4 字段集未变:``AsyncSubAgent`` TypedDict required={name,
+    description, graph_id},url/headers 是 optional。Nexus 历史上允许 url 缺省,
     但漏检 graph_id —— 缺 graph_id 时框架在首次调用才炸(延迟到运行期),
     这里加前端校验,启动期就拒绝。
 

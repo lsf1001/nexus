@@ -1,6 +1,6 @@
 """质量门中间件：拦截写 AGENTS.md 的工具调用,做忠实度评估。
 
-deepagents 0.6.12 的 :class:`MemoryMiddleware` 自动加载 ``AGENTS.md``
+deepagents 0.7.4 的 :class:`MemoryMiddleware` 自动加载 ``AGENTS.md``
 内容并注入 system prompt,LLM 用内置 ``edit_file`` / ``write_file``
 自更新。本中间件在每次 ``edit_file`` / ``write_file`` 命中受保护路径
 （即 ``~/.nexus/AGENTS.md`` 或项目级 ``AGENTS.md``）时,先用

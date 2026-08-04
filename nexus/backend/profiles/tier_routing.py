@@ -1,6 +1,6 @@
 """按 provider:model 注册 HarnessProfile —— Nexus tier 路由。
 
-deepagents 0.6.12 真实 API(从 ``deepagents.profiles`` 公开 re-export):
+deepagents 0.7.4 真实 API(0.6.x 以来字段集未变;从 ``deepagents.profiles`` 公开 re-export):
   - :class:`HarnessProfile` 字段:
     - init_kwargs: 注入 init_chat_model 的 kwargs
     - base_system_prompt: 替换 BASE_AGENT_PROMPT(完整替换 base)

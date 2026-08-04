@@ -13,7 +13,7 @@ WHY 用正则而非 LLM 调 LLM:
   外挂是反模式;当前架构与中间件链顺序见 SPEC.md)。
   正则判定轻量、可单测、可单元回归覆盖。
 
-DeepAgents 0.6.12 middleware 接口: ``wrap_model_call(request, handler)``,
+DeepAgents 0.7.4 middleware 接口: ``wrap_model_call(request, handler)``,
 handler 透传到 LLM 调用,本中间件拦截响应判断是否需要 patch。
 """
 
