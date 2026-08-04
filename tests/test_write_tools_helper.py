@@ -104,6 +104,35 @@ def test_is_write_tool_unknown_unrelated_returns_false() -> None:
     assert is_write_tool("ask_user") is False
 
 
+def test_is_write_tool_delete_file_returns_true() -> None:
+    """deepagents 0.7 新增 ``delete_file`` 工具,HITL 必须识别为写工具。
+
+    0.6.12 没有这个工具,但 Nexus 的 ``WRITE_TOOL_PATTERNS`` 子串兜底
+    (模式 ``"_file"``) 已经自动覆盖。这是为 0.7 升级准备的合约测试 —
+    一旦有人把模式改回精确白名单,这个 case 会立刻 RED 提醒:LLM 调用
+    ``delete_file`` 删除项目源码时,HITL 必须弹窗,不允许无确认写入。
+    """
+    from nexus.backend.permissions.write_tools import is_write_tool
+
+    assert is_write_tool("delete_file") is True
+    # 其它 _file 后缀的删除类工具也走相同兜底
+    assert is_write_tool("remove_file") is True
+    assert is_write_tool("trash_file") is True
+
+
+def test_is_write_tool_delete_directory_returns_false() -> None:
+    """已知 gap:``delete_directory`` 没有 ``_file`` 后缀 → 不被当前 patterns 命中。
+
+    0.7 暂未引入 ``delete_directory``(只引入 ``delete_file``)。若未来
+    框架新增 ``delete_directory``,需要在 ``WRITE_TOOL_PATTERNS`` 补
+    ``"_dir"`` 或 ``"_directory"``,或加精确白名单条目。本 case 用于
+    在补完之前提前 RED,提醒升级时盯 framework 工具集变更。
+    """
+    from nexus.backend.permissions.write_tools import is_write_tool
+
+    assert is_write_tool("delete_directory") is False
+
+
 def test_quality_middleware_invokes_helper_for_write_tool(tmp_path) -> None:
     """QualityGate._is_protected 调用 is_write_tool(edit_file → 命中)。
 

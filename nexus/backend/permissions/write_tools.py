@@ -37,6 +37,14 @@ FILE_TOOLS: frozenset[str] = frozenset(
 # 黑名单兜底模式: 工具名包含这些子串即视为写文件工具。
 # WHY 子串而非正则:deepagents 工具名都是 snake_case,子串 ``in name``
 # 已经覆盖 99% 场景;正则匹配是过度工程,而且要处理 ``.*`` 边界 case。
+#
+# **0.7 升级准备**:deepagents 0.7.0a6 新增 ``delete_file`` 工具。``"_file"``
+# 模式已经覆盖它(``is_write_tool("delete_file") is True``),无需新加 pattern。
+# 若 0.7 后续引入 ``delete_directory`` 这类无 ``_file`` 后缀的删除工具,
+# 在这里补 ``"_dir"`` / ``"_directory"`` 模式即可。回归测试:
+# ``tests/test_write_tools_helper.py::test_is_write_tool_delete_file_returns_true``
+# 锁定当前合约;``test_is_write_tool_delete_directory_returns_false`` 提前
+# 标 gap,补完后该 case 应转 GREEN(记得改 assert)。
 WRITE_TOOL_PATTERNS: tuple[str, ...] = (
     "write_",
     "edit_",
