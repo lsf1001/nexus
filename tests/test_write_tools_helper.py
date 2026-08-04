@@ -55,6 +55,7 @@ def test_is_write_tool_known_write_returns_true() -> None:
 
     assert is_write_tool("edit_file") is True
     assert is_write_tool("write_file") is True
+    assert is_write_tool("delete") is True
     assert is_write_tool("create_file") is True
     assert is_write_tool("apply_patch") is True
     assert is_write_tool("str_replace_editor") is True
@@ -105,17 +106,27 @@ def test_is_write_tool_unknown_unrelated_returns_false() -> None:
 
 
 def test_is_write_tool_delete_file_returns_true() -> None:
-    """deepagents 0.7 新增 ``delete_file`` 工具,HITL 必须识别为写工具。
+    """deepagents 0.7 引入文件删除工具,HITL 必须识别为写工具。
 
-    0.6.12 没有这个工具,但 Nexus 的 ``WRITE_TOOL_PATTERNS`` 子串兜底
-    (模式 ``"_file"``) 已经自动覆盖。这是为 0.7 升级准备的合约测试 —
-    一旦有人把模式改回精确白名单,这个 case 会立刻 RED 提醒:LLM 调用
-    ``delete_file`` 删除项目源码时,HITL 必须弹窗,不允许无确认写入。
+    0.7.4 实测 ``FilesystemMiddleware._FS_TOOL_ORDER`` = ``("ls","read_file",
+    "write_file","edit_file","delete","glob","grep")`` — 工具注册的 ``name``
+    是字面 ``"delete"``(不是 ``"delete_file"``)。HITL/QualityGate 必须能
+    识别两种形式:
+
+      - ``delete``(0.7.4 当前)→ ``FILE_TOOLS`` 精确白名单命中 → True
+      - ``delete_file`` / ``remove_file``(未来若改名)→ ``WRITE_TOOL_PATTERNS``
+        的 ``"_file"`` 兜底模式 → True
+
+    这是 0.6.12 → 0.7.4 升级的核心 HITL 合约。一旦有人把 ``"delete"`` 从
+    白名单移除 / 改名,这个 case 会 RED → LLM 删除项目源码不再触发 HITL,
+    静默破坏安全护栏。
     """
     from nexus.backend.permissions.write_tools import is_write_tool
 
+    # 0.7.4 当前字面工具名
+    assert is_write_tool("delete") is True
+    # 未来若 deepagents 改名为 delete_file,_file 子串模式兜底
     assert is_write_tool("delete_file") is True
-    # 其它 _file 后缀的删除类工具也走相同兜底
     assert is_write_tool("remove_file") is True
     assert is_write_tool("trash_file") is True
 
