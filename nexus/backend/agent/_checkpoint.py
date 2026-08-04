@@ -155,7 +155,7 @@ def _create_store() -> Any:
     约定 / 中间结果)跨进程 / 跨重启存活,跟 checkpoint 同寿命。
     InMemoryStore 重启丢光,等于"用户偏好每次重启都得重写"。
 
-    WHY AsyncSqliteStore:deepagents 0.6.8 的 StoreBackend 走 async 路径
+    WHY AsyncSqliteStore:deepagents 0.6.12 的 StoreBackend 走 async 路径
     (astream_events),同步 SqliteStore 会抛 ``NotImplementedError``。
     """
     import os as _os

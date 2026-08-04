@@ -36,7 +36,7 @@ def _select_filesystem_backend(project_root: Path) -> Any:
     WHY env-gated:LangSmithSandbox / ContextHubBackend 都依赖 LangSmith 账号
     + 配额,生产默认关。只在本地开发 / 评测场景按需启用。
 
-    ⚠️ 所有 execution backend 都跟 FilesystemPermission 互斥(deepagents 0.6.8
+    ⚠️ 所有 execution backend 都跟 FilesystemPermission 互斥(deepagents 0.6.12
     框架限制,源码 ``filesystem.py:737-744``)。开启 = LLM 写源码不再触发
     HITL,源码侧由 confirmation 层兜底。
     """
@@ -118,7 +118,7 @@ def _create_backend(project_root: Path, *, store: BaseStore | None = None):
 
     ⚠️ **execution backend 警告**:
         LocalShellBackend / LangSmithSandbox / ContextHubBackend 让 LLM 可以
-        跑 shell / 远程代码。deepagents 0.6.8 的 FilesystemMiddleware
+        跑 shell / 远程代码。deepagents 0.6.12 的 FilesystemMiddleware
         **不支持同时配 permissions 和 execution backend**(框架会主动禁用
         permissions,源码 ``filesystem.py:737-744``)。开启 = LLM 写源码不再
         触发 HITL,由用户自负风险。建议只在本地开发 / CI 测试环境开启,

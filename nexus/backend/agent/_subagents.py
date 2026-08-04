@@ -27,7 +27,7 @@ def build_interrupt_on_for_agent(project_root: Path) -> None:
     """(已废弃,2026-06-24 删除具体逻辑)。
 
     原实现手动构造 ``interrupt_on`` 的 ``when`` 谓词试图对"未在白名单的路径
-    触发 HITL"。E2E 实测发现该实现与 deepagents 0.6.8 内部的
+    触发 HITL"。E2E 实测发现该实现与 deepagents 0.6.12 内部的
     ``_make_exact_when_predicate`` 语义错位 — 后者直接调 ``_check_fs_permission``,
     而手动版用 regex 白名单匹配,后者在 macOS symlink 等场景下漏判,导致
     "LLM 写项目源码未触发 HITL"。修复:把项目源码目录加入

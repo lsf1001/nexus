@@ -1,4 +1,4 @@
-"""DeepAgents 0.6.8 模块集成测试。
+"""DeepAgents 0.6.12 模块集成测试。
 
 覆盖:
   - ``_create_store``:memory / sqlite 两路 + 异常降级

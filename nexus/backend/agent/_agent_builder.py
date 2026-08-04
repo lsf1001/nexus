@@ -171,7 +171,7 @@ def create_agent(
     # 单一数据源(models.json),绝无缓存滞留。
     from ..middleware.dynamic_identity import dynamic_identity_middleware
 
-    # 上下文自动压缩:由 deepagents 0.6.8 主 agent stack 自动注入
+    # 上下文自动压缩:由 deepagents 0.6.12 主 agent stack 自动注入
     # ``create_summarization_middleware(model, backend)``,trigger 通过
     # ``ResilientRunnable._resolve_model_profile()`` 暴露的 profile 计算:
     #   1. profile 含 max_input_tokens → deepagents 用 ``("fraction", 0.85)``,
