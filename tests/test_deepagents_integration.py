@@ -166,23 +166,44 @@ class TestLoadAsyncSubagentSpecs:
         assert agent_module._load_async_subagent_specs() == []
 
     def test_missing_required_fields_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """缺 name 或 description → 跳过该条 + warning。"""
+        """缺 name/description/graph_id → 跳过该条 + warning。
+
+        0.6.12 ``AsyncSubAgent`` TypedDict required={name, description, graph_id},
+        ``graph_id`` 是 LangGraph 平台 deployment_id,缺了首次调用才炸(延迟到
+        运行期)。Nexus 在加载期就拒,启动期失败 = 启动期可观测。
+        """
         monkeypatch.setenv(
             "NEXUS_ASYNC_SUBAGENTS_JSON",
-            '[{"name":"x"},{"description":"y"}]',
+            '[{"name":"x"},{"description":"y"},{"name":"a","description":"b"}]',
         )
         assert agent_module._load_async_subagent_specs() == []
 
     def test_valid_specs_parsed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """完整 spec → 返回 AsyncSubAgent TypedDict。"""
+        """完整 spec → 返回 AsyncSubAgent TypedDict。
+
+        0.6.12 ``AsyncSubAgent``:required={name, description, graph_id},
+        optional={url, headers}。url 缺省时框架走 LangGraph Platform 默认地址。
+        """
         monkeypatch.setenv(
             "NEXUS_ASYNC_SUBAGENTS_JSON",
-            '[{"name":"remote_writer","description":"远程写作","url":"https://x.example"}]',
+            '[{"name":"remote_writer","description":"远程写作",'
+            '"graph_id":"deploy-123","url":"https://x.example"}]',
         )
         specs = agent_module._load_async_subagent_specs()
         assert len(specs) == 1
         assert specs[0]["name"] == "remote_writer"
         assert specs[0]["url"] == "https://x.example"
+        assert specs[0]["graph_id"] == "deploy-123"
+
+    def test_url_optional(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """url 缺省仍可解析(0.6.12 url 是 optional)。"""
+        monkeypatch.setenv(
+            "NEXUS_ASYNC_SUBAGENTS_JSON",
+            '[{"name":"r","description":"d","graph_id":"g1"}]',
+        )
+        specs = agent_module._load_async_subagent_specs()
+        assert len(specs) == 1
+        assert "url" not in specs[0]
 
 
 # ============================================================================
