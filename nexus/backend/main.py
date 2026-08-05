@@ -27,6 +27,7 @@ from .memory import USER_MEMORY_PATH
 from .models_config import get_active_model
 from .observability import setup_logging
 from .routes import model_config as model_config_routes
+from .routes import plugins as plugins_routes
 from .routes import projects as projects_routes
 from .search import router as search_router
 from .sessions import router as sessions_router
@@ -279,6 +280,8 @@ app.include_router(attachments_router)
 from .routes.asr import router as asr_router  # noqa: E402
 
 app.include_router(asr_router)
+# Round 5 Task 5.1:插件清单路由(GET /api/plugins)
+app.include_router(plugins_routes.router)
 
 # Round 4 T4.4: E2E 诊断端点(GET /api/e2e/last-messages),仅
 # NEXUS_E2E_MOCK=1 时挂载 — 生产路径不应暴露 LLM 注入链路观测面。
