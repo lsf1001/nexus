@@ -24,6 +24,13 @@ DB_PATH = Path.home() / ".nexus" / "nexus.db"
 # 是否已执行过表初始化(进程内单次)
 _INITED = False
 
+# Round 3 Task 3.2:首次 search_messages 调用时触发一次 FTS5 'rebuild',
+# 把 init_db 之前已存在的 messages 行灌进 messages_fts(外部内容表 + triggers
+# 只覆盖 INSERT / UPDATE / DELETE 路径,老行的反向同步需要 'rebuild')。
+# 模块级 bool + global:与同模块 _INITED 标志同模式,见 get_db();副作用
+# 只在首次 search 时跑一次 SQL,后续查询纯走 MATCH,无锁/无线程问题。
+_FTS_REBUILT = False
+
 
 def _get_db_path() -> Path:
     """获取数据库路径，确保目录存在。"""
@@ -252,14 +259,26 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     # content='messages' + content_rowid='rowid' 走 external-content FTS5,
     # 原表 messages 已经存了完整文本,FTS 不重复存,
     # 节省 ~50% 体积;触发器负责把 rowid ↔ 文本双向同步。
-    # Task 3.2 的 search_messages() 测试会跑 MATCH,这里只验 init。
+    # Task 3.2 增补:tokenize='trigram' 让中文也能搜。
+    # 默认 unicode61 tokenizer 把 CJK 字符归到 Lo(按 Unicode 分类),
+    # 不在默认 categories 列表里,导致 "元力股份" 一整段被当作 1 个
+    # token,partial MATCH(如 prefix / 子串)直接 0 命中。
+    # trigram tokenizer 按 3 字符滑动窗口切,中文 / 英文 / 数字统一处理,
+    # 实测 "元力股份" / "BTC" / "基本面" 都能精确 + 前缀匹配。
+    # 限制:查询词长度 < 3 字符时 trigram 不会生成 token,
+    # 单字 / 双字搜索需调用方主动补全(产品上 1-2 字搜索意义不大)。
+    # 迁移:如果 messages_fts 已用旧 tokenizer(<= 88e1a25 提交)存在,
+    # _migrate_messages_fts_to_trigram() 删 triggers + 旧表 + 重建,
+    # 重灌索引由 _rebuild_fts_once() 首次 search 时跑。
+    _migrate_messages_fts_to_trigram(conn)
     conn.executescript(
         """
         CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
             content,
             thinking_content,
             content='messages',
-            content_rowid='rowid'
+            content_rowid='rowid',
+            tokenize='trigram'
         );
         CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
             INSERT INTO messages_fts(rowid, content, thinking_content)
@@ -698,3 +717,70 @@ def get_conversation_history(session_id: str) -> list[dict]:
     """获取会话的历史消息，用于 AI 对话。"""
     messages = get_messages(session_id)
     return [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+
+
+def _migrate_messages_fts_to_trigram(conn: sqlite3.Connection) -> None:
+    """旧 unicode61 tokenizer 的 messages_fts 重建为 trigram,支持中文搜索。
+
+    WHY:Task 3.1(commit 88e1a25)默认 unicode61,中文 partial MATCH 0 命中;
+    Task 3.2 改 trigram,但已存在的 FTS5 表不会自动升级 — 必须 DROP + CREATE。
+    检测:sqlite_master 里 messages_fts 的 CREATE SQL 含 'tokenize='trigram'' 则 no-op。
+    """
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_fts'").fetchone()
+    if row is None:
+        return
+    sql = row[0] or ""
+    if "tokenize='trigram'" in sql:
+        return
+    # 先 DROP 触发器:DROP TABLE 不会级联 DROP 依赖 triggers,留 dangling triggers
+    # 会导致重建同名表时新 triggers DROP 失败,触发器路径坏。
+    conn.execute("DROP TRIGGER IF EXISTS messages_ai")
+    conn.execute("DROP TRIGGER IF EXISTS messages_ad")
+    conn.execute("DROP TRIGGER IF EXISTS messages_au")
+    conn.execute("DROP TABLE IF EXISTS messages_fts")
+    # 老表数据由 _rebuild_fts_once() 首次 search 时跑 'rebuild' 命令反向灌回。
+
+
+def _rebuild_fts_once() -> None:
+    """老 DB 升级后,首次 search 时跑 'rebuild' 把 messages 已有行反向灌进 messages_fts。
+
+    external-content FTS5 + 3 triggers 只同步后续 INSERT/UPDATE/DELETE,老行不在索引里,
+    不 rebuild 用户搜不到历史消息。
+    """
+    global _FTS_REBUILT
+    if _FTS_REBUILT:
+        return
+    with get_db() as conn:
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+    _FTS_REBUILT = True
+
+
+def search_messages(query: str, limit: int = 50) -> list[dict]:
+    """FTS5 全文搜索 messages 表。
+
+    Args:
+        query: FTS5 表达式(支持 OR / AND / "phrase" / prefix* / NEAR)。<3 字符
+            在 trigram tokenizer 下不命中,调用方需补全或包双引号短语。
+        limit: 返回数量上限(默认 50)。
+
+    Returns:
+        list of dict,含 session_id / role / content / snippet / created_at,
+        按 bm25 排序。snippet 用 <mark>...</mark> 高亮,前后最多 32 token。
+    """
+    if not query or not query.strip():
+        return []
+    _rebuild_fts_once()
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT m.session_id, m.role, m.content, m.created_at,
+                   snippet(messages_fts, 0, '<mark>', '</mark>', '…', 32) AS snippet
+            FROM messages_fts
+            JOIN messages m ON m.rowid = messages_fts.rowid
+            WHERE messages_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+            """,
+            (query, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]

@@ -28,6 +28,7 @@ from .models_config import get_active_model
 from .observability import setup_logging
 from .routes import model_config as model_config_routes
 from .routes import projects as projects_routes
+from .search import router as search_router
 from .sessions import router as sessions_router
 from .skills import scan_skills_dir
 
@@ -259,6 +260,8 @@ API_PREFIX = "/api"
 
 # 注册会话路由
 app.include_router(sessions_router)
+# Round 3 Task 3.2:全文搜索路由(/api/search/messages)
+app.include_router(search_router)
 # 注册模型配置路由
 app.include_router(model_config_routes.router)
 # Round 1 SPEC §4.3:Project REST API(Round 1 骨架第三步)
