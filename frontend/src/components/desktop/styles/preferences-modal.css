@@ -723,9 +723,10 @@
   border-radius: 4px;
 }
 
-/* ===== Skills / MCP 面板列表 ===== */
+/* ===== Skills / MCP / Plugins 面板列表 ===== */
 .skills-panel-list,
-.mcp-panel-list {
+.mcp-panel-list,
+.plugins-panel-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -747,10 +748,62 @@
   align-items: center;
 }
 
+/* Plugins 行布局:三行 — 主行(name+version+type) / description / path */
+.plugins-panel-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  font-size: var(--font-sm);
+}
+
+.plugins-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .skills-panel-name,
-.mcp-panel-name {
+.mcp-panel-name,
+.plugins-panel-name {
   color: var(--ink);
   font-weight: 500;
+}
+
+.plugins-panel-version {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+}
+
+.plugins-panel-type {
+  font-size: var(--font-10);
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--ink-2);
+  border-radius: 999px;
+  padding: 1px 8px;
+  flex-shrink: 0;
+  line-height: 1.6;
+  margin-left: auto;
+}
+
+.plugins-panel-description {
+  font-size: var(--font-xs);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.plugins-panel-path {
+  font-size: var(--font-2xs);
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .skills-panel-path,
@@ -778,15 +831,27 @@
 .skills-panel-empty,
 .mcp-panel-loading,
 .mcp-panel-error,
-.mcp-panel-empty {
+.mcp-panel-empty,
+.plugins-panel-loading,
+.plugins-panel-error,
+.plugins-panel-empty {
   font-size: var(--font-sm);
   color: var(--ink-2);
   padding: 16px 8px;
 }
 
 .skills-panel-error,
-.mcp-panel-error {
+.mcp-panel-error,
+.plugins-panel-error {
   color: #d44;
+}
+
+.plugins-panel-empty code {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  background: var(--paper-2);
+  padding: 1px 5px;
+  border-radius: 4px;
 }
 
 /* ===== Drafts tab(SPEC §4.6,2026-07-24)===== */

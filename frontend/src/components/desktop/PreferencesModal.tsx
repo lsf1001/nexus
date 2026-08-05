@@ -14,13 +14,14 @@ import { useAppVersion } from '../../hooks/useAppVersion';
 import { FONT_SCALES, FONT_SCALE_LABEL, type FontScale } from '../../store/slices/uiPrefs';
 import { SkillsPanel } from './SkillsPanel';
 import { McpPanel } from './McpPanel';
+import { PluginsPanel } from './PluginsPanel';
 
 export interface PreferencesModalProps {
   open: boolean;
   onClose: () => void;
 }
 
-type TabId = 'general' | 'skills' | 'mcp' | 'drafts';
+type TabId = 'general' | 'skills' | 'mcp' | 'drafts' | 'plugins';
 
 interface TabDef {
   id: TabId;
@@ -157,6 +158,7 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
     { id: 'general', label: '常规' },
     { id: 'skills', label: 'Skills' },
     { id: 'mcp', label: 'MCP' },
+    { id: 'plugins', label: 'Plugins' },
     { id: 'drafts', label: '草稿' },
   ];
   const [activeTab, setActiveTab] = useState<TabId>('general');
@@ -519,6 +521,23 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps): JSX.
                   当前项目:{panelProjectId}
                 </p>
                 <McpPanel projectId={panelProjectId} />
+              </div>
+            </div>
+          )}
+
+          {/* ===== Tab: Plugins(Round 5 Task 5.2)===== */}
+          {activeTab === 'plugins' && (
+            <div
+              role="tabpanel"
+              id={`preferences-tab-panel-plugins`}
+              aria-labelledby={`preferences-tab-plugins`}
+            >
+              <div className="settings-section">
+                <div className="settings-section-title">PLUGINS</div>
+                <p className="provider-hint">
+                  本地 plugins 全局共享 ~/.nexus/plugins/,不受项目维度限制。
+                </p>
+                <PluginsPanel />
               </div>
             </div>
           )}

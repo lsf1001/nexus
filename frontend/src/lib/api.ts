@@ -281,6 +281,29 @@ export async function fetchMcpToolsForProject(projectId: string): Promise<McpToo
   return (await res.json()) as McpToolsResponse;
 }
 
+// ============ Plugins(Round 5 Task 5.2)============
+
+/** 单条 plugin manifest — 与后端 `nexus/backend/plugins_scanner.py` 字段对齐。 */
+export interface PluginManifest {
+  name: string;
+  version: string;
+  description: string;
+  type: string;
+  path: string;
+}
+
+/** `GET /api/plugins` 返回的包装对象。 */
+export interface PluginsResponse {
+  plugins: PluginManifest[];
+}
+
+/** 列出 ~/.nexus/plugins/ 下扫描到的 manifest。本轮只读,无安装/卸载入口。 */
+export async function fetchPlugins(): Promise<PluginsResponse> {
+  const res = await apiFetch('/api/plugins');
+  if (!res.ok) throw new Error(`读取 plugins 失败: ${res.status}`);
+  return (await res.json()) as PluginsResponse;
+}
+
 // ============ 消息全文搜索(Round 3 Task 3.4)============
 
 export interface SearchResult {
