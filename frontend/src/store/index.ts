@@ -78,6 +78,8 @@ export const useStore = create<Store>()(
         starredIds: state.starredIds,
         // activeProjectId:跨会话保留当前激活 project,避免每次启动重置到 default
         activeProjectId: state.activeProjectId,
+        // Round 6.1:per-session 回复风格,跨 reload 保留用户偏好
+        sessionStyles: state.sessionStyles,
       }),
       skipHydration: true,
     }
