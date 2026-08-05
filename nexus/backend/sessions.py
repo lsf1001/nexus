@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import threading
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 
+from .agent._system_prompt import reload_system_prompt
 from .api.ws import require_token
 from .db import (
     add_message,
@@ -24,6 +26,7 @@ from .db import (
     purge_old_sessions,
     restore_session,
     update_session,
+    update_session_style,
 )
 from .share import render_session_markdown
 
@@ -295,3 +298,40 @@ async def export_session_markdown(session_id: str) -> PlainTextResponse:
     messages = get_messages(session_id)
     body = render_session_markdown(session, messages)
     return PlainTextResponse(content=body, media_type="text/markdown; charset=utf-8")
+
+
+# ============================================================================
+# Round 6.1: PATCH /sessions/{id} — 风格更新 + cache invalid
+# ============================================================================
+
+
+class SessionStylePatch(BaseModel):
+    """PATCH /api/sessions/{id} body schema。
+
+    WHY 单字段 PATCH: 本期只 style; 后续加 title / show_thinking 等
+    都走这同一 endpoint, BodyModel 加字段。
+    """
+
+    style: Literal["default", "concise", "professional"]
+
+
+@router.patch("/{session_id}", response_model=None)
+async def patch_session(session_id: str, body: SessionStylePatch) -> dict:
+    """更新会话属性(目前仅支持 style)。
+
+    触发 system prompt 缓存清空 —— 未来若 style 进 cache 必须 invalid
+    (Round 6.1 已 multi-bucket, 但 PATCH 仍 reload 兜底, 确保其它
+    未覆盖的 cache 维度也清)。
+
+    Returns:
+        ``{"ok": True, "style": "<新风格>"}``。
+
+    Raises:
+        HTTPException 400: style 不合法 / session 不存在。
+    """
+    try:
+        update_session_style(session_id, body.style)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    reload_system_prompt()
+    return {"ok": True, "style": body.style}
