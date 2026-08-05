@@ -249,10 +249,10 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     # WHY:Sidebar 当前只按 title 搜索,"我昨天那条说 BTC 的在哪里?"
     # 没法用。FTS5 给 messages.content / thinking_content 建倒排索引,
     # 配合 3 triggers 保持同步(insert / delete / update)。
-    # content='messages' + content_rowid='rowid' 走 contentless FTS5,
+    # content='messages' + content_rowid='rowid' 走 external-content FTS5,
     # 原表 messages 已经存了完整文本,FTS 不重复存,
     # 节省 ~50% 体积;触发器负责把 rowid ↔ 文本双向同步。
-    # 见 tests/test_db_fts5_init.py + tests/test_search_messages.py。
+    # Task 3.2 的 search_messages() 测试会跑 MATCH,这里只验 init。
     conn.executescript(
         """
         CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

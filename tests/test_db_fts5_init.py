@@ -46,7 +46,12 @@ def test_init_db_creates_messages_fts() -> None:
 
 
 def test_messages_fts_triggers_sync_insert() -> None:
-    """INSERT messages 后 messages_fts 自动同步(ai trigger 触发)。"""
+    """INSERT messages 后 messages_fts 自动同步(ai trigger 触发)。
+
+    用 ``MATCH`` 验证倒排索引真有 BTC token,而不是 ``COUNT(*)`` —
+    后者走 base table ``messages``(external-content FTS5 的特性),
+    删 trigger 仍恒真,无法测出 ai trigger 的同步行为。
+    """
     db.init_db()
     sid = db.create_session(session_id="sess-fts", channel="test")
     db.add_message(
@@ -56,12 +61,19 @@ def test_messages_fts_triggers_sync_insert() -> None:
         content="BTC 行情怎么样",
     )
     with db.get_db() as conn:
-        n = conn.execute("SELECT COUNT(*) FROM messages_fts").fetchone()[0]
-    assert n == 1
+        hits = conn.execute(
+            "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH ?",
+            ("BTC",),
+        ).fetchone()[0]
+    assert hits == 1
 
 
 def test_messages_fts_triggers_sync_delete() -> None:
-    """DELETE messages 后 messages_fts 自动同步(ad trigger 触发,delete 命令)。"""
+    """DELETE messages 后 messages_fts 自动同步(ad trigger 触发)。
+
+    先 ``MATCH 'deleted'`` 确认 token 进索引,DELETE 后再 ``MATCH``
+    验 == 0 — 走倒排索引才能测出 ad trigger 是否真同步。
+    """
     db.init_db()
     sid = db.create_session(session_id="sess-del", channel="test")
     db.add_message(
@@ -71,11 +83,17 @@ def test_messages_fts_triggers_sync_delete() -> None:
         content="will be deleted",
     )
     with db.get_db() as conn:
-        n_before = conn.execute("SELECT COUNT(*) FROM messages_fts").fetchone()[0]
+        before = conn.execute(
+            "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH ?",
+            ("deleted",),
+        ).fetchone()[0]
         conn.execute("DELETE FROM messages WHERE id = ?", ("msg-del-1",))
-        n_after = conn.execute("SELECT COUNT(*) FROM messages_fts").fetchone()[0]
-    assert n_before == 1
-    assert n_after == 0
+        after = conn.execute(
+            "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH ?",
+            ("deleted",),
+        ).fetchone()[0]
+    assert before == 1
+    assert after == 0
 
 
 def test_messages_fts_triggers_sync_update() -> None:
