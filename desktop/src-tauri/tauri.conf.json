@@ -48,7 +48,8 @@
       "minimumSystemVersion": "10.15",
       "entitlements": "entitlements.plist",
       "signingIdentity": null,
-      "providerShortName": null
+      "providerShortName": null,
+      "infoPlist": "Info.plist"
     },
     "resources": [
       "../../release/nexus-runtime/",
