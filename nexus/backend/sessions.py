@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 
 from .api.ws import require_token
 from .db import (
@@ -24,6 +25,7 @@ from .db import (
     restore_session,
     update_session,
 )
+from .share import render_session_markdown
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"], dependencies=[Depends(require_token)])
 
@@ -272,3 +274,24 @@ async def add_message_to_session(session_id: str, body: dict) -> dict:
 
     message_id = str(uuid.uuid4())
     return add_message(message_id, session_id, role, content, thinking_content)
+
+
+@router.get("/{session_id}/export.md", response_class=PlainTextResponse)
+async def export_session_markdown(session_id: str) -> PlainTextResponse:
+    """导出整个会话为 markdown(纯文本,text/markdown; charset=utf-8)。
+
+    给用户提供「把对话贴到公众号 / GitHub / 邮件附件」的便携路径。
+    markdown 渲染格式与 :func:`nexus.backend.share.render_session_markdown`
+    一致(share 公开链接 + 本地导出看到同一份格式)。
+
+    WHY 单独 endpoint 而不是 query param ``?format=md``:
+    1. ``.md`` 后缀让 curl / 浏览器直接以 attachment 形式下载;
+    2. RESTful 资源导向 — 每个 URL 一种表示,不变换语义;
+    3. 未来加 ``export.json`` / ``export.html`` 不用碰现有 endpoint。
+    """
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    messages = get_messages(session_id)
+    body = render_session_markdown(session, messages)
+    return PlainTextResponse(content=body, media_type="text/markdown; charset=utf-8")
