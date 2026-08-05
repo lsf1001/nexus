@@ -280,3 +280,37 @@ export async function fetchMcpToolsForProject(projectId: string): Promise<McpToo
   if (!res.ok) throw new Error(`读取 MCP 工具失败: ${res.status}`);
   return (await res.json()) as McpToolsResponse;
 }
+
+// ============ 消息全文搜索(Round 3 Task 3.4)============
+
+export interface SearchResult {
+  session_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  /** SQLite FTS5 snippet() 生成,含 <mark>...</mark> 高亮,前端 dangerouslySetInnerHTML 渲染 */
+  snippet: string;
+  created_at: string;
+}
+
+export interface SearchMessagesResponse {
+  results: SearchResult[];
+  count: number;
+}
+
+/**
+ * 全局搜索消息正文 — GET /api/search/messages?q=...&limit=50。
+ *
+ * 后端走 SQLite FTS5(nexus/backend/search.py),snippet 字段已经含 <mark> 高亮,
+ * 前端用 dangerouslySetInnerHTML 渲染。注意 content 是完整文本,snippet 是
+ * 摘要(高亮 + 上下文),UI 上展示 snippet 就够,content 留给将来"点开看全
+ * 文"扩展。
+ */
+export async function searchMessages(q: string, limit = 50): Promise<SearchMessagesResponse> {
+  const qs = new URLSearchParams({ q, limit: String(limit) });
+  const res = await apiFetch(`/api/search/messages?${qs.toString()}`);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`搜索失败: ${res.status} ${detail}`);
+  }
+  return (await res.json()) as SearchMessagesResponse;
+}

@@ -1,11 +1,16 @@
 import { useEffect } from 'react';
 import { useStore } from '../../../store';
+import { useGlobalSearchStore } from '../store/useGlobalSearchStore';
 
 export interface UseGlobalShortcutsOptions {
   /** Cmd+N / Ctrl+N 新建对话 */
   onNewTask?: () => void;
   /** Cmd+K / Ctrl+K 聚焦 sidebar 搜索框 */
   onFocusSearch?: () => void;
+  /** Cmd+F / Ctrl+F 唤起全局消息搜索面板(Round 3 Task 3.4)
+   *  — 跟 onFocusSearch 互不冲突:Cmd+K 走 sidebar input,Cmd+F 走
+   *    全局浮层(搜的是后端 FTS5 历史消息,而不是 sidebar 已有会话标题) */
+  onOpenGlobalSearch?: () => void;
   /** Cmd+/ / Ctrl+/ 聚焦 composer textarea */
   onFocusComposer?: () => void;
   /** Esc 关闭最上层 modal(优先 .preferences-modal-overlay,其次 .model-config-modal-overlay / .wechat-plugin-modal-overlay / .setup-overlay) */
@@ -46,7 +51,16 @@ export interface UseGlobalShortcutsOptions {
  * modKey = e.metaKey || e.ctrlKey,让 macOS / Win / Linux 通用。
  */
 export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
-  const { onNewTask, onFocusSearch, onFocusComposer, onCloseModal, onZoomIn, onZoomOut, onZoomReset } = options;
+  const {
+    onNewTask,
+    onFocusSearch,
+    onOpenGlobalSearch,
+    onFocusComposer,
+    onCloseModal,
+    onZoomIn,
+    onZoomOut,
+    onZoomReset,
+  } = options;
 
   useEffect(() => {
     const isTextInput = (target: EventTarget | null): boolean => {
@@ -73,6 +87,15 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
         if (key === 'k' && !e.shiftKey) {
           e.preventDefault();
           onFocusSearch?.();
+          return;
+        }
+        // Round 3 Task 3.4:Cmd+F / Ctrl+F 唤起全局消息搜索面板。
+        // 走全局 useGlobalSearchStore 而不是 options 回调,让 hook 不必知道
+        // 哪个 component 负责渲染 panel — DesktopShell 挂一次组件就够。
+        if (key === 'f' && !e.shiftKey) {
+          e.preventDefault();
+          useGlobalSearchStore.getState().setOpen(true);
+          onOpenGlobalSearch?.();
           return;
         }
         if (key === '/' && !e.shiftKey) {
@@ -117,7 +140,16 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onNewTask, onFocusSearch, onFocusComposer, onCloseModal, onZoomIn, onZoomOut, onZoomReset]);
+  }, [
+    onNewTask,
+    onFocusSearch,
+    onOpenGlobalSearch,
+    onFocusComposer,
+    onCloseModal,
+    onZoomIn,
+    onZoomOut,
+    onZoomReset,
+  ]);
 }
 
 /** 实用工具:focus selector 对应元素,失败 fallback 到 querySelector。 */

@@ -10,7 +10,9 @@ import { useConversationCrud } from './hooks/useConversationCrud';
 import { PreferencesModal } from './PreferencesModal';
 import { ShellLayout } from './ShellLayout';
 import { CommandPalette } from './CommandPalette';
+import { GlobalSearchModal } from './GlobalSearchModal';
 import { WeChatModal } from './WeChatModal';
+import { useGlobalSearchStore } from './store/useGlobalSearchStore';
 import { FONT_SCALE_LABEL } from '../../store/slices/uiPrefs';
 import { useToastStore } from '../../store/useToast';
 import type { Conversation } from '../../types';
@@ -79,6 +81,8 @@ export function DesktopShell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [wechatOpen, setWechatOpen] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
+  const globalSearchOpen = useGlobalSearchStore((s) => s.isOpen);
+  const setGlobalSearchOpen = useGlobalSearchStore((s) => s.setOpen);
 
   const navigate = useNavigate();
 
@@ -111,6 +115,7 @@ export function DesktopShell() {
   useGlobalShortcuts({
     onNewTask: handleNewTask,
     onFocusSearch: () => setPaletteOpen(true),
+    onOpenGlobalSearch: () => setGlobalSearchOpen(true),
     onFocusComposer: () => focusElement('.composer-textarea'),
     onCloseModal: () => closeTopModal(),
     onZoomIn: () => cycleFontScale(+1),
@@ -188,6 +193,28 @@ export function DesktopShell() {
         onOpenWechat={handleOpenWechat}
         conversations={conversations}
         onSelectConversation={onSelectConversation}
+      />
+      <GlobalSearchModal
+        open={globalSearchOpen}
+        onClose={() => setGlobalSearchOpen(false)}
+        onSelect={(sid) => {
+          // useConversationCrud.onSelectConversation 需要整个 Conversation 对象,
+          // 这里只拿到 sessionId,从 conversations 列表反查(或构造最小 stub)
+          const conv = conversations.find((c) => c.id === sid);
+          if (conv) {
+            void onSelectConversation(conv);
+          } else {
+            // 列表里没有(可能被删) → 构造 stub 触发 select 流程(messages 会拉空)
+            void onSelectConversation({
+              id: sid,
+              title: '历史会话',
+              messages: [],
+              createdAt: new Date(),
+              updatedAt: new Date().toISOString(),
+            });
+          }
+          navigate('/chat');
+        }}
       />
       <WeChatModal open={wechatOpen} onClose={handleCloseWechat} />
     </>
