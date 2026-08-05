@@ -63,7 +63,7 @@ def _append_project_context(base: str, active_project_id: str | None) -> str:
 _TRAINING_BIAS_BLACKLIST_TEXT = " / ".join(sorted(DIRECTIVES.training_bias_blacklist))
 
 
-def _build_system_prompt(model_name: str = "") -> str:
+def _build_system_prompt(model_name: str = "", style: str = "default") -> str:
     """构建系统提示词的**静态部分** —— 与模型无关的产品层规则。
 
     2026-06-29 重构(对齐 DeepAgents 框架):
@@ -73,12 +73,19 @@ def _build_system_prompt(model_name: str = "") -> str:
       deepagents HarnessProfile 按 ``provider:model`` 自动挂载
       ``system_prompt_suffix``,**不在本函数硬拼**。
 
+    2026-08-05 Round 6.1:加 ``style`` 参数。
+      WHY:deepagents graph.py:911-924 在 agent 构造时把 system_prompt
+      字符串固化,运行期改 messages[0] 已晚。style 必须在 prompt 构造
+      阶段注入,然后通过 get_agent(style=...) 触发 agent 重建。
+      三种风格(default / concise / professional)对应 3 个 cache bucket。
+
     Args:
         model_name: **保留参数仅为向后兼容**,实际不影响本函数输出。
-            缓存 key 简化为 ``"__default__"``,整个进程一份即可。
+        style: 'default' / 'concise' / 'professional';非 default 时
+            末尾追加对应风格的 directive 段。
 
     Returns:
-        与激活模型无关的 system prompt 字符串。
+        与激活模型无关 + 当前 style 维度的 system prompt 字符串。
     """
     identity = f"""【身份】
 你是 Nexus,夜小白科技有限公司打造的 AI 智能助理。
@@ -236,41 +243,45 @@ ask_user 会暂停当前回合,前端弹出结构化澄清表单(候选项 / 自
     if skills_block:
         parts.append(skills_block)
 
+    # Round 6.1:风格段注入
+    # WHY 放最后:风格是用户偏好(回复口吻),产品身份 / 规则 / skills 优先;
+    # 风格段只是末尾追加,不改既有 parts 拼接顺序。
+    if style != "default":
+        from nexus.backend.styles import get_style_directive
+
+        directive = get_style_directive(style)
+        if directive:
+            parts.append(directive)
+
     return "\n\n".join(parts)
 
 
 _CACHED_PROMPT: dict[str, str] = {}
 
 
-def get_system_prompt(model_name: str = "") -> str:
-    """获取系统提示词(带缓存,单 bucket)。
+def get_system_prompt(model_name: str = "", style: str = "default") -> str:
+    """获取系统提示词(带缓存,按 model+style+project 三维 key)。
 
-    WHY 单 bucket:
-      2026-06-29 第三轮重构后,``_build_system_prompt`` 输出的字符串**与激活
-      模型无关**(FACT 块由 :class:`DynamicIdentityMiddleware` 在每次 LLM
-      调用前实时注入)。不同 model_name / 不同 active model 拼出来的字符串
-      完全一致 → 不需要分桶,一份缓存覆盖所有场景。
-
-      这是相对第二轮的简化:第二轮 cache key 是 ``"model@active_name"``,
-      目的是"切模型时强制重算 prompt 让新 prompt 里的 FACT 反映新模型";
-      现在 FACT 已经从 prompt 字符串里移走,缓存滞留问题从根上消失。
-
-      2026-07-23 增加第二段拼接 ``<project_context>``,但 project 切换
-      已经通过 ``set_active_project_id`` 清缓存,base + context 拼好后
-      一起缓存,单 bucket 即可。
+    WHY 多 bucket:
+      Round 6.1 加 style 维度后,prompt 字符串依赖 style 参数;
+      cache key 从 ``"__default__"`` 扩到 ``f"{model_name}:{style}:{project_id}"``,
+      切换风格 / 切换 project 时各自命中独立 bucket,避免清整个 cache。
 
     Args:
-        model_name: **保留参数仅为向后兼容**,不再影响缓存键。
+        model_name: **保留参数仅为向后兼容**,不再影响缓存键(model 维度已
+            与 prompt 字符串解耦,FACT 块由 DynamicIdentityMiddleware 注入)。
+        style: 'default' / 'concise' / 'professional';影响 cache key。
 
     Returns:
-        与激活模型无关 + 当前激活 Project 的 system prompt 完整字符串。
+        与激活模型无关 + 当前 style + 当前 Project 的 system prompt 完整字符串。
     """
     global _CACHED_PROMPT
-    cached = _CACHED_PROMPT.get("__default__")
+    cache_key = f"{model_name}:{style}:{_ACTIVE_PROJECT_ID}"
+    cached = _CACHED_PROMPT.get(cache_key)
     if cached is None:
-        base = _build_system_prompt(model_name)
+        base = _build_system_prompt(model_name, style=style)
         cached = _append_project_context(base, _ACTIVE_PROJECT_ID)
-        _CACHED_PROMPT["__default__"] = cached
+        _CACHED_PROMPT[cache_key] = cached
     return cached
 
 
