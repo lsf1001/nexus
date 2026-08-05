@@ -34,6 +34,7 @@ import { openContextMenuAt } from '../../lib/useContextMenuTrigger';
 import { useStore } from '@/store';
 import { AttachmentBar } from './AttachmentBar';
 import { ComposerToolbar } from './ComposerToolbar';
+import { MicButton } from './MicButton';
 import { useAttachments } from './hooks/useAttachments';
 import type { RefObject } from 'react';
 
@@ -170,6 +171,10 @@ export function Composer({
             />
             <div className="composer-bottom">
               <ComposerToolbar onAttach={openFilePicker} />
+              <MicButton
+                onTranscribed={(text) => onChange(value ? `${value} ${text}` : text)}
+                enabled={!disabled}
+              />
               {isLoading ? (
                 <button
                   type="button"

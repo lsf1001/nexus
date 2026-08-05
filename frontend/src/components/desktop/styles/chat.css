@@ -1738,3 +1738,32 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ===== MicButton (Round 4 T4.2,2026-08-05 加) ===== */
+.mic-button {
+  position: relative;
+  /* 默认 ghost(透明 + hover 才出底色);recording 时切 destructive */
+}
+
+.mic-button-recording {
+  animation: mic-button-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mic-button-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55); }
+  50%      { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+}
+
+.mic-button-elapsed {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: var(--danger, #dc2626);
+  color: #fff;
+  pointer-events: none;
+}
