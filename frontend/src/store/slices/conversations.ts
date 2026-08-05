@@ -20,6 +20,9 @@ import { DEFAULT_MODEL } from '../../lib/config';
  *
  * 命名稳定:setter 名与原 useStore 完全一致(Plan 4 §Phase 5 迁移约束)。
  */
+/** 搜索作用域:'title' 只匹配 title(默认);'all' 走 /api/search/messages。 */
+export type SearchScope = 'title' | 'all';
+
 export interface ConversationsSlice {
   conversationMessages: Message[];
   models: Model[];
@@ -28,6 +31,8 @@ export interface ConversationsSlice {
   isLoading: boolean;
   /** 用户点 stop 后置 true;WS handler 写入前查这个 gate,防止"已停止"标记被覆盖。 */
   streamingPaused: boolean;
+  /** Sidebar 搜索作用域(Round 3 Task 3.5):title 仅本地匹配;all 走后端 FTS5。 */
+  searchScope: SearchScope;
   setConversationMessages: (messages: Message[]) => void;
   clearConversationMessages: () => void;
   setModels: (models: Model[]) => void;
@@ -37,6 +42,7 @@ export interface ConversationsSlice {
   /** 把 patch 写到 assistant 占位(自动检查 streamingPaused gate);无 placeholder 时建。 */
   appendAssistantPatch: (patch: { content?: string; thinking?: string }) => void;
   setStreamingPaused: (paused: boolean) => void;
+  setSearchScope: (scope: SearchScope) => void;
 }
 
 export const createConversationsSlice: StateCreator<ConversationsSlice, [], [], ConversationsSlice> = (set, get) => ({
@@ -46,6 +52,7 @@ export const createConversationsSlice: StateCreator<ConversationsSlice, [], [], 
   modelName: DEFAULT_MODEL,
   isLoading: false,
   streamingPaused: false,
+  searchScope: 'title',
   setConversationMessages: (messages) => set({ conversationMessages: messages }),
   clearConversationMessages: () => set({ conversationMessages: [] }),
   setModels: (models) => set({ models }),
@@ -78,4 +85,5 @@ export const createConversationsSlice: StateCreator<ConversationsSlice, [], [], 
     set({ conversationMessages: cloned });
   },
   setStreamingPaused: (paused) => set({ streamingPaused: paused }),
+  setSearchScope: (scope) => set({ searchScope: scope }),
 });

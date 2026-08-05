@@ -4,6 +4,7 @@ import { useAppVersion } from '../../hooks/useAppVersion';
 import type { Conversation } from '../../types';
 import { ProjectDropdown } from './ProjectDropdown';
 import { NewProjectDrawer } from './NewProjectDrawer';
+import { searchMessages, type SearchResult } from '../../lib/api';
 
 export interface SidebarProps {
   conversations: Conversation[];
@@ -18,6 +19,10 @@ export interface SidebarProps {
 
 /** 删除二次确认按钮停留时长(ms),超时自动取消避免永久占位。 */
 const DELETE_CONFIRM_TIMEOUT_MS = 5_000;
+/** 'all' 搜索 debounce(200ms 跟 GlobalSearchModal 一致 — 避免每按一键打后端)。 */
+const SEARCH_DEBOUNCE_MS = 200;
+/** 'all' 模式默认请求上限;后端 FTS5 上限 50/页(Round 3 Task 3.4)。 */
+const SEARCH_ALL_LIMIT = 50;
 
 /**
  * 左侧栏 — 极简单栏。
@@ -46,7 +51,12 @@ export function Sidebar({
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const toggleStarred = useStore((s) => s.toggleStarred);
   const starredIds = useStore((s) => s.starredIds);
+  const searchScope = useStore((s) => s.searchScope);
+  const setSearchScope = useStore((s) => s.setSearchScope);
   const appVersion = useAppVersion();
+
+  // 全部模式:'all' 时调 searchMessages,命中 session 集合用来排序 + 显示 snippet。
+  const [allResults, setAllResults] = useState<SearchResult[]>([]);
 
   const sortedConversations = useMemo(() => {
     const byUpdated = [...conversations].sort((a, b) => {
@@ -63,22 +73,79 @@ export function Sidebar({
   }, [conversations, starredIds]);
 
   const q = query.trim();
-  // 搜索只匹配 title — 列表接口不返 messages 正文,跨会话预取会爆内存。
-  // 行业惯例(ChatGPT / Claude Desktop)只搜标题;搜不到的关键词请去 ChatArea 里翻。
+  // 标题模式:只匹配 title — 列表接口不返 messages 正文,跨会话预取会爆内存。
+  // 全部模式:调 searchMessages,q 非空时所有 conv 都参与渲染(不按命中过滤),
+  // 命中会话通过 matchedSessionIds 提到前面 + 在 title 下渲染 snippet 摘要。
+  const matchedSessionIds = useMemo(() => {
+    if (searchScope !== 'all') return null;
+    const set = new Set<string>();
+    for (const r of allResults) set.add(r.session_id);
+    return set;
+  }, [searchScope, allResults]);
+
   const filteredConversations = useMemo(() => {
     if (!q) return sortedConversations;
-    const lowerQ = q.toLowerCase();
-    return sortedConversations.filter((conv) => {
-      const title = conv.title || '新对话';
-      return title.toLowerCase().includes(lowerQ);
+    if (searchScope === 'title') {
+      const lowerQ = q.toLowerCase();
+      return sortedConversations.filter((conv) => {
+        const title = conv.title || '新对话';
+        return title.toLowerCase().includes(lowerQ);
+      });
+    }
+    // 'all' — 全展示,matchedSessionIds 在渲染层排序前置
+    return sortedConversations;
+  }, [q, sortedConversations, searchScope]);
+
+  // 全部模式:debounce 调 searchMessages;切换 scope/title 时清理。
+  useEffect(() => {
+    if (searchScope !== 'all') {
+      setAllResults([]);
+      return;
+    }
+    if (!q) {
+      setAllResults([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      searchMessages(q, SEARCH_ALL_LIMIT)
+        .then((resp) => setAllResults(resp.results))
+        .catch(() => setAllResults([]));
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [q, searchScope]);
+
+  // 第一段 snippet-by-session 映射(每个 session 只取第一条作为预览)。
+  const snippetBySession = useMemo(() => {
+    const map = new Map<string, SearchResult>();
+    for (const r of allResults) {
+      if (!map.has(r.session_id)) map.set(r.session_id, r);
+    }
+    return map;
+  }, [allResults]);
+
+  // 排序:命中在前(组内按 updatedAt),然后 starred,然后非命中。
+  const orderedConversations = useMemo(() => {
+    if (searchScope !== 'all' || !q || !matchedSessionIds) {
+      return filteredConversations;
+    }
+    return [...filteredConversations].sort((a, b) => {
+      const aHit = matchedSessionIds.has(a.id) ? 1 : 0;
+      const bHit = matchedSessionIds.has(b.id) ? 1 : 0;
+      if (aHit !== bHit) return bHit - aHit;
+      const ta = new Date(a.updatedAt || a.createdAt.toISOString()).getTime();
+      const tb = new Date(b.updatedAt || b.createdAt.toISOString()).getTime();
+      return tb - ta;
     });
-  }, [q, sortedConversations]);
+  }, [filteredConversations, matchedSessionIds, searchScope, q]);
 
   const renderTask = (conv: Conversation) => {
     const active = conv.id === currentConversationId;
     const title = conv.title || '新对话';
     const starred = starredIds.includes(conv.id);
     const handleSelect = (): void => onSelectConversation(conv);
+    const showSnippet =
+      searchScope === 'all' && q.length > 0 && snippetBySession.has(conv.id);
+    const snippet = showSnippet ? snippetBySession.get(conv.id) : undefined;
 
     return (
       <TaskItem
@@ -91,6 +158,7 @@ export function Sidebar({
         onDelete={onDeleteConversation}
         onRename={onRenameConversation}
         onToggleStar={() => toggleStarred(conv.id)}
+        snippet={snippet}
       />
     );
   };
@@ -120,11 +188,32 @@ export function Sidebar({
         <input
           type="search"
           className="sidebar-search"
-          placeholder="搜索对话"
+          placeholder={searchScope === 'all' ? '搜索消息正文' : '搜索对话'}
           aria-label="搜索对话"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
+
+        <div className="sidebar-search-scope" role="group" aria-label="搜索作用域">
+          <button
+            type="button"
+            data-scope="title"
+            aria-pressed={searchScope === 'title'}
+            className={`scope-btn ${searchScope === 'title' ? 'is-active' : ''}`}
+            onClick={() => setSearchScope('title')}
+          >
+            标题
+          </button>
+          <button
+            type="button"
+            data-scope="all"
+            aria-pressed={searchScope === 'all'}
+            className={`scope-btn ${searchScope === 'all' ? 'is-active' : ''}`}
+            onClick={() => setSearchScope('all')}
+          >
+            全部
+          </button>
+        </div>
 
         {conversations.length === 0 ? (
           <div className="empty-tasks">
@@ -138,7 +227,7 @@ export function Sidebar({
           <div className="no-match">无匹配对话</div>
         ) : (
           <div className="recent-panel" aria-live="polite" aria-relevant="additions text">
-            {filteredConversations.map(renderTask)}
+            {orderedConversations.map(renderTask)}
           </div>
         )}
       </div>
@@ -177,6 +266,8 @@ interface TaskItemProps {
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void | Promise<void>;
   onToggleStar: () => void;
+  /** 'all' 模式下命中时,渲染首条 snippet(含 <mark> 高亮,后端 trusted output)。 */
+  snippet?: SearchResult | undefined;
 }
 
 function TaskItem({
@@ -188,6 +279,7 @@ function TaskItem({
   onDelete,
   onRename,
   onToggleStar,
+  snippet,
 }: TaskItemProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [renameState, setRenameState] = useState<
@@ -232,7 +324,8 @@ function TaskItem({
     <div
       role="button"
       tabIndex={0}
-      className={`task-item ${active ? 'is-current' : ''} ${starred ? 'is-starred' : ''}`}
+      data-conversation-id={conv.id}
+      className={`task-item ${active ? 'is-current' : ''} ${starred ? 'is-starred' : ''} ${snippet ? 'has-match' : ''}`}
       onClick={() => {
         if (renameState.mode === 'editing') return;
         onSelect();
@@ -279,7 +372,15 @@ function TaskItem({
             aria-label={`重命名 ${title}`}
           />
         ) : (
-          <strong>{title}</strong>
+          <>
+            <strong>{title}</strong>
+            {snippet && (
+              <span
+                className="search-snippet"
+                dangerouslySetInnerHTML={{ __html: snippet.snippet }}
+              />
+            )}
+          </>
         )}
       </div>
       <div className="task-actions">
