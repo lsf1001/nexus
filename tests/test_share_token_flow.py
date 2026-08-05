@@ -20,7 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from nexus.backend import config as config_module
-from nexus.backend import db
+from nexus.backend import db, share_store
 from nexus.backend.main import app
 
 
@@ -66,7 +66,7 @@ def test_create_share_token_writes_row_and_7d_expiry(tmp_path: Path) -> None:
     sid = _create_session_with_messages()
     before = datetime.now()
 
-    result = db.create_share_token(sid, ttl_days=7)
+    result = share_store.create_share_token(sid, ttl_days=7)
 
     assert "token" in result and len(result["token"]) >= 32  # secrets.token_urlsafe(32) ≥ 43 字符
     assert "expires_at" in result
@@ -91,9 +91,9 @@ def test_get_share_token_returns_active_row() -> None:
     """get_share_token 拿有效 token → 返回 dict 含 session_id + expires_at。"""
     db.init_db()
     sid = _create_session_with_messages()
-    result = db.create_share_token(sid, ttl_days=7)
+    result = share_store.create_share_token(sid, ttl_days=7)
 
-    fetched = db.get_share_token(result["token"])
+    fetched = share_store.get_share_token(result["token"])
 
     assert fetched is not None
     assert fetched["session_id"] == sid
@@ -105,10 +105,10 @@ def test_get_share_token_returns_none_when_revoked() -> None:
     """revoke_share_token 后,get_share_token → None(已判 revoked_at)。"""
     db.init_db()
     sid = _create_session_with_messages()
-    result = db.create_share_token(sid, ttl_days=7)
-    assert db.revoke_share_token(result["token"]) is True
+    result = share_store.create_share_token(sid, ttl_days=7)
+    share_store.revoke_share_token(result["token"])  # 二次撤销也 no-op,返回 None
 
-    assert db.get_share_token(result["token"]) is None
+    assert share_store.get_share_token(result["token"]) is None
 
 
 def test_get_share_token_returns_none_when_expired() -> None:
@@ -119,7 +119,7 @@ def test_get_share_token_returns_none_when_expired() -> None:
     """
     db.init_db()
     sid = _create_session_with_messages()
-    result = db.create_share_token(sid, ttl_days=7)
+    result = share_store.create_share_token(sid, ttl_days=7)
     # 直接 UPDATE 把 expires_at 改到过去
     with db.get_db() as conn:
         conn.execute(
@@ -127,7 +127,7 @@ def test_get_share_token_returns_none_when_expired() -> None:
             ((datetime.now() - timedelta(days=1)).isoformat(), result["token"]),
         )
 
-    assert db.get_share_token(result["token"]) is None
+    assert share_store.get_share_token(result["token"]) is None
 
 
 # ============================================================================
@@ -202,3 +202,31 @@ def test_get_share_returns_410_when_expired(client: TestClient) -> None:
 
     get_resp = client.get(f"/api/share/{token}", headers=HEADERS)
     assert get_resp.status_code == 410
+
+
+def test_post_share_404_on_missing_session(client: TestClient) -> None:
+    """POST /api/sessions/{不存在的 sid}/share → 404。
+
+    WHY 单测覆盖:create_share_token 内部 ValueError,router 必须映射
+    到 404(§1.6 不吞异常 + 业务层语义);回归「漏 raise」会导致
+    FastAPI 抛 500,前端误以为是鉴权问题。
+    """
+    response = client.post("/api/sessions/does-not-exist/share", headers=HEADERS)
+    assert response.status_code == 404
+    assert "不存在" in response.json()["detail"]
+
+
+def test_get_share_token_410_when_session_deleted(client: TestClient) -> None:
+    """占位:理论上 session 物理删除 + share_tokens 残留应返回 410。
+
+    WHY skipped:share_tokens DDL(L301-309)``FOREIGN KEY (session_id)
+    REFERENCES sessions(id)`` **无** ``ON DELETE CASCADE``,且注释明确
+    「原会话删了,share 链接还能看历史快照」;share.py L116-120 的
+    ``get_session(...) is None → 410`` 分支在当前 schema 下不可达
+    (DB 层 FK 会先 IntegrityError 拦下)。
+
+    真要覆盖该路径需要改 DDL(加 CASCADE 或改 share_tokens.session_id
+    可空)并决定快照策略,**不在本轮范围**。保此测试名 + docstring
+    留给未来重构。
+    """
+    pytest.skip("share_tokens FK 阻止 session 物理删除;该 410 路径需 DDL 改造")

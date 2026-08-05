@@ -28,7 +28,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 
-from . import db
+from . import db, share_store
 from .api.ws import require_token
 
 router = APIRouter(prefix="/api", tags=["share"], dependencies=[Depends(require_token)])
@@ -91,7 +91,7 @@ async def create_share(session_id: str) -> dict[str, Any]:
         HTTPException 404: session 不存在。
     """
     try:
-        result = db.create_share_token(session_id, ttl_days=7)
+        result = share_store.create_share_token(session_id, ttl_days=7)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {
@@ -109,7 +109,7 @@ async def get_share_markdown(token: str) -> PlainTextResponse:
     失效」,跟 404(从未存在)语义不同;前端可以基于此显示"链接已撤销"
     而不是"链接打错"。
     """
-    record = db.get_share_token(token)
+    record = share_store.get_share_token(token)
     if record is None:
         raise HTTPException(status_code=410, detail="分享链接已撤销或已过期")
 
@@ -130,5 +130,5 @@ async def revoke_share(token: str) -> None:
     WHY 二次撤销也 410:与 GET 路径语义对齐,前端不用区分"刚撤"与
     "早就没了",统一走"链接不可用"提示;避免 204 vs 410 让 UI 写两套分支。
     """
-    db.revoke_share_token(token)
+    share_store.revoke_share_token(token)
     raise HTTPException(status_code=410, detail="分享链接已撤销")
