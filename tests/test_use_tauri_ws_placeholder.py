@@ -127,8 +127,6 @@ def test_installed_dmg_bundles_have_forwarding_fix() -> None:
             )
 
 
-
-
 def test_ws_emit_chunk_realtime_not_buffered() -> None:
     """回归测试:ws 流式循环的 chunk 处理路径不能改成缓存模式。
 

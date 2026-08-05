@@ -160,8 +160,7 @@ class PathAwareHITLMiddleware(AgentMiddleware[Any, ContextT, ResponseT]):
         # 用户级 ``~/.nexus/{outputs,state,logs,skills,cache}`` 在所有平台
         # 都是 Nexus 个人助理的合法归宿,直接放行。
         whitelist_prefixes.extend(
-            str((Path.home() / ".nexus" / sub).resolve()) + "/"
-            for sub in self._USER_WHITELIST_SUBDIRS
+            str((Path.home() / ".nexus" / sub).resolve()) + "/" for sub in self._USER_WHITELIST_SUBDIRS
         )
         # 2026-07-22 E2E mock 注入 ``NEXUS_HOME=/tmp/nexus-playwright-<pid>/``
         # 时也把同套子目录加进白名单 — mock scenario ``allow_nexus_write``
@@ -172,10 +171,7 @@ class PathAwareHITLMiddleware(AgentMiddleware[Any, ContextT, ResponseT]):
         nexus_home = os.environ.get("NEXUS_HOME")
         if nexus_home:
             home_root = Path(nexus_home).expanduser().resolve()
-            whitelist_prefixes.extend(
-                str((home_root / sub).resolve()) + "/"
-                for sub in self._USER_WHITELIST_SUBDIRS
-            )
+            whitelist_prefixes.extend(str((home_root / sub).resolve()) + "/" for sub in self._USER_WHITELIST_SUBDIRS)
         self._whitelist_prefixes: tuple[str, ...] = tuple(whitelist_prefixes)
         # protected_paths 走 str 比较;resolve 后比较避免 symlink 漂移
         self._protected = {str(Path(p).expanduser().resolve()) for p in protected_paths}

@@ -78,6 +78,7 @@ def get_db() -> Iterator[sqlite3.Connection]:
         # 挪到 try 之外:_create_tables 失败路径不进入这里,test_db_init_retry
         # 的 retry 场景不会被 ensure_default_project 读 projects 表炸掉。
         from .projects.storage import ensure_default_project
+
         ensure_default_project()
     try:
         yield conn

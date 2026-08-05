@@ -218,6 +218,7 @@ class E2EMockChatModel(BaseChatModel):
         delay = float(os.environ.get("NEXUS_E2E_MOCK_DELAY_SEC", "0"))
         # 2026-07-22 调试 hook:看 mock 是不是真 sleep + messages 长度。
         import logging as _logging
+
         _logging.getLogger(__name__).warning(
             "[MOCK-DEBUG] _generate scenario=%s delay=%s messages_len=%s has_tool_result=%s",
             self.scenario,

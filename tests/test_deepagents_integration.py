@@ -167,8 +167,7 @@ class TestProfiles:
             "general_purpose_subagent",
         }
         assert actual == expected, (
-            f"deepagents 0.7.4 HarnessProfile 字段集漂移:actual={sorted(actual)}, "
-            f"expected={sorted(expected)}"
+            f"deepagents 0.7.4 HarnessProfile 字段集漂移:actual={sorted(actual)}, expected={sorted(expected)}"
         )
 
     def test_general_purpose_subagent_field_set_matches_0_7_4(self) -> None:
@@ -181,8 +180,7 @@ class TestProfiles:
         actual.discard("self")
         expected = {"enabled", "description", "system_prompt"}
         assert actual == expected, (
-            f"GeneralPurposeSubagentProfile 字段漂移:actual={sorted(actual)}, "
-            f"expected={sorted(expected)}"
+            f"GeneralPurposeSubagentProfile 字段漂移:actual={sorted(actual)}, expected={sorted(expected)}"
         )
 
     def test_create_deep_agent_signature_0_7_4(self) -> None:
@@ -280,8 +278,7 @@ class TestLoadAsyncSubagentSpecs:
         """
         monkeypatch.setenv(
             "NEXUS_ASYNC_SUBAGENTS_JSON",
-            '[{"name":"remote_writer","description":"远程写作",'
-            '"graph_id":"deploy-123","url":"https://x.example"}]',
+            '[{"name":"remote_writer","description":"远程写作","graph_id":"deploy-123","url":"https://x.example"}]',
         )
         specs = agent_module._load_async_subagent_specs()
         assert len(specs) == 1
