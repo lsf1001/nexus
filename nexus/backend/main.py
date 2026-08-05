@@ -705,7 +705,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await handle_websocket(
         websocket,
-        get_agent=_get_current_agent,
+        get_agent=lambda style="default": _get_current_agent(style=style),
         channel_broadcasts={"wechat": _build_broadcast_to_ws(websocket)},
         get_quality_pipeline=_get_quality_pipeline,
     )

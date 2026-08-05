@@ -41,7 +41,7 @@ async def test_same_session_caches_within_ttl(monkeypatch):
             fetch_count["n"] += 1
             return _StubSnapshot([{"id": "1", "value": "x"}])
 
-    monkeypatch.setattr(h, "get_agent", lambda: _StubAgent())
+    monkeypatch.setattr(h, "get_agent", lambda style="default": _StubAgent())
 
     # 第一次 cache miss → 调 aget_state
     r1 = await h._resolve_pending_interrupts("sess-A")
@@ -69,7 +69,7 @@ async def test_different_session_does_not_share_cache(monkeypatch):
             fetch_count["n"] += 1
             return _StubSnapshot()
 
-    monkeypatch.setattr(h, "get_agent", lambda: _StubAgent())
+    monkeypatch.setattr(h, "get_agent", lambda style="default": _StubAgent())
 
     await h._resolve_pending_interrupts("sess-A")
     await h._resolve_pending_interrupts("sess-A")  # cache hit
@@ -94,7 +94,7 @@ async def test_cache_invalidated_by_invalidate_call(monkeypatch):
             fetch_count["n"] += 1
             return _StubSnapshot([{"id": "1"}])
 
-    monkeypatch.setattr(h, "get_agent", lambda: _StubAgent())
+    monkeypatch.setattr(h, "get_agent", lambda style="default": _StubAgent())
 
     await h._resolve_pending_interrupts("sess-A")  # miss → 1
     await h._resolve_pending_interrupts("sess-A")  # hit
@@ -120,7 +120,7 @@ async def test_cache_expires_after_ttl(monkeypatch):
             fetch_count["n"] += 1
             return _StubSnapshot([{"id": "1"}])
 
-    monkeypatch.setattr(h, "get_agent", lambda: _StubAgent())
+    monkeypatch.setattr(h, "get_agent", lambda style="default": _StubAgent())
 
     # 用 monkeypatch 把 _INTERRUPTS_CACHE_TTL_SECONDS 改成 0.1,避免真实 sleep 1s
     monkeypatch.setattr(h, "_INTERRUPTS_CACHE_TTL_SECONDS", 0.1)
@@ -149,7 +149,7 @@ async def test_aget_state_failure_returns_empty_tuple_and_does_not_cache(monkeyp
             fetch_count["n"] += 1
             raise RuntimeError("transient")
 
-    monkeypatch.setattr(h, "get_agent", lambda: _FailingAgent())
+    monkeypatch.setattr(h, "get_agent", lambda style="default": _FailingAgent())
 
     r1 = await h._resolve_pending_interrupts("sess-A")  # fail → ()
     r2 = await h._resolve_pending_interrupts("sess-A")  # 失败不应缓存 → 重试
@@ -191,7 +191,7 @@ async def test_cache_status_reports_hit_miss_fail(monkeypatch):
             raise RuntimeError("boom")
 
     # miss → miss
-    monkeypatch.setattr(h, "get_agent", lambda: _GoodAgent())
+    monkeypatch.setattr(h, "get_agent", lambda style="default": _GoodAgent())
     r1 = await h._resolve_pending_interrupts("sess-X")
     assert r1.cache_status == "miss"
 
@@ -200,13 +200,13 @@ async def test_cache_status_reports_hit_miss_fail(monkeypatch):
     assert r2.cache_status == "hit"
 
     # fail → fail (不写入缓存)
-    monkeypatch.setattr(h, "get_agent", lambda: _FailAgent())
+    monkeypatch.setattr(h, "get_agent", lambda style="default": _FailAgent())
     h._invalidate_interrupts_cache("sess-X")
     r3 = await h._resolve_pending_interrupts("sess-X")
     assert r3.cache_status == "fail"
     assert r3.interrupts == ()
 
     # 失败不缓存 → 下次仍是 miss(非 hit)
-    monkeypatch.setattr(h, "get_agent", lambda: _GoodAgent())
+    monkeypatch.setattr(h, "get_agent", lambda style="default": _GoodAgent())
     r4 = await h._resolve_pending_interrupts("sess-X")
     assert r4.cache_status == "miss"  # 因为前一次是 fail,没缓存
