@@ -32,7 +32,7 @@ def test_mcp_load_failure_logs_exc_info(monkeypatch, caplog) -> None:
     # conftest autouse 强制 NEXUS_ENABLE_MCP=false;这里把它打开触发 MCP load 分支
     monkeypatch.setenv("NEXUS_ENABLE_MCP", "true")
     # MCP 失败后 _create_agent_with_model 仍会被调用,这里 stub 掉避免触发真实模型构造
-    monkeypatch.setattr(main, "_create_agent_with_model", lambda mcp_tools=None: None)
+    monkeypatch.setattr(main, "_create_agent_with_model", lambda mcp_tools=None, style="default": None)
 
     with caplog.at_level(logging.WARNING, logger="nexus.backend.main"):
         main._ensure_agent_ready(app=object())

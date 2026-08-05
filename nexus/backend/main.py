@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .agent import _reset_checkpointer_cache, create_agent
+from .agent._system_prompt import reload_system_prompt
 from .api.ws import (
     _clients_lock,
     _extract_ws_token,
@@ -42,6 +43,9 @@ _agent_lock = threading.RLock()
 # 避免首条消息到达时 _agent 仍为 None,被 _run_agent_streaming 拒为 agent_unavailable。
 # 后台线程构造完成后 set;timeout 60s 后放弃,走原错误路径。
 _agent_ready_event: asyncio.Event | None = None
+# Round 6.1 风格维度:跟踪当前 _agent 实例对应的 style;切换风格时
+# _get_current_agent(style) 触发 reload + 清 _agent,走重建路径。
+_agent_singleton_style: str | None = None
 
 _main_loop: asyncio.AbstractEventLoop | None = None
 
@@ -97,7 +101,11 @@ def _get_frontend_path() -> Path | None:
     return None
 
 
-def _create_agent_with_model(model_config: dict | None = None, mcp_tools: list[Any] | None = None):
+def _create_agent_with_model(
+    model_config: dict | None = None,
+    mcp_tools: list[Any] | None = None,
+    style: str = "default",
+):
     """使用指定模型配置创建 Agent。"""
     if model_config is None:
         model_config = get_active_model()
@@ -119,6 +127,7 @@ def _create_agent_with_model(model_config: dict | None = None, mcp_tools: list[A
         api_base=api_base,
         temperature=temperature,
         mcp_tools=mcp_tools or [],
+        style=style,
     )
 
 
@@ -183,8 +192,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001 — 兜底任意扫描异常,不阻断启动
         logger.warning("[skills] scan 失败,继续启动(无 skill 可用): %s", e, exc_info=True)
     # 清空 system prompt 缓存,下次 get_system_prompt 会拼上新加载的 skills
-    from .agent._system_prompt import reload_system_prompt
-
     reload_system_prompt()
     # MCP 加载延后到 agent 首次构造时（省 0.5-3s）
     _mcp_tools = []
@@ -220,7 +227,7 @@ async def lifespan(app: FastAPI):
     _reset_checkpointer_cache()
 
 
-def _ensure_agent_ready(app) -> None:
+def _ensure_agent_ready(app, style: str = "default") -> None:
     """懒构造 Agent：首次调用时同步阻塞完成。
 
     由于构造过程涉及 langchain / deepagents 的大量 import，无法在 async 上下文
@@ -231,8 +238,11 @@ def _ensure_agent_ready(app) -> None:
     正则),judge_llm 也不再需要。质量门走 deepagents RubricMiddleware
     (见 agent.py QualityGateMiddleware + MemoryFilter)。本函数只构造
     Agent + MCP,不再附加 LLM 全局。
+
+    Round 6.1:加 ``style`` 参数透传到 ``create_agent``;构造成功后记录
+    ``_agent_singleton_style``,后续风格变化时由 ``_get_current_agent`` 检测并触发重建。
     """
-    global _agent, _mcp_tools
+    global _agent, _mcp_tools, _agent_singleton_style
     with _agent_lock:
         if _agent is not None:
             return
@@ -244,9 +254,10 @@ def _ensure_agent_ready(app) -> None:
             except Exception as e:  # noqa: BLE001
                 logger.warning("MCP 加载失败，继续启动: %s", e, exc_info=True)
                 _mcp_tools = []
-        new_agent = _create_agent_with_model(mcp_tools=_mcp_tools)
+        new_agent = _create_agent_with_model(mcp_tools=_mcp_tools, style=style)
         if new_agent is not None:
             _agent = new_agent
+            _agent_singleton_style = style
 
 
 app = FastAPI(title="Nexus Backend", lifespan=lifespan)
@@ -537,12 +548,22 @@ _agent_init_started = False
 _app_ref: FastAPI | None = None
 
 
-def _ensure_agent_async(app) -> None:
+def _ensure_agent_async(app, style: str = "default") -> None:
     """懒构造 Agent：在子线程里跑，构造期间 /health 已经能 200。
     用一次性触发：一旦构造过就 noop。
+
+    Round 6.1 风格维度:如果传入的 style 与当前 ``_agent_singleton_style``
+    不一致,重置 ``_agent`` / ``_agent_singleton_style`` / ``_agent_init_started``,
+    强制下一轮走 create_agent 走新 style bucket。reload_system_prompt() 由
+    调用方 ``_get_current_agent`` 负责 —— 本函数只负责触发构造。
     """
-    global _agent_init_started, _agent_ready_event
+    global _agent_init_started, _agent_ready_event, _agent, _agent_singleton_style
     with _agent_lock:
+        # 风格变化 → 必须重建
+        if _agent is not None and _agent_singleton_style != style:
+            _agent = None
+            _agent_singleton_style = None
+            _agent_init_started = False
         if _agent is not None or _agent_init_started:
             return
         _agent_init_started = True
@@ -551,7 +572,7 @@ def _ensure_agent_async(app) -> None:
 
     def _run_init_and_signal() -> None:
         try:
-            _ensure_agent_ready(app)
+            _ensure_agent_ready(app, style=style)
         finally:
             # 跨线程设置 asyncio.Event:必须用 call_soon_threadsafe
             if _main_loop and not _main_loop.is_closed() and _agent_ready_event is not None:
@@ -564,16 +585,29 @@ def _ensure_agent_async(app) -> None:
     ).start()
 
 
-def _get_current_agent() -> Any:
+def _get_current_agent(style: str = "default") -> Any:
     """返回当前 agent。Agent 尚未构造时返回 None;Gateway 走 astream 时
     会拿到 None → RuntimeError → 走 _send_error 错误路径(同 WS 行为)。
 
     入口兜底:WS 端 / Gateway 首次调用此函数都会触发 _ensure_agent_async,
     确保 WeChat 消息先于 WS 连接到达时也能进入懒构造路径。
     模块级函数,供 _AgentProxy 在 lifespan 后通过 lambda: _get_current_agent 解析。
+
+    Round 6.1 风格维度:style 与当前 ``_agent_singleton_style`` 不一致时,
+    reload_system_prompt() 清 system prompt 缓存(让下条消息走 cache miss
+    重建 prompt),然后清 ``_agent`` + 触发 _ensure_agent_async 走 create_agent
+    重建实例。默认 style='default' 走原 cache bucket,零行为变化。
     """
+    global _agent, _agent_singleton_style, _agent_init_started
+    with _agent_lock:
+        if _agent is not None and _agent_singleton_style != style:
+            # 风格切换:清 prompt 缓存 + 现有 agent 实例,触发重建
+            reload_system_prompt()
+            _agent = None
+            _agent_singleton_style = None
+            _agent_init_started = False
     if _agent is None and not _agent_init_started and _app_ref is not None:
-        _ensure_agent_async(_app_ref)
+        _ensure_agent_async(_app_ref, style=style)
     with _agent_lock:
         return _agent
 

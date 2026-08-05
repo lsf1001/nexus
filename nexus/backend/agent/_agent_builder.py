@@ -27,6 +27,7 @@ def create_agent(
     api_base: str | None = None,
     temperature: float | None = None,
     mcp_tools: list[Any] | None = None,
+    style: str = "default",
 ) -> Any:
     """创建带完整 Nexus 能力的智能体。
 
@@ -43,6 +44,9 @@ def create_agent(
         api_base: API 端点
         temperature: 温度参数
         mcp_tools: MCP 服务器加载的工具列表
+        style: 风格维度。'default' / 'concise' / 'professional';Round 6.1 新增,
+            注入到 system prompt 末尾风格段。切换风格必须重建 agent ——
+            prompt 字符串在首次构造时已固化,运行期 messages[0] 改不了。
     """
     from deepagents import create_deep_agent
 
@@ -218,7 +222,10 @@ def create_agent(
         # 2026-06-29 重构:``_build_system_prompt`` 只输出与激活模型无关的
         # 产品规则(身份 / 思考格式 / 澄清 / 安全)。模型特定指令由
         # HarnessProfile 的 ``system_prompt_suffix`` 按 provider:model 注入。
-        system_prompt=get_system_prompt(model_name or CONFIG.get("model_name", "")),
+        system_prompt=get_system_prompt(
+            model_name or CONFIG.get("model_name", ""),
+            style=style,
+        ),
         backend=backend,
         subagents=subagents,
         permissions=permissions,
