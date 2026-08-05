@@ -30,7 +30,7 @@ from .routes import model_config as model_config_routes
 from .routes import projects as projects_routes
 from .search import router as search_router
 from .sessions import router as sessions_router
-from .share import router as share_router
+from .share import router as share_router, public_share_router
 from .skills import scan_skills_dir
 
 _agent = None
@@ -265,6 +265,7 @@ app.include_router(sessions_router)
 app.include_router(search_router)
 # Round 3 Task 3.3:share token CRUD + 公开 markdown(/api/share/{token})
 app.include_router(share_router)
+app.include_router(public_share_router)
 # 注册模型配置路由
 app.include_router(model_config_routes.router)
 # Round 1 SPEC §4.3:Project REST API(Round 1 骨架第三步)

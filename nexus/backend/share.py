@@ -33,6 +33,11 @@ from .api.ws import require_token
 
 router = APIRouter(prefix="/api", tags=["share"], dependencies=[Depends(require_token)])
 
+# 公开 share consumer router — ``GET /api/share/{token}`` 浏览器裸开,不应走
+# REST 鉴权。share **token 本身**就是 access credential(7 天有效 + 可撤销),
+# 拿到 URL 即可读会话 markdown。创建 / 撤销仍走原 router 鉴权。
+public_share_router = APIRouter(prefix="/api", tags=["share"])
+
 
 def render_session_markdown(session: dict[str, Any], messages: list[dict[str, Any]]) -> str:
     """把 session + messages 序列化为 markdown(share + export 共享格式)。
@@ -101,9 +106,12 @@ async def create_share(session_id: str) -> dict[str, Any]:
     }
 
 
-@router.get("/share/{token}", response_class=PlainTextResponse)
+@public_share_router.get("/share/{token}", response_class=PlainTextResponse)
 async def get_share_markdown(token: str) -> PlainTextResponse:
     """根据 token 返回会话 markdown;撤销 / 过期 / session 已删 → 410。
+
+    公开 endpoint — 浏览器裸开 share URL,不走 REST 鉴权。
+    token 本身就是 access credential(7 天有效 + 可撤销)。
 
     WHY 410 Gone 而非 404:410 明确告诉客户端「这个资源曾经存在但永久
     失效」,跟 404(从未存在)语义不同;前端可以基于此显示"链接已撤销"
