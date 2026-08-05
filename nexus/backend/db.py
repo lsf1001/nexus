@@ -166,6 +166,9 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "sessions", "account_id", "TEXT")
     _ensure_column(conn, "sessions", "wechat_user_id", "TEXT")
     _ensure_column(conn, "sessions", "channel_meta", "TEXT")
+    # Round 6.1:Composer 风格选择器写入 sessions.style,后端 LLM 实际
+    # 收到 prompt 段。新会话默认 'default',老库 ALTER ADD COLUMN 自动补齐。
+    _ensure_column(conn, "sessions", "style", "TEXT NOT NULL DEFAULT 'default'")
 
     # partial index:WHERE deleted_at IS NULL 把软删行排除在外,索引体积更小,
     # 查询计划走更窄的范围。wechat_user_id 索引额外过滤 IS NOT NULL,
@@ -575,7 +578,7 @@ def list_sessions(limit: int = 50, project_id: str | None = None) -> list[dict]:
         rows = conn.execute(
             """
             SELECT id, title, created_at, updated_at, deleted_at, channel,
-                   account_id, wechat_user_id, channel_meta
+                   account_id, wechat_user_id, channel_meta, style
               FROM (
                   SELECT s.*,
                          ROW_NUMBER() OVER (
@@ -786,3 +789,31 @@ def search_messages(query: str, limit: int = 50) -> list[dict]:
 
 # share_tokens 管理已迁出至 ``share_store.py``(Round 3 Task 3.3:
 # db.py 拆分,避免 800 行硬约束触发)。
+
+
+# Round 6.1:Composer 风格选择器 → sessions.style 写入。
+# 风格枚举与 ``nexus/backend/styles.py`` 的 STYLE_DIRECTIVES 保持一致:
+# 三档 hard-coded 字面量,不引外部枚举,避免循环依赖。
+_VALID_SESSION_STYLES: tuple[str, ...] = ("default", "concise", "professional")
+
+
+def update_session_style(session_id: str, style: str) -> None:
+    """更新会话风格。
+
+    Args:
+        session_id: 会话 id。
+        style: 'default' / 'concise' / 'professional' 三选一。
+
+    Raises:
+        ValueError: style 不在合法枚举内,或 session 不存在。
+    """
+    if style not in _VALID_SESSION_STYLES:
+        raise ValueError(f"invalid style: {style}")
+    if get_session(session_id) is None:
+        raise ValueError(f"session 不存在: {session_id}")
+    now = datetime.now().isoformat()
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE sessions SET style = ?, updated_at = ? WHERE id = ?",
+            (style, now, session_id),
+        )
