@@ -170,4 +170,65 @@ describe('Sidebar 搜索作用域(Round 3 Task 3.5 双层匹配)', () => {
       expect(mark?.textContent).toBe('kubernetes');
     });
   });
+
+  it('右键 TaskItem 弹出 ConversationMenu(带 anchor 坐标)', () => {
+    const conv = makeConv('s-right', '右键测试会话');
+    const h = makeHarness();
+    const { container } = render(
+      <Sidebar
+        conversations={[conv]}
+        currentConversationId={null}
+        onSelectConversation={h.onSelectConversation}
+        onDeleteConversation={h.onDeleteConversation}
+        onRenameConversation={h.onRenameConversation}
+        onNewTask={h.onNewTask}
+        onOpenPreferences={h.onOpenPreferences}
+      />,
+    );
+
+    const item = container.querySelector('.task-item') as HTMLElement;
+    expect(item).not.toBeNull();
+    // 右键前菜单不应存在
+    expect(container.querySelector('.conversation-menu')).toBeNull();
+
+    fireEvent.contextMenu(item, { clientX: 320, clientY: 240, button: 2 });
+
+    const menu = container.querySelector('.conversation-menu');
+    expect(menu).not.toBeNull();
+    expect(menu?.getAttribute('role')).toBe('menu');
+    // anchor 坐标应落到 fixed 定位上(menu 最小化 x 避免溢出)
+    const left = (menu as HTMLElement).style.left;
+    const top = (menu as HTMLElement).style.top;
+    expect(left).toBeTruthy();
+    expect(top).toBeTruthy();
+  });
+
+  it('点击 ConversationMenu 删除项触发 onDeleteConversation + 关闭菜单', () => {
+    const conv = makeConv('s-del', '待删除会话');
+    const h = makeHarness();
+    const { container } = render(
+      <Sidebar
+        conversations={[conv]}
+        currentConversationId={null}
+        onSelectConversation={h.onSelectConversation}
+        onDeleteConversation={h.onDeleteConversation}
+        onRenameConversation={h.onRenameConversation}
+        onNewTask={h.onNewTask}
+        onOpenPreferences={h.onOpenPreferences}
+      />,
+    );
+
+    const item = container.querySelector('.task-item') as HTMLElement;
+    fireEvent.contextMenu(item, { clientX: 100, clientY: 100, button: 2 });
+    const menu = container.querySelector('.conversation-menu');
+    expect(menu).not.toBeNull();
+
+    const deleteBtn = menu?.querySelector('[data-action="delete"]') as HTMLButtonElement;
+    expect(deleteBtn).not.toBeNull();
+    fireEvent.click(deleteBtn);
+
+    expect(h.onDeleteConversation).toHaveBeenCalledWith('s-del');
+    // 菜单应当关闭
+    expect(container.querySelector('.conversation-menu')).toBeNull();
+  });
 });

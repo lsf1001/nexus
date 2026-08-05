@@ -4,6 +4,7 @@ import { useAppVersion } from '../../hooks/useAppVersion';
 import type { Conversation } from '../../types';
 import { ProjectDropdown } from './ProjectDropdown';
 import { NewProjectDrawer } from './NewProjectDrawer';
+import { ConversationMenu } from './ConversationMenu';
 import { searchMessages, type SearchResult } from '../../lib/api';
 
 export interface SidebarProps {
@@ -49,6 +50,9 @@ export function Sidebar({
 }: SidebarProps) {
   const [query, setQuery] = useState('');
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [menuState, setMenuState] = useState<
+    { sessionId: string; anchor: { x: number; y: number } | null } | null
+  >(null);
   const toggleStarred = useStore((s) => s.toggleStarred);
   const starredIds = useStore((s) => s.starredIds);
   const searchScope = useStore((s) => s.searchScope);
@@ -159,6 +163,7 @@ export function Sidebar({
         onRename={onRenameConversation}
         onToggleStar={() => toggleStarred(conv.id)}
         snippet={snippet}
+        onOpenMenu={(anchor) => setMenuState({ sessionId: conv.id, anchor })}
       />
     );
   };
@@ -252,6 +257,18 @@ export function Sidebar({
         open={newProjectOpen}
         onClose={() => setNewProjectOpen(false)}
       />
+      {menuState && (
+        <ConversationMenu
+          open
+          sessionId={menuState.sessionId}
+          anchor={menuState.anchor}
+          onClose={() => setMenuState(null)}
+          onDelete={(sid) => {
+            onDeleteConversation(sid);
+            setMenuState(null);
+          }}
+        />
+      )}
     </aside>
   );
 }
@@ -268,6 +285,8 @@ interface TaskItemProps {
   onToggleStar: () => void;
   /** 'all' 模式下命中时,渲染首条 snippet(含 <mark> 高亮,后端 trusted output)。 */
   snippet?: SearchResult | undefined;
+  /** 右键 / kebab 触发时把 anchor 透传给父组件,父组件渲染 <ConversationMenu>。 */
+  onOpenMenu: (anchor: { x: number; y: number }) => void;
 }
 
 function TaskItem({
@@ -280,6 +299,7 @@ function TaskItem({
   onRename,
   onToggleStar,
   snippet,
+  onOpenMenu,
 }: TaskItemProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [renameState, setRenameState] = useState<
@@ -336,6 +356,10 @@ function TaskItem({
           event.preventDefault();
           onSelect();
         }
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onOpenMenu({ x: event.clientX, y: event.clientY });
       }}
       aria-current={active ? 'true' : undefined}
       aria-label={title}
