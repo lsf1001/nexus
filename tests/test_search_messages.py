@@ -18,9 +18,13 @@ init_db() 正常路径下 schema 完整,无需手动 create。
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from fastapi.testclient import TestClient
 
 from nexus.backend import db
+from nexus.backend.main import app
 
 
 @pytest.fixture(autouse=True)
@@ -137,3 +141,33 @@ def test_search_limit_caps_results() -> None:
     # 默认 limit 是 50
     results_default = db.search_messages("BTC")
     assert len(results_default) == 5
+
+
+# --- /api/search/messages HTTP endpoint 异常路径 ---
+
+
+@pytest.fixture
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """复用 test_attachments_routes 的 client 模式:tmp_path 当 ~,
+    隔离 DB,避免测试落到 ~/.nexus/。
+    """
+    db_path = tmp_path / "test_search_endpoint.db"
+    monkeypatch.setitem(db.CONFIG, "db_path", str(db_path))
+    monkeypatch.setitem(db.CONFIG, "database_url", str(db_path))
+    monkeypatch.setattr(db, "_INITED", False)
+    db.init_db()
+    return TestClient(app)
+
+
+def test_search_messages_endpoint_400_on_fts5_syntax_error(
+    client: TestClient,
+) -> None:
+    """FTS5 syntax 错(孤立 "OR") → 400 + detail 含"搜索语法错"。
+
+    WHY:search.py 之前 `except Exception` 过宽,会吞掉编程错误
+    (KeyError / AttributeError 等)。本测试断言 OperationalError
+    被窄化捕获并走 HTTPException 400,其它异常路径不再静默翻 400。
+    """
+    response = client.get("/api/search/messages", params={"q": "a OR"})
+    assert response.status_code == 400
+    assert "搜索语法错" in response.json()["detail"]

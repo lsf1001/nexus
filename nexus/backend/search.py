@@ -7,6 +7,8 @@ WHY 单独 router:sessions.py 已 800+ 行,加 search 会破单文件 ≤ 800 �
 
 from __future__ import annotations
 
+import sqlite3
+
 from fastapi import APIRouter, HTTPException, Query
 
 from . import db
@@ -27,6 +29,6 @@ async def search_messages_endpoint(
     """
     try:
         results = db.search_messages(q, limit=limit)
-    except Exception as exc:  # FTS5 syntax 错抛 sqlite3.OperationalError
+    except sqlite3.OperationalError as exc:  # FTS5 syntax 错抛 sqlite3.OperationalError
         raise HTTPException(status_code=400, detail=f"搜索语法错:{exc}") from exc
     return {"results": results, "count": len(results)}
