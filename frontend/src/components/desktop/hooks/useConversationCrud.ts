@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/api';
 import { useStore } from '../../../store';
-import type { Conversation } from '../../../types';
+import type { Conversation, StyleOption } from '../../../types';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -149,14 +149,21 @@ export function useConversationCrud(): ConversationCrud {
       const response = await apiFetch(`/api/sessions?${qs.toString()}`);
       if (!response.ok) return;
       const rows = (await response.json()) as Array<Record<string, unknown>>;
-      const loaded: Conversation[] = rows.map((row) => ({
-        id: String(row.id),
-        title: (row.title as string | null) ?? '新会话',
-        messages: [], // 列表接口不返回 messages,点选时再 GET /api/sessions/{id}/messages
-        createdAt: new Date((row.created_at as string | undefined) ?? Date.now()),
-        updatedAt: (row.updated_at as string | undefined) ?? new Date().toISOString(),
-        channel: (row.channel as string | undefined) ?? 'main',
-      }));
+      const loaded: Conversation[] = rows.map((row) => {
+        const style = (row.style as StyleOption | undefined) ?? 'default';
+        const sid = String(row.id);
+        // seed store — 加载列表时同步写 sessionStyles(silent 创建,Task 7 已经确认)
+        useStore.getState().setSessionStyle(sid, style);
+        return {
+          id: sid,
+          title: (row.title as string | null) ?? '新会话',
+          messages: [], // 列表接口不返回 messages,点选时再 GET /api/sessions/{id}/messages
+          createdAt: new Date((row.created_at as string | undefined) ?? Date.now()),
+          updatedAt: (row.updated_at as string | undefined) ?? new Date().toISOString(),
+          channel: (row.channel as string | undefined) ?? 'main',
+          style, // Conversation.style,Task 7 已加字段
+        };
+      });
       setConversations(loaded);
     } catch {
       // 拉取失败保留空列表,sidebar 走欢迎页空态即可,不要阻塞首屏

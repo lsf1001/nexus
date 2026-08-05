@@ -337,3 +337,39 @@ export async function searchMessages(q: string, limit = 50): Promise<SearchMessa
   }
   return (await res.json()) as SearchMessagesResponse;
 }
+
+// ============ 通用 PATCH(Round 6.1 Task 8)============
+
+/**
+ * 通用 PATCH helper — Content-Type: application/json,返回解析后的 JSON。
+ *
+ * WHY 单独 helper:`apiFetch` 是底层 fetch wrapper(返 Response 不解析),
+ * 上层 80% GET/POST/DELETE 场景都直接 fetch。只有 PATCH 当前只有 PATCH
+ * /api/sessions/{id} style 这一处,但 Round 后续字段(title? show_thinking?)
+ * 仍会走此 helper,避免每处都重复 method/headers/body/JSON/throw 模板。
+ *
+ * 错误处理:非 2xx 抛 ``Error(`${status}: ${detail}`)``,detail 优先取
+ * ``response.json().detail``,fallback 到 statusText。422(Pydantic Literal
+ * 校验失败)/ 400(非法 style)/ 404(session 不存在)都走这条路径。
+ */
+export async function apiPatch<T = unknown>(
+  path: string,
+  body: unknown,
+): Promise<T> {
+  const res = await apiFetch(path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const data = (await res.json()) as { detail?: string };
+      if (data?.detail) detail = data.detail;
+    } catch {
+      /* body 非 JSON,保留 statusText */
+    }
+    throw new Error(`${res.status}: ${detail}`);
+  }
+  return (await res.json()) as T;
+}
