@@ -206,12 +206,24 @@ class E2EMockChatModel(BaseChatModel):
 
     scenario: str = Field(default="allow_nexus_write")
     call_count: int = Field(default=0)
+    # E2E 验证用:每次 _generate 调用时把入参 messages 拷一份到这里,供
+    # /api/e2e/last-messages(仅 NEXUS_E2E_MOCK=1 暴露)读出来给 Playwright 断言。
+    # WHY:多模态图片注入链路(用户上传图 → 后端 read_attachment_image_b64 →
+    # build_messages_with_attachments 拼 Anthropic multi-part image block →
+    # LLM 收到 messages)需要端到端验证。生产路径不挂 /api/e2e,所以这个
+    # 字段只服务于测试观察。
+    last_messages: list = Field(default_factory=list)
 
     @property
     def _llm_type(self) -> str:
         return "e2e-mock"
 
     def _generate(self, messages: list, stop=None, run_manager=None, **kwargs: Any) -> ChatResult:
+        # 把入参 messages 拷一份:WebSocket / REST 流式触发 _generate 时,
+        # E2E spec 在流结束后 GET /api/e2e/last-messages 读出来断言"LLM 真收到图"。
+        # 用 list(messages) 防止后续 mutation 影响快照(深拷贝 lazy 即可,langchain
+        # message 对象本轮 astream 后不再修改)。
+        self.last_messages = list(messages) if messages else []
         # E2E 流速控制(2026-07-13):stop-mid-stream spec 依赖"流持续一段时间"
         # 才能让用户点 stop。默认 0(mock 立即返回),NEXUS_E2E_MOCK_DELAY_SEC
         # 设成 2 可让流持续 ~2 秒,足以触发 stop 按钮交互。

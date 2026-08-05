@@ -80,6 +80,12 @@ def create_agent(
         from ..llm.e2e_mock import make_e2e_mock_llm
 
         llm = make_e2e_mock_llm()
+        # 注册到 e2e_diagnostics 路由,使 /api/e2e/last-messages 能读到这个实例
+        # 的 last_messages。生产路径不挂 e2e_diagnostics router,所以这个注册
+        # 只在 NEXUS_E2E_MOCK=1 时实际生效(main.py 路由器挂载同样受 env 控制)。
+        from ..routes.e2e_diagnostics import register_e2e_mock
+
+        register_e2e_mock(llm)
         logger.warning("[E2E-MOCK] using mock LLM scenario=%s", llm.scenario)
     else:
         llm = get_llm(model_name, api_key, api_base, temperature)

@@ -280,6 +280,15 @@ from .routes.asr import router as asr_router  # noqa: E402
 
 app.include_router(asr_router)
 
+# Round 4 T4.4: E2E 诊断端点(GET /api/e2e/last-messages),仅
+# NEXUS_E2E_MOCK=1 时挂载 — 生产路径不应暴露 LLM 注入链路观测面。
+# 路由内部还会再 check 一次 env, 双重保险让任何漏配都返回 404
+# 而不是泄露消息内容。
+if os.environ.get("NEXUS_E2E_MOCK") == "1":
+    from .routes.e2e_diagnostics import router as e2e_diagnostics_router  # noqa: E402
+
+    app.include_router(e2e_diagnostics_router)
+
 # CORS 白名单：环境变量 NEXUS_ALLOWED_ORIGINS 逗号分隔；默认本地开发地址
 _cors_origins = [
     o.strip()
