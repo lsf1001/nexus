@@ -30,7 +30,8 @@ from .routes import model_config as model_config_routes
 from .routes import projects as projects_routes
 from .search import router as search_router
 from .sessions import router as sessions_router
-from .share import router as share_router, public_share_router
+from .share import public_share_router
+from .share import router as share_router
 from .skills import scan_skills_dir
 
 _agent = None
@@ -274,6 +275,10 @@ app.include_router(projects_routes.router)
 from .routes.attachments import router as attachments_router  # noqa: E402
 
 app.include_router(attachments_router)
+# Round 4 Task 4.3:语音转写 endpoint(POST /api/asr,Whisper + mock fallback)
+from .routes.asr import router as asr_router  # noqa: E402
+
+app.include_router(asr_router)
 
 # CORS 白名单：环境变量 NEXUS_ALLOWED_ORIGINS 逗号分隔；默认本地开发地址
 _cors_origins = [
