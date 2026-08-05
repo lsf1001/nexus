@@ -245,6 +245,63 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_resume_tokens_session ON resume_tokens(session_id)")
 
+    # Round 3 (2026-08-05):FTS5 全文搜索。
+    # WHY:Sidebar 当前只按 title 搜索,"我昨天那条说 BTC 的在哪里?"
+    # 没法用。FTS5 给 messages.content / thinking_content 建倒排索引,
+    # 配合 3 triggers 保持同步(insert / delete / update)。
+    # content='messages' + content_rowid='rowid' 走 contentless FTS5,
+    # 原表 messages 已经存了完整文本,FTS 不重复存,
+    # 节省 ~50% 体积;触发器负责把 rowid ↔ 文本双向同步。
+    # 见 tests/test_db_fts5_init.py + tests/test_search_messages.py。
+    conn.executescript(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+            content,
+            thinking_content,
+            content='messages',
+            content_rowid='rowid'
+        );
+        CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+            INSERT INTO messages_fts(rowid, content, thinking_content)
+            VALUES (new.rowid, new.content, new.thinking_content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+            INSERT INTO messages_fts(messages_fts, rowid, content, thinking_content)
+            VALUES ('delete', old.rowid, old.content, old.thinking_content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+            INSERT INTO messages_fts(messages_fts, rowid, content, thinking_content)
+            VALUES ('delete', old.rowid, old.content, old.thinking_content);
+            INSERT INTO messages_fts(rowid, content, thinking_content)
+            VALUES (new.rowid, new.content, new.thinking_content);
+        END;
+        """
+    )
+
+    # Round 3 (2026-08-05):share_tokens 表。
+    # WHY:会话分享链接需要 server-side token 映射 —
+    # ``resume_tokens`` 是 WS 续传 HMAC(短命,与 ws 帧挂钩),
+    # 不能复用。share_tokens 是显式 user 触发的"创建公开只读快照",
+    # 可以 7 天过期 + 撤销。
+    # FK session_id → sessions(id):share 出来后发现原会话被删,
+    # 可手动级联清理 share_tokens;这里不写 ON DELETE CASCADE 是因为
+    # 业务上希望"原会话删了,share 链接还能看历史快照"(后续可能
+    # 改成 snapshot 表 + token 关联,不在本轮范围)。
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS share_tokens (
+            token TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            revoked_at TEXT,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_share_tokens_session
+            ON share_tokens(session_id);
+        """
+    )
+
 
 def init_db() -> None:
     """显式初始化数据库表。get_db() 已自动调用,此函数主要给 CLI/启动入口使用。
