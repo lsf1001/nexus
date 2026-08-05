@@ -39,7 +39,9 @@ export function GlobalSearchModal({ open, onClose, onSelect }: GlobalSearchModal
       setQuery('');
       setResults([]);
       setActiveIdx(0);
-      requestAnimationFrame(() => inputRef.current?.focus());
+      // 用 setTimeout(..., 0) 替代 requestAnimationFrame:jsdom 的 rAF polyfill
+      // 不保证在 vitest 下准时执行,setTimeout 0 由 macrotask 队列接管更稳定。
+      window.setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [open]);
 
@@ -137,6 +139,11 @@ export function GlobalSearchModal({ open, onClose, onSelect }: GlobalSearchModal
       >
         <input
           ref={inputRef}
+          type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={results.length > 0}
+          aria-controls="global-search-listbox"
           className="command-palette-input"
           placeholder="搜索消息正文(支持 FTS5 语法)…"
           value={query}
@@ -145,11 +152,16 @@ export function GlobalSearchModal({ open, onClose, onSelect }: GlobalSearchModal
           aria-label="全局搜索"
         />
         {loading && (
-          <div className="global-search-loading" aria-live="polite">
+          <div className="global-search-loading" aria-busy={true}>
             搜索中…
           </div>
         )}
-        <ul className="command-palette-list global-search-list" role="listbox">
+        <ul
+          id="global-search-listbox"
+          className="command-palette-list global-search-list"
+          role="listbox"
+          aria-live="polite"
+        >
           {!loading && !query.trim() && (
             <li className="command-palette-empty">输入关键词搜索全部历史消息</li>
           )}

@@ -49,7 +49,7 @@ describe('GlobalSearchModal(⌘F 全局搜索面板)', () => {
     const input = screen.getByPlaceholderText(/搜索消息/) as HTMLInputElement;
     expect(input).toBeInTheDocument();
     expect(container.querySelector('.global-search-modal')).not.toBeNull();
-    await waitFor(() => expect(document.activeElement).toBe(input));
+    await waitFor(() => expect(input).toHaveFocus(), { timeout: 200 });
   });
 
   it('open=false 时不渲染', () => {
