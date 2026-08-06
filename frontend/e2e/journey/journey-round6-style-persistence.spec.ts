@@ -13,19 +13,19 @@
  *      新 mock 实例被 register_e2e_mock 替换
  *   8. 刷新页面 → 风格仍为 'professional',徽标仍在(持久化生效)
  *
- * 已知 backend bug(不属于本 Task 11):DynamicIdentityMiddleware
- * (nexus/backend/middleware/dynamic_identity.py:229) 在 wrap_model_call
- * 阶段用 get_system_prompt()(默认 style='default')重建 SystemMessage,
- * 即便 agent 已按 style='professional' 重建并把 directive 拼进 messages[0],
- * middleware 仍替换成默认风格版本。本 spec 因此跳过 system prompt directive
- * 断言,只验 WS send 帧 + agent 真重建 + LLM 真收到第二条消息。
- *
  * Mock 模式(NEXUS_E2E_MOCK=1):
  *   - LLM 由 e2e_mock 替代,scenario 走默认 allow_nexus_write(不触发 HITL)。
  *   - /api/e2e/last-messages 仅 mock 下挂载(nexus/backend/routes/e2e_diagnostics.py:46),
  *     抓 mock LLM 最后一次 _generate 收到的完整 messages(含 system prompt)。
  *   - PATCH /api/sessions/{id} 走 page.route 拦截,避免真后端落库,
  *     跨 spec 顺序跑不污染。
+ *
+ * System prompt directive 断言(2026-08-05 修复):
+ *   DynamicIdentityMiddleware 现在读 ``llm._nexus_style`` 透传给
+ *   ``get_system_prompt(style=...)``,LLM 收到的 prompt 必须含
+ *   【回复风格 · 专业】段。本 spec 验证 /api/e2e/last-messages 返回的
+ *   SystemMessage.content 含此段(证明 backend 修复生效,不再覆盖
+ *   agent 注入的 directive)。
  *
  * WS send 截帧设计:
  *   - 在 page.addInitScript 里包装 WebSocket,捕获业务 WS(/api/ws)的
@@ -219,15 +219,9 @@ test('Round 6.1:Composer 切专业风格 → 徽标 + WS 帧 + LLM 真收到 →
   //    - 验:last_messages 来自"不同"实例(指针变化)+ HumanMessage.content 是
   //      '带风格字段的请求'(说明是真第二次 invoke,不是第一次的残留)
   //
-  //    NOTE(已知 backend bug):DynamicIdentityMiddleware(dynamic_identity.py:229)
-  //    重建 SystemMessage 用的是 get_system_prompt()(style='default'),
-  //    即便 agent 已经按 style='professional' 重建并把 directive 拼进
-  //    messages[0],middleware 仍把 system_message 替换成默认风格版本。
-  //    这导致 LLM 实际拿到的 prompt 不含 '【回复风格 · 专业】' 段。
-  //    修复方向(不属于本 Task 11):middleware 应读 agent.style 透传给
-  //    get_system_prompt(style=...) 或保留原 messages[0] 不替换。本 spec
-  //    只验证 WS send 帧 + agent 真重建 + LLM 真收到帧 style,跳过 system
-  //    prompt directive 断言(那是 Task 6/8 backend 责任)。
+  //    2026-08-05 fix: DynamicIdentityMiddleware 现在读 llm._nexus_style
+  //    透传给 get_system_prompt(style=...),LLM 收到的 SystemMessage 必须
+  //    含【回复风格 · 专业】段(否则 backend bug 仍存在)。
   const payload = await page.evaluate(async () => {
     const r = await fetch('/api/e2e/last-messages');
     if (!r.ok) throw new Error(`/api/e2e/last-messages returned ${r.status}`);
@@ -240,6 +234,16 @@ test('Round 6.1:Composer 切专业风格 → 徽标 + WS 帧 + LLM 真收到 →
   // (证明第二次 invoke 真走到 LLM,新 mock 实例被注册 + 第二次 send 完整流转)
   const sysMsg = payload.messages.find((m) => m.type === 'SystemMessage');
   expect(sysMsg, '应至少有一条 SystemMessage').toBeTruthy();
+  // 验证 SystemMessage 含【回复风格 · 专业】段(2026-08-05 修复目标)。
+  // 这是 backend bug 修复的核心断言:DynamicIdentityMiddleware 不再
+  // 用默认 style 覆盖 agent 注入的 directive。
+  const sysContent = typeof sysMsg!.content === 'string'
+    ? sysMsg!.content
+    : JSON.stringify(sysMsg!.content);
+  expect(
+    sysContent,
+    'SystemMessage 必须含【回复风格 · 专业】段(backend bug 修复后),实际 content 前 500 字符',
+  ).toContain('回复风格 · 专业');
   const humanMessages = payload.messages.filter((m) => m.type === 'HumanMessage');
   const matchingHuman = humanMessages.find((m) => {
     const c = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);

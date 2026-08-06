@@ -94,6 +94,18 @@ def create_agent(
     else:
         llm = get_llm(model_name, api_key, api_base, temperature)
 
+    # Round 6.1 style bug fix:把 style 维度写到 LLM 实例上,供
+    # ``DynamicIdentityMiddleware`` 在 wrap_model_call 阶段读取。
+    # WHY:middleware 入口处 ``request.system_message.content`` 是空字符串
+    # (deepagents 0.7.4 在 wrap_model_call 前把 system_prompt 字符串吃掉了),
+    # 走 Bug A 防御重建 SystemMessage 时如果不传 style,会拿默认风格的
+    # ``get_system_prompt()``,覆盖掉 agent 在 create_agent 阶段按 style 拼进
+    # messages[0] 的【回复风格 · 专业】段 → LLM 永远按 default 风格回复。
+    # 把 style 挂在 LLM(model 实例,BaseChatModel 子类)上而非全局状态,
+    # 避免 ws 多客户端 / 切换风格时 race;每个 agent 实例对应一个 LLM,
+    # 风格切换时 ``_get_current_agent`` 会重建新 LLM + 新 ``_nexus_style``。
+    llm._nexus_style = style  # type: ignore[attr-defined]
+
     # 顺序敏感:**先 checkpointer 再 store**。
     # _create_checkpointer() 走 sync sqlite3 + 同步 DDL(``_ensure_sqlite_checkpoint_tables``),
     # 调完就关连接、不留后台线程。_create_store() 走 aiosqlite,内部 ``asyncio.run``
