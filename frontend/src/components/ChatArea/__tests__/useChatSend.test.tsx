@@ -200,4 +200,43 @@ describe('useChatSend', () => {
       expect(wsMsg.session_id).toBe('sid-2')
     })
   })
+
+  /**
+   * Round 6.1 Task 11:WS send 帧携带 style 字段。
+   * 覆盖:
+   *   - 旧会话 + store.sessionStyles[sid] 命中 → WSMessage.style 命中值
+   *   - 旧会话 + store.sessionStyles[sid] 缺失 → WSMessage.style 退化为 'default'
+   *   - 新会话(getSessionId=null) → WSMessage.style 字段被 omit
+   */
+  describe('style 注入 (Round 6.1 Task 11)', () => {
+    it('旧会话 + store.sessionStyles 命中 → WSMessage.style 等于命中值', async () => {
+      const { useStore } = await import('../../../store')
+      const { args, spies } = makeArgs({ getSessionId: () => 'sid-pro' })
+      useStore.setState({ sessionStyles: { 'sid-pro': 'professional' } })
+      const { result } = renderHook(() => useChatSend(args))
+      result.current('hello')
+      const wsMsg = spies.send.mock.calls[0]?.[0] as WSMessage
+      expect(wsMsg.style).toBe('professional')
+    })
+
+    it('旧会话 + store.sessionStyles 缺失 → WSMessage.style 退化为 default', async () => {
+      const { useStore } = await import('../../../store')
+      const { args, spies } = makeArgs({ getSessionId: () => 'sid-miss' })
+      useStore.setState({ sessionStyles: {} })
+      const { result } = renderHook(() => useChatSend(args))
+      result.current('hello')
+      const wsMsg = spies.send.mock.calls[0]?.[0] as WSMessage
+      expect(wsMsg.style).toBe('default')
+    })
+
+    it('新会话(getSessionId=null) → 不挂 style 字段(omit)', async () => {
+      const { useStore } = await import('../../../store')
+      const { args, spies } = makeArgs({ getSessionId: () => null })
+      useStore.setState({ sessionStyles: { 'sid-existing': 'concise' } })
+      const { result } = renderHook(() => useChatSend(args))
+      result.current('first')
+      const wsMsg = spies.send.mock.calls[0]?.[0] as WSMessage
+      expect(wsMsg.style).toBeUndefined()
+    })
+  })
 })

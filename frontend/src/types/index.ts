@@ -128,6 +128,18 @@ export interface WSMessage {
   /** 已上传附件的 server id 列表(可空);后端 sessions.build_prompt 按需拼 multi-part。
    *  空数组时后端走原纯 text 路径(SPEC §4.4 零回归)。 */
   attachment_ids?: string[];
+  /**
+   * Round 6.1 Task 11:本次消息生效的回复风格。
+   *
+   * 始终从 store.sessionStyles[sid] 同步读取并显式携带(default 也传),
+   * 让后端 _resolve_session_style 路径能直接命中本条消息的 style,
+   * 不依赖 DB 持久值或 ws_session_state 的隐式 fallthrough(SPEC §4.10)。
+   *
+   * 后端解析顺序:本帧 style → DB sessions.style → 'default'。
+   * 新会话(getSessionId=null)时不携带,等首次消息落库后由后端默认
+   * 写 'default',下次会话回写即可同步。
+   */
+  style?: StyleOption;
 }
 
 export interface Model {

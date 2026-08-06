@@ -57,6 +57,11 @@ beforeEach(() => {
     projects: [],
     activeProjectId: null,
     loading: false,
+    // Round 6.1 Task 11:清 uiPrefs 持久化字段,跨 test 状态隔离。
+    // 原 setup 漏了 sessionStyles / starredIds 等 persisted slice 字段,
+    // 持久化中间件跨 test 复用时会让"上次切风格"残留到本 test。
+    sessionStyles: {},
+    starredIds: [],
   } as never)
   // Persist middleware 写的 localStorage 清掉,避免跨 test 状态污染
   try {
