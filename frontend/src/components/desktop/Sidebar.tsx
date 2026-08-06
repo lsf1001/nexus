@@ -1,11 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { JSX } from 'react';
 import { useStore } from '../../store';
 import { useAppVersion } from '../../hooks/useAppVersion';
-import type { Conversation } from '../../types';
+import type { Conversation, StyleOption } from '../../types';
 import { ProjectDropdown } from './ProjectDropdown';
 import { NewProjectDrawer } from './NewProjectDrawer';
 import { ConversationMenu } from './ConversationMenu';
 import { searchMessages, type SearchResult } from '../../lib/api';
+
+/**
+ * 风格徽标 UI 标签映射 — 跟 ComposerToolbar 的 STYLE_LABELS 对齐,
+ * 保持两处 UI 文本一致(单一来源原则)。
+ * default 对应空串,渲染层据此跳过徽标元素。
+ */
+const STYLE_BADGE_LABELS: Record<StyleOption, string> = {
+  default: '',
+  concise: '简洁',
+  professional: '专业',
+};
 
 export interface SidebarProps {
   conversations: Conversation[];
@@ -273,6 +285,37 @@ export function Sidebar({
   );
 }
 
+/**
+ * 会话风格徽标 — 渲染 store.sessionStyles[sid] 对应的标签。
+ *
+ * WHY 数据走 store 而非 props / Conversation.style 字段:
+ *  - sessions 列表接口不携带每条 style 的实时视图,后端在
+ *    loadSessions 时把 sessions.style seed 到 store.sessionStyles
+ *    (Round 6.1 Task 7);风格切换也走 store.setSessionStyle + PATCH。
+ *  - 因此 store 是 UI 唯一同步准确的入口,避免再读 Conversation.style
+ *    字段(那是 backend 单向写、UI 不读的回流通道)。
+ *  - fallback:store 中无条目或值为 'default' 时不渲染徽标,保持当前
+ *    会话项视觉不变。
+ */
+function SessionStyleBadge({ sessionId }: { sessionId: string }): JSX.Element | null {
+  // 容错:某些测试把 useStore mock 成最小 stub(没有 sessionStyles 字段),
+  // 用 `?.` 避免读取 undefined 报错;真实 store 中该字段恒为 Record。
+  const sessionStyle: StyleOption = useStore(
+    (s) => (s.sessionStyles?.[sessionId] ?? 'default'),
+  );
+  const label = STYLE_BADGE_LABELS[sessionStyle];
+  if (!label) return null;
+  return (
+    <span
+      className={`task-item-style-badge task-item-style-badge--${sessionStyle}`}
+      data-style={sessionStyle}
+      aria-label={`回复风格 ${label}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 /** 单条会话 — 拆出来便于把删除确认 + 重命名态各自管 state。 */
 interface TaskItemProps {
   conv: Conversation;
@@ -397,7 +440,10 @@ function TaskItem({
           />
         ) : (
           <>
-            <strong>{title}</strong>
+            <span className="task-item-title-row">
+              <strong>{title}</strong>
+              <SessionStyleBadge sessionId={conv.id} />
+            </span>
             {snippet && (
               <span
                 className="search-snippet"

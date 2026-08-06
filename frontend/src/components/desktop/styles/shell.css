@@ -180,6 +180,43 @@
   text-overflow: ellipsis;
 }
 
+/* 标题 + 风格徽标 同行 — 标题 flex:1 占满,徽标收缩到内容宽度。
+ * 风格徽标为 default 时不渲染元素(SessionStyleBadge 返回 null),
+ * 此规则只对有徽标的会话项生效。 */
+.task-item-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.task-item-title-row strong {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.task-item-style-badge {
+  flex: 0 0 auto;
+  font-size: var(--font-2xs);
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.task-item-style-badge--concise {
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-fg-secondary);
+}
+.task-item-style-badge--professional {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+/* 深色模式 — 紫底压暗 + 紫字提亮,避免深色 canvas 上 #ede9fe 刺眼 */
+.dark-mode .task-item-style-badge--professional,
+[data-theme="dark"] .task-item-style-badge--professional {
+  background: #4c1d95;
+  color: #ddd6fe;
+}
+
 .task-item-body span {
   margin-top: 3px;
   color: var(--sidebar-fg-tertiary);
