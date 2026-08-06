@@ -365,6 +365,8 @@ export function ChatArea({
           isLoading={isLoading}
           onStop={handleStop}
           inputRef={inputRef}
+          // Round 6.1:把当前会话 id 透传给 ComposerToolbar 用于风格 PATCH
+          sessionId={conversationIdProp}
         />
       </div>
     </div>

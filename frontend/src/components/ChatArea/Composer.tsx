@@ -63,6 +63,8 @@ export interface ComposerProps {
   onStop: () => void;
   /** textarea ref(父组件需要 focus / scroll-into-view) */
   inputRef: RefObject<HTMLTextAreaElement | null>;
+  /** 当前会话 id(Round 6.1):透传给 ComposerToolbar 用于风格 PATCH */
+  sessionId?: string | null;
 }
 
 export function Composer({
@@ -75,6 +77,7 @@ export function Composer({
   isLoading,
   onStop,
   inputRef,
+  sessionId,
 }: ComposerProps) {
   const activeProjectId = useStore((s) => s.activeProjectId) ?? 'default';
   const { attachments, addFiles, remove, clear, uploadedServerIds } =
@@ -170,7 +173,7 @@ export function Composer({
               className="composer-textarea"
             />
             <div className="composer-bottom">
-              <ComposerToolbar onAttach={openFilePicker} />
+              <ComposerToolbar onAttach={openFilePicker} sessionId={sessionId ?? undefined} />
               <MicButton
                 onTranscribed={(text) => onChange(value ? `${value} ${text}` : text)}
                 enabled={!disabled}
