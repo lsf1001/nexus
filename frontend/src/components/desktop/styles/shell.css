@@ -324,6 +324,12 @@
  * 包住 chat-status-bar(36px 顶部状态条) + ChatArea(内部 flex column)
  * 用 flex column 让 chat-area 自然占满剩余空间 */
 .chat-area-wrap {
+  /* Round 7 Bug A 修复(2026-08-08):flex 子项默认 min-width:auto,
+   * 会按内容撑爆 grid cell(viewport=900 + artifacts 展开时
+   * .main 被压到 320px,但 chat-scroll 内容 411.9px 撑出去,
+   * 被 .main{overflow:hidden} 切右 92px — 用户截图"约/2/件"切边)。
+   * 加 min-width:0 强制约束在父 grid cell 内。 */
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
