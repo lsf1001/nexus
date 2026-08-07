@@ -111,9 +111,13 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
         }
       }
 
-      // 字号缩放:Cmd+= / Cmd++ / Cmd+- / Cmd+0 —— input focus 时放行。
-      // 第十一轮-3 起所有 modKey 快捷键都共用 isTextInput guard(上面 if 块)。
-      if (modKey && !e.altKey && !inTextInput) {
+      // 字号缩放:Cmd+= / Cmd++ / Cmd+- / Cmd+0 — 不走 isTextInput guard。
+      // WHY:macOS / 浏览器原生 zoom 在 textarea / input / contenteditable
+      // 内同样生效;被 inTextInput guard 误吞 = "输入框聚焦时按 Cmd+= 无
+      // 反应"(用户截图复现)。Cmd+N/K/F// 不同 — 它们抢原生编辑快捷键,
+      // 必须守卫。仍守卫 modKey + !altKey(避免 Ctrl+Alt+= 类组合冲突)
+      // 和 Shift 条件(见 '+' 分支注释)。
+      if (modKey && !e.altKey) {
         if ((e.key === '=' || e.key === '+') && !e.shiftKey) {
           e.preventDefault();
           onZoomIn?.();

@@ -116,9 +116,14 @@
   padding-top: 8px;
 }
 
-/* V3 (2026-07-20):主区共享 720px 限宽 — EmptyState / message-list / composer
- * 全部走这个容器,确保主对话区永远 720px 居中(主区宽 1000+ 时两侧留白)。 */
-.chat-scroll,
+/* V3 (2026-07-20):主区共享 720px 限宽 — composer-shell / empty-state
+ * 走这个容器,主对话区永远 720px 居中(主区宽 1000+ 时两侧留白)。
+ *
+ * chat-scroll 不再限宽:实测 1280 整窗 + sidebar 260 下,被压到 720 + 68px
+ * padding = 内容可用 652px,比 .message-list max-width 720 还小,气泡被父
+ * 容器压扁,长 Markdown 段落右侧字符被 .main { overflow: hidden } 硬裁。
+ * 改为 100% 撑满父(chat-area 已被父 chat-area-wrap 限到 main 列宽),
+ * 真正的 720 居中交给 .message-list(它本身 max-width: 720 / 790 后置)。 */
 .composer-shell,
 .empty-state {
   width: min(720px, 100%);
@@ -1145,8 +1150,8 @@
 .status-card .row .label { font-size: var(--font-15); }
 .status-card .row .value { font-size: var(--font-15); }
 
-.message-list { max-width: 790px; gap: 22px; }
-.message-bubble { max-width: 700px; border-radius: 16px; padding: 14px 16px; }
+.message-list { max-width: 720px; gap: 22px; }
+.message-bubble { max-width: 680px; border-radius: 16px; padding: 14px 16px; }
 /* Claude 三层结构覆盖:用户块=左侧 1px 浅线 + 加粗;助手块=极浅背景 */
 .message-user { background: transparent; border: 0; border-left: 2px solid var(--muted-foreground); color: var(--foreground); box-shadow: none; border-radius: 0; }
 .message-assistant { background: var(--muted); border: 0; color: var(--foreground); box-shadow: none; border-radius: var(--r-lg); }

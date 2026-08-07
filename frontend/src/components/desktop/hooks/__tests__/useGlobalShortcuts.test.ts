@@ -167,10 +167,55 @@ describe("useGlobalShortcuts (Cmd+N/K// + Esc)", () => {
       expect(useStore.getState().artifactsCollapsed).toBe(true);
     });
 
-    it("Cmd+= 在 textarea 内不触发 onZoomIn", () => {
+    // Cmd+N/K/F// 在 textarea 内要继续守卫(避免抢原生编辑快捷键),
+    // 但 Cmd+= / Cmd+- / Cmd+0 是浏览器 / macOS 原生 zoom 语义,
+    // textarea 内同样生效 — 不应被 inTextInput guard 吞掉。
+    it("Cmd+= 在 textarea 内仍触发 onZoomIn(textarea 不守卫 zoom)", () => {
       const onZoomIn = vi.fn();
       renderHook(() => useGlobalShortcuts({ onZoomIn }));
       fireKey({ key: "=", metaKey: true, target: makeTextarea() });
+      expect(onZoomIn).toHaveBeenCalledTimes(1);
+    });
+
+    it("Cmd+- 在 textarea 内仍触发 onZoomOut", () => {
+      const onZoomOut = vi.fn();
+      renderHook(() => useGlobalShortcuts({ onZoomOut }));
+      fireKey({ key: "-", metaKey: true, target: makeTextarea() });
+      expect(onZoomOut).toHaveBeenCalledTimes(1);
+    });
+
+    it("Cmd+0 在 textarea 内仍触发 onZoomReset", () => {
+      const onZoomReset = vi.fn();
+      renderHook(() => useGlobalShortcuts({ onZoomReset }));
+      fireKey({ key: "0", metaKey: true, target: makeTextarea() });
+      expect(onZoomReset).toHaveBeenCalledTimes(1);
+    });
+
+    it("Cmd+= 在 input 内仍触发 onZoomIn", () => {
+      const onZoomIn = vi.fn();
+      renderHook(() => useGlobalShortcuts({ onZoomIn }));
+      fireKey({ key: "=", metaKey: true, target: makeInput() });
+      expect(onZoomIn).toHaveBeenCalledTimes(1);
+    });
+
+    it("Cmd+= 在 contenteditable 内仍触发 onZoomIn", () => {
+      const onZoomIn = vi.fn();
+      renderHook(() => useGlobalShortcuts({ onZoomIn }));
+      fireKey({ key: "=", metaKey: true, target: makeContentEditable() });
+      expect(onZoomIn).toHaveBeenCalledTimes(1);
+    });
+
+    it("Shift+Cmd+= 不触发(避免双触发)", () => {
+      const onZoomIn = vi.fn();
+      renderHook(() => useGlobalShortcuts({ onZoomIn }));
+      fireKey({ key: "=", metaKey: true, shiftKey: true });
+      expect(onZoomIn).not.toHaveBeenCalled();
+    });
+
+    it("Cmd+= 无 modKey 时不触发", () => {
+      const onZoomIn = vi.fn();
+      renderHook(() => useGlobalShortcuts({ onZoomIn }));
+      fireKey({ key: "=" });
       expect(onZoomIn).not.toHaveBeenCalled();
     });
 
