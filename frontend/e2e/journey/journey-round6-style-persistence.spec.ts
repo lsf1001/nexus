@@ -272,3 +272,135 @@ test('Round 6.1:Composer 切专业风格 → 徽标 + WS 帧 + LLM 真收到 →
     '刷新后 Composer 徽标应仍显示当前会话风格',
   ).toHaveText('专业', { timeout: 5_000 });
 });
+
+
+/**
+ * Round 6.1 二次覆盖:同会话内 professional→concise→default 来回切换。
+ *
+ * WHY(2026-08-05 补):前一个 test 只覆盖"default→professional"单向切换 + 一次
+ * 重建,没验证连续多次风格切换的 cache bucket 清理 / agent 重建 / SystemMessage
+ * 段同步。本 test 三次切换 + 各发一条消息,验证最后一次 send 的 LLM 收到的
+ * SystemMessage 含【回复风格 · 默认】段(证明"来回切"路径风格段也跟手)。
+ *
+ * 关键路径:
+ *   - 每次切风格 → ComposerToolbar.handleSelect 走 store.setSessionStyle + PATCH
+ *   - 下次 send → main._get_current_agent(style) 检测 != 重建 agent
+ *   - 重建 agent → _build_system_prompt(style) 走新 bucket → SystemMessage
+ *     内容随风格段切换。
+ */
+test('Round 6.1:同会话 professional→concise→default 来回切,最后一次 SystemMessage 段 = 默认', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+
+  await installWsFrameCapture(page);
+  await page.route(/\/api\/sessions\/[^/]+$/, async (route) => {
+    if (route.request().method() === 'PATCH') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await journeyOpenHome(page);
+  // 先创建会话
+  await sendMessageAndWaitForReply(page, '来回切起点', { timeoutMs: 60_000 });
+  const sessionId = await page
+    .locator('.task-item')
+    .first()
+    .getAttribute('data-conversation-id');
+  expect(sessionId, '会话应有 data-conversation-id').toBeTruthy();
+
+  // 切风格的小工具:点 trigger + 选指定 menuitem + 验徽标状态
+  // WHY:ComposerToolbar.tsx 的徽标 .style-badge 仅在非 default 风格时显示
+  // (default 的 label 是空串,见 styles.ts:STYLE_LABELS)。所以 "默认" 选中后
+  // 徽标应消失,其余风格选中后徽标文本 = label。
+  async function selectStyle(label: '默认' | '简洁' | '专业'): Promise<void> {
+    await page.locator('button[aria-label="选择回复风格"]').click();
+    const item = page.getByRole('menuitem', { name: label });
+    await expect(item, `${label} menuitem 应可见`).toBeVisible({ timeout: 3_000 });
+    await item.click();
+    if (label === '默认') {
+      await expect(
+        page.locator('.style-badge'),
+        'Composer 徽标在 default 时应隐藏(label 空串)',
+      ).toHaveCount(0, { timeout: 3_000 });
+    } else {
+      await expect(page.locator('.style-badge'), `Composer 徽标应显示 ${label}`).toHaveText(
+        label,
+        { timeout: 3_000 },
+      );
+    }
+  }
+
+  // 1. 切到"专业" → 发消息(触发 llm_B 重建 + SystemMessage 切专业段)
+  await selectStyle('专业');
+  await sendMessageAndWaitForReply(page, '切到专业后第一条', { timeoutMs: 60_000 });
+
+  // 2. 切到"简洁" → 发消息(触发 llm_C 重建)
+  await selectStyle('简洁');
+  await sendMessageAndWaitForReply(page, '切到简洁后第二条', { timeoutMs: 60_000 });
+
+  // 3. 切回"默认" → 发消息(触发 llm_D 重建 + SystemMessage 切回默认段)
+  await selectStyle('默认');
+  await sendMessageAndWaitForReply(page, '切回默认后第三条', { timeoutMs: 60_000 });
+
+  // 4. 关键断言:来回切三次后,最后一次 LLM 收到的 SystemMessage 应处于
+  //    "已切回默认" 状态。``default`` 风格按设计**不**注入任何【回复风格 · X】段
+  //    (见 nexus/backend/agent/_system_prompt.py:249 ``if style != "default":``),
+  //    所以验证方式是"无【回复风格 · X】段"而非"含【回复风格 · 默认】段"。
+  //    这才是 backend 真重建 + cache bucket 切对的证据 —— 假若切回 default
+  //    时 cache 残留前一次的 professional 段,会触发"含回复风格 · 专业"误报。
+  const payload = await page.evaluate(async () => {
+    const r = await fetch('/api/e2e/last-messages');
+    if (!r.ok) throw new Error(`/api/e2e/last-messages returned ${r.status}`);
+    return (await r.json()) as {
+      messages: Array<{ type: string; content: unknown }>;
+    };
+  });
+  expect(payload.messages.length, '应至少收到一组 messages').toBeGreaterThan(0);
+
+  const sysMsg = payload.messages.find((m) => m.type === 'SystemMessage');
+  expect(sysMsg, '应至少有一条 SystemMessage').toBeTruthy();
+  const sysContent =
+    typeof sysMsg!.content === 'string'
+      ? sysMsg!.content
+      : JSON.stringify(sysMsg!.content);
+  // 4a. 切回默认后,SystemMessage **不应**含任何【回复风格 · X】段(default 静默)。
+  //     这是 backend 重建正确 + cache bucket 切对的硬证据。
+  expect(
+    sysContent,
+    '来回切三次后,最后 LLM 收到的 SystemMessage 不应含【回复风格 · X】段(default 风格按设计不注入)',
+  ).not.toMatch(/回复风格 · (默认|简洁|专业)/);
+  // 4b. 同时验:HumanMessage 真收到第三次 send 的内容(证明真第三次 invoke,
+  //     避免 mock LLM 拿不到风格的默认 fallback 路径误判为"无风格段 = 通过")。
+  const humanMessages = payload.messages.filter((m) => m.type === 'HumanMessage');
+  const matchingHuman = humanMessages.find((m) => {
+    const c = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+    return c.includes('切回默认后第三条');
+  });
+  expect(
+    matchingHuman,
+    'LLM 应真收到第三次 send 的内容(证明来回切都有 invoke 走到 LLM)',
+  ).toBeTruthy();
+
+  // 5. 同时验:最后一次 send 的 WS 帧 style === 'default'
+  const frames = await readSentFrames(page);
+  const lastUserMsgFrame = [...frames]
+    .reverse()
+    .find(
+      (f) =>
+        f['content'] === '切回默认后第三条' &&
+        typeof f['session_id'] === 'string' &&
+        f['session_id'] === sessionId,
+    );
+  expect(
+    lastUserMsgFrame,
+    '应捕获到第三条 send 的 user_message 帧',
+  ).toBeTruthy();
+  expect(lastUserMsgFrame!['style'], '最后一次 WS 帧 style 必须是 default').toBe('default');
+});
