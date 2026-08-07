@@ -451,3 +451,54 @@ def test_ws_final_content_excludes_thinking(monkeypatch) -> None:
                 assert "</thinking>" not in final["content"]
                 assert "internal" not in final["content"]
                 assert final["content"] == "Final answer"
+
+
+# ---------------- Round 6.1 回归：注入 agent 不被销毁 ----------------
+
+
+def test_ws_patched_agent_is_not_destroyed_by_style_check(monkeypatch) -> None:
+    """Round 6.1 回归：当外部注入 agent（``patch(main._agent, ...)``）
+    时,``_agent_singleton_style`` 仍是 ``None``,``_get_current_agent`` 不应
+    因为 ``None != style`` 误判"风格已变更"而销毁注入实例,导致 WS
+    handler 走 60s ready gate。
+
+    验证:即使带 ``style="professional"`` 帧进来,patched mock 仍被使用,
+    而不是被 None 替代。
+    """
+    from nexus.backend import main as main_module
+
+    _authed_token(monkeypatch)
+
+    async def astream_events_factory(input, **kwargs):  # noqa: ARG001
+        yield {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": MagicMock(content="ok")},
+        }
+
+    with TestClient(app) as client:
+        # 必须在 TestClient lifespan 启动后再 patch
+        with patch("nexus.backend.main._agent") as mock_agent:
+            mock_agent.astream_events = astream_events_factory
+            # 模拟外部注入:_agent_singleton_style 留 None
+            monkeypatch.setattr(main_module, "_agent_singleton_style", None)
+            monkeypatch.setattr(main_module, "_agent_init_started", False)
+
+            with client.websocket_connect("/api/ws?token=test-token") as ws:
+                ws.send_json(
+                    {
+                        "content": "hello",
+                        "title": "round61-style-regression",
+                        "style": "professional",
+                    }
+                )
+
+                # 30s 内必须收到 done 或 error（不应卡 60s ready gate）
+                events = _collect_until_done(ws, max_events=200)
+                assert len(events) > 0
+                last = events[-1]
+                assert last.get("type") in {"done", "error"}
+
+                # 关键断言:_agent 仍是我们 patch 的 mock,未被 None 替代
+                assert main_module._agent is mock_agent
+                # _agent_singleton_style 仍为 None（不被错误写入）
+                assert main_module._agent_singleton_style is None

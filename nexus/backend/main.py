@@ -559,8 +559,13 @@ def _ensure_agent_async(app, style: str = "default") -> None:
     """
     global _agent_init_started, _agent_ready_event, _agent, _agent_singleton_style
     with _agent_lock:
-        # 风格变化 → 必须重建
-        if _agent is not None and _agent_singleton_style != style:
+        # 风格变化 → 必须重建。
+        # 边界:`_agent_singleton_style is None` 表示 agent 是外部注入的(``_set_global_agent``
+        # 或测试 ``patch(main._agent, ...)``),风格"未知",不该当作"风格已变更"
+        # 销毁现有实例 —— 否则测试 mock 会被无条件抹掉,WS handler 卡 60s ready gate。
+        # 生产路径上 `_ensure_agent_ready` 成功后必写 `_agent_singleton_style`,
+        # 正常风格切换 default↔其它 逻辑不受影响。
+        if _agent is not None and _agent_singleton_style is not None and _agent_singleton_style != style:
             _agent = None
             _agent_singleton_style = None
             _agent_init_started = False
@@ -600,8 +605,13 @@ def _get_current_agent(style: str = "default") -> Any:
     """
     global _agent, _agent_singleton_style, _agent_init_started
     with _agent_lock:
-        if _agent is not None and _agent_singleton_style != style:
-            # 风格切换:清 prompt 缓存 + 现有 agent 实例,触发重建
+        # 风格切换:清 prompt 缓存 + 现有 agent 实例,触发重建。
+        # 边界:`_agent_singleton_style is None` 表示 agent 是外部注入的
+        # (``_set_global_agent`` 或测试 ``patch(main._agent, ...)``),
+        # 风格"未知",不该当作"风格已变更"销毁 — 否则测试 mock 会被抹掉,
+        # WS handler 卡 60s ready gate。生产路径上 ``_ensure_agent_ready``
+        # 成功后必写 ``_agent_singleton_style``,正常 default↔其它 切换不受影响。
+        if _agent is not None and _agent_singleton_style is not None and _agent_singleton_style != style:
             reload_system_prompt()
             _agent = None
             _agent_singleton_style = None
