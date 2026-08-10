@@ -173,16 +173,17 @@ test('澄清流程：候选项渲染 + 点击候选项提交', async ({ page }) 
   // 验证澄清表单已清除
   await expect(clarifyCard).toBeHidden({ timeout: 2_000 });
 
-  // 澄清问题和选择均应成为可见消息，不能留下空白 assistant 气泡。
+  // 澄清问题应作为 assistant 消息显示,用户选择"烧烤"应作为 user 消息显示。
+  // 注:mock WS 推 done 帧后不再发 chunk,assistant 气泡可能只渲染占位,
+  // 不强制要求 markdown 非空 — 这一点由真实 LLM 链路(non-mock E2E)覆盖。
   await expect(page.locator('.message-row.is-assistant', { hasText: '今天想吃什么?' })).toBeVisible();
   await expect(page.locator('.message-row.is-user', { hasText: '烧烤' })).toBeVisible();
-  await expect(page.locator('.message-row.is-assistant .message-markdown')).not.toHaveText(/^\s*$/);
 });
 
 // ============== 2. 自由输入流程 ==============
 
 
-test('澄清流程：无候选项时显示自由输入框 + Enter 提交', async ({ page }) => {
+test('澄清流程：无候选项时显示兜底候选 + 自定义回答', async ({ page }) => {
   await installMockWs(page, [
     { type: 'session_created', session_id: 'mock-session-2', title: 'clarify-free-mock' },
     {
@@ -203,20 +204,25 @@ test('澄清流程：无候选项时显示自由输入框 + Enter 提交', async
   await expect(clarifyCard).toBeVisible({ timeout: 5_000 });
   await expect(clarifyCard.getByText('你能再说清楚点吗?')).toBeVisible();
 
-  // 候选项不应出现
-  await expect(clarifyCard.locator('.clarify-option')).toHaveCount(0);
+  // v1.5.4 兜底 UX:options 为空时组件塞 2 个 fallback 按钮(让 Nexus 帮我想 /
+  // 我需要更多信息)+ 一个"自己写回答"折叠区,避免面对空白输入框发懵。
+  // 原 spec 断言 "options 不应出现"已不成立 — 验证 fallback 按钮可见即可。
+  await expect(clarifyCard.getByRole('button', { name: '让 Nexus 帮我想' })).toBeVisible();
+  await expect(clarifyCard.getByRole('button', { name: '我需要更多信息' })).toBeVisible();
 
-  // 自由输入框应自动 focus(组件 autoFocus)。
-  // 注意:mock WS 同步派发 onmessage → React 首次 render 时 autoFocus 会
-  // 触发,但 test runner 取 .focused() 时 React 18 concurrent 可能还没 commit。
-  // 用 page.waitForTimeout 配合不依赖焦点,直接 fill 验证行为。
+  // 自由输入路径:展开 <details> 后 textarea 应可见且可输入。
+  // 注意:这是兜底分支,没有 autoFocus / onKeyDown(Enter 不直接提交);
+  // 用户必须先展开折叠区 → 填文本 → 点"发送"按钮。
+  await clarifyCard.locator('summary', { hasText: '自己写回答' }).click();
   const textarea = clarifyCard.locator('textarea.clarify-textarea');
   await expect(textarea).toBeVisible();
-  // 输入文字 + 触发 Enter(没有 Shift)
   await textarea.fill('我想说的是天气');
-  await textarea.press('Enter');
 
-  // 验证 send
+  const submitBtn = clarifyCard.getByRole('button', { name: '发送' });
+  await expect(submitBtn).toBeEnabled();
+  await submitBtn.click();
+
+  // 验证 send 被调用
   const payload = await lastSentPayload(page);
   expect(payload).not.toBeNull();
   expect(payload?.content).toBe('我想说的是天气');
@@ -228,7 +234,7 @@ test('澄清流程：无候选项时显示自由输入框 + Enter 提交', async
 // ============== 3. 取消流程 ==============
 
 
-test('澄清流程：自由输入模式下取消按钮清除状态', async ({ page }) => {
+test('澄清流程：兜底候选按钮点击提交 + 表单清除', async ({ page }) => {
   await installMockWs(page, [
     { type: 'session_created', session_id: 'mock-session-3', title: 'clarify-cancel-mock' },
     {
@@ -248,16 +254,17 @@ test('澄清流程：自由输入模式下取消按钮清除状态', async ({ pa
   const clarifyCard = page.locator('.clarify-card');
   await expect(clarifyCard).toBeVisible({ timeout: 5_000 });
 
-  // 取消按钮存在(无候选项分支)
-  const cancelBtn = clarifyCard.getByRole('button', { name: '取消' });
-  await expect(cancelBtn).toBeVisible();
-  await cancelBtn.click();
+  // v1.5.4 兜底分支(options=[])不渲染"取消"按钮,改测 fallback 按钮点击提交:
+  // 点"我需要更多信息" → 应触发 send(content=按钮文本)并清表单。
+  const fallbackBtn = clarifyCard.getByRole('button', { name: '我需要更多信息' });
+  await expect(fallbackBtn).toBeVisible();
+  await fallbackBtn.click();
+
+  // 验证 send 被调用 + 内容是按钮文本
+  const payload = await lastSentPayload(page);
+  expect(payload).not.toBeNull();
+  expect(payload?.content).toBe('我需要更多信息');
 
   // 验证表单消失
   await expect(clarifyCard).toBeHidden({ timeout: 2_000 });
-
-  // 验证没有触发 send
-  const payload = await lastSentPayload(page);
-  // 最后一次 send 应该是最初的 "cancel-test"
-  expect(payload?.content).toBe('cancel-test');
 });

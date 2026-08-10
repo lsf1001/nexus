@@ -23,7 +23,10 @@ import { useAutoScroll } from './hooks/useAutoScroll';
 import { useChatAreaActions } from './hooks/useChatAreaActions';
 import { useChatSend } from './hooks/useChatSend';
 import { type ChatStreamActions, useChatStream } from './hooks/useChatStream';
+import { useDraft } from './hooks/useDraft';
+import { useDraftConflict } from './hooks/useDraftConflict';
 import { useWsMessageRouter, type WsRouterCtx } from './hooks/useWsMessageRouter';
+import { useToastStore } from '../../store/useToast';
 import type { LastError, PendingClarification } from './types';
 
 export interface ChatAreaProps {
@@ -66,22 +69,19 @@ export function ChatArea({
   const clearConversationMessages = useStore((s) => s.clearConversationMessages);
   const pendingConfirmation = useStore((s) => s.pendingConfirmation);
   const setPendingConfirmation = useStore((s) => s.setPendingConfirmation);
+  // Round 2(2026-07-24):草稿按 project 隔离 — 切 project 后各自草稿独立保留。
+  const activeProjectId = useStore((s) => s.activeProjectId);
 
   useEffect(() => {
     sessionIdRef.current = conversationIdProp;
   }, [conversationIdProp]);
 
-  // === resetTrigger 同步状态 ===
-  useEffect(() => {
-    if (resetTrigger && resetTrigger > resetTriggerRef.current) {
-      clearConversationMessages();
-      setInput('');
-      setPendingClarification(null);
-      setPendingConfirmation(null);
-      setLastError(null);
-    }
-    resetTriggerRef.current = resetTrigger ?? 0;
-  }, [resetTrigger, clearConversationMessages, setPendingConfirmation]);
+  // === useDraft 解构必须在所有引用 clearDraft / loadOnMount / saveDraftEffect
+  // 的 useEffect 之前声明,否则 React commit 阶段同步求值 deps 数组时撞 TDZ
+  // (ReferenceError: Cannot access 'clearDraft' before initialization),导致
+  // ErrorBoundary 卸载整个 ChatView 树(e2e settings spec 暴露的就是这条链路)。
+  // useDraft 内部三个回调都是 useCallback([]),引用稳定,提前解构不影响 hooks 状态。
+  const { loadOnMount, saveDraftEffect, clearDraft } = useDraft();
 
   // === 消息流操作(替代原 messagesRef mutate) ===
   const stream: ChatStreamActions = useChatStream();
@@ -92,6 +92,36 @@ export function ChatArea({
     setLastError,
   });
 
+  // === resetTrigger 同步状态 ===
+  // 2026-07-22 修复:必须重置 isLoading + disarm watchdog。否则上一轮流如果
+  // 是经 mock reflection / 已停止 路径提前结束(stoppedRef 门控掉后续 chunk,
+  // 或 mock LLM 走反思 done 帧的时序刚好让 last content 不写 store),handleDone
+  // 帧可能不会被 wsHandlers 收到 → store.isLoading 残留 true → Composer 渲染
+  // stop-button(send-button stop-button) → 用户切到新会话后 sendButton selector
+  // 命中 stop-button 而不是 send → click 不发消息(quick-prompts-and-history
+  // spec 暴露的就是这条链路)。
+  // 必须放在 useLoadingWatchdog 之后 — disarmWatchdog 是它的返回值,在
+  // 调用前 closure 引用会撞 TDZ(React 19 + Vite + ReferenceError)。
+  useEffect(() => {
+    if (resetTrigger && resetTrigger > resetTriggerRef.current) {
+      // 切会话前同步清草稿 + 取消 pending 防抖 timer,避免"setInput('') 触发
+      // 500ms 后 removeDraft" 跟"用户已写新草稿但 timer 尚未触发"竞争。
+      // WHY:loadedRef 让 loadOnMount 只跑一次,所以"切会话再读旧草稿"不会发生,
+      // 但 resetTrigger 内的 setInput('') → useEffect → saveDraftEffect('') →
+      // 500ms 后 removeDraft 仍会清掉草稿。这条路径是用户切到新会话时把旧会话
+      // 草稿擦掉的根因(SPEC 第十一轮-2,2026-07-23)。
+      clearDraft(activeProjectId);
+      clearConversationMessages();
+      setInput('');
+      setIsLoading(false);
+      disarmWatchdog();
+      setPendingClarification(null);
+      setPendingConfirmation(null);
+      setLastError(null);
+    }
+    resetTriggerRef.current = resetTrigger ?? 0;
+  }, [resetTrigger, clearConversationMessages, setIsLoading, disarmWatchdog, setPendingConfirmation, clearDraft, activeProjectId]);
+
   // === WS 连接 — 鉴权走 subprotocol ===
   // 2026-07-20:WsRouterCtx 不再含 stream — wsHandlers.handleChunk / handleThinking
   // / handleFinal 都改用 useStore.getState().appendAssistantPatch,直接读 store,
@@ -99,6 +129,10 @@ export function ChatArea({
   // 全是 useState setter(本就稳定)+ useCallback(依赖稳定),useMemo 几乎可以
   // 移除 — 这里保留 useMemo 是为了未来扩展 setLastError 等可能在 ChatArea 内
   // 重建的 setter 仍走稳定路径。
+  // 2026-08-08 Round 6.2:getLastError 用 useCallback 包成稳定引用,wsHandler
+  // 用它 gate "chunk 帧只在 stale lastError 实际显示时才清",避免每次 chunk
+  // 都触发 setter call。
+  const getLastError = useCallback(() => lastError, [lastError]);
   const wsCtx = useMemo<WsRouterCtx>(
     () => ({
       setLastError,
@@ -106,9 +140,10 @@ export function ChatArea({
       setPendingClarification,
       setPendingConfirmation,
       disarmWatchdog,
+      getLastError,
       onSessionCreated,
     }),
-    [setLastError, setIsLoading, setPendingClarification, setPendingConfirmation, disarmWatchdog, onSessionCreated],
+    [setLastError, setIsLoading, setPendingClarification, setPendingConfirmation, disarmWatchdog, getLastError, onSessionCreated],
   );
   const handleWsMessage = useWsMessageRouter(wsCtx);
 
@@ -141,12 +176,57 @@ export function ChatArea({
   // 不能是末尾空 div messagesEndRef — 那个 div 没有 overflow,smooth
   // scrollTo 不会带动父容器。2026-07-13 真 LLM multi-turn 暴露 viewport
   // ratio 0,根因就在这里。===
-  useAutoScroll({
+  // 第十一轮:返回 userScrolledUp + scrollToBottom,ChatArea 条件渲染浮动按钮。
+  const { userScrolledUp, scrollToBottom } = useAutoScroll({
     trigger: [displayMessages.length, isLoading],
     containerRef: chatScrollRef,
   });
 
+  // === 草稿持久化(第十一轮,2026-07-23) ===
+  // 见 ./hooks/useDraft.ts 实现注释。Level 1 行为:
+  //   - 读:挂载 + conversationId 为空 → 读 localStorage → 填回 input + toast
+  //   - 写:input 变化 + 500ms 防抖
+  //   - 清:send 成功后(走 clearInput wrapper)同步 removeItem
+  //
+  // #13 草稿文案明确化(2026-07-23):当前是 Level 1 — 单草稿跨会话不复用,
+  // 仅在 conversationId 为空(无会话)时读出。有会话时切回旧会话会丢半句 prompt,
+  // 是有意取舍(YAGNI:per-conversationId 草稿会让 localStorage 膨胀 + 多数用户
+  // 实际场景是"快速切换会话后回到最新草稿")。toast 文案 "已恢复未提交草稿" 明
+  // 确告知用户这是未发送的内容,避免和"已发送历史消息"混淆。后续如收到用户反馈
+  // "切回旧会话丢草稿"再升级到 Level 2(per-conversationId + TTL)。
+  useEffect(() => {
+    loadOnMount(activeProjectId, conversationIdProp, setInput);
+    // 只在挂载时跑一次(hook 内部用 ref 自管)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // activeProjectId 故意不放 deps:切 project 时 hook 内部 saveDraftEffect
+  // 会被新 callback 调一次(send/clear 路径),此 effect 仅在 input 文本变化
+  // 时落 localStorage;activeProjectId 通过 closure 捕获,每次 render 都最新。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => saveDraftEffect(activeProjectId, input), [input, saveDraftEffect]);
+
+  // === 多 tab 草稿冲突提示(Round 2,2026-07-30,SPEC §4.6)===
+  // 另一 tab 改了同 project 的 nexus-draft-{pid} → toast 提示用户。
+  // 降级为 warn(8000ms):useToast store API 仅 (kind, message, durationMs),
+  // 不支持 plan 模板里的 {title, body, actions} 结构 — actions 是 nice-to-have,
+  // 让用户手动对比/恢复即可(useDraft 已自动 writeDraft,reload 后能恢复)。
+  useDraftConflict({
+    projectId: activeProjectId,
+    onConflict: ({ remoteText }) => {
+      const preview =
+        remoteText.length > 60 ? `${remoteText.slice(0, 60)}…` : remoteText
+      useToastStore
+        .getState()
+        .push('warn', `另一窗口刚修改草稿: ${preview}`, 8000)
+    },
+  });
+
   // === 单一发送入口 ===
+  // 第十三轮(2026-07-30):Composer 提交时把已上传附件的 server ids 一并传给
+  // useChatSend,由它写到 WSMessage.attachment_ids(后端 sessions.build_prompt
+  // 按需拼 multi-part;空数组走纯 text 路径零回归)。clearInput 走自定义
+  // wrapper:不仅 setInput(''),还同步清掉 localStorage 草稿(否则 debounce
+  // 500ms 内 reload 会重新读回已发送的内容)。
   const send = useChatSend({
     wsConnected,
     getReadyState,
@@ -154,7 +234,10 @@ export function ChatArea({
     send: sendFn,
     setIsLoading,
     setLastError,
-    clearInput: () => setInput(''),
+    clearInput: () => {
+      clearDraft(activeProjectId);
+      setInput('');
+    },
     armWatchdog,
     pushUserAndPlaceholder: stream.pushUserAndPlaceholder,
   });
@@ -218,6 +301,17 @@ export function ChatArea({
             onRetry={handleRetry}
           />
         )}
+        {userScrolledUp && (
+          <button
+            type="button"
+            className="jump-to-bottom"
+            onClick={() => scrollToBottom(true)}
+            aria-label="跳到底部"
+            title="跳到底部"
+          >
+            <span aria-hidden="true">↓</span> 跳到底部
+          </button>
+        )}
         {pendingClarification && (
           <ClarificationForm
             question={pendingClarification.question}
@@ -266,13 +360,18 @@ export function ChatArea({
         <Composer
           value={input}
           onChange={setInput}
-          onSubmit={() => send(input)}
+          // 第十三轮:Composer 提交时把已上传附件的 server ids 一并 forward 给 useChatSend,
+          // 由 useChatSend 写到 WSMessage.attachment_ids 字段。Composer's onSubmit 实际
+          // 永远以 (serverIds: string[]) 单参调用,我们接住它传给 send 的第 2 个参数。
+          onSubmit={(serverIds: readonly string[]) => send(input, serverIds)}
           onKeyDown={handleKeyDown}
           placeholder={composerPlaceholder}
           disabled={!wsConnected}
           isLoading={isLoading}
           onStop={handleStop}
           inputRef={inputRef}
+          // Round 6.1:把当前会话 id 透传给 ComposerToolbar 用于风格 PATCH
+          sessionId={conversationIdProp}
         />
       </div>
     </div>

@@ -1,6 +1,8 @@
 import asyncio
+import json
 import logging
 import os
+import sqlite3
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .agent import _reset_checkpointer_cache, create_agent
+from .agent._system_prompt import reload_system_prompt
 from .api.ws import (
     _clients_lock,
     _extract_ws_token,
@@ -19,13 +22,18 @@ from .api.ws import (
     handle_websocket,
     require_token,
 )
-from .config import CONFIG
-from .mcp import find_mcp_config, load_all_mcp_tools
+from .config import CONFIG, _get_nexus_home
+from .mcp import _load_tools_for_server, load_all_mcp_tools
 from .memory import USER_MEMORY_PATH
 from .models_config import get_active_model
 from .observability import setup_logging
 from .routes import model_config as model_config_routes
+from .routes import plugins as plugins_routes
+from .routes import projects as projects_routes
+from .search import router as search_router
 from .sessions import router as sessions_router
+from .share import public_share_router
+from .share import router as share_router
 from .skills import scan_skills_dir
 
 _agent = None
@@ -35,6 +43,9 @@ _agent_lock = threading.RLock()
 # 避免首条消息到达时 _agent 仍为 None,被 _run_agent_streaming 拒为 agent_unavailable。
 # 后台线程构造完成后 set;timeout 60s 后放弃,走原错误路径。
 _agent_ready_event: asyncio.Event | None = None
+# Round 6.1 风格维度:跟踪当前 _agent 实例对应的 style;切换风格时
+# _get_current_agent(style) 触发 reload + 清 _agent,走重建路径。
+_agent_singleton_style: str | None = None
 
 _main_loop: asyncio.AbstractEventLoop | None = None
 
@@ -90,7 +101,11 @@ def _get_frontend_path() -> Path | None:
     return None
 
 
-def _create_agent_with_model(model_config: dict | None = None, mcp_tools: list[Any] | None = None):
+def _create_agent_with_model(
+    model_config: dict | None = None,
+    mcp_tools: list[Any] | None = None,
+    style: str = "default",
+):
     """使用指定模型配置创建 Agent。"""
     if model_config is None:
         model_config = get_active_model()
@@ -112,6 +127,7 @@ def _create_agent_with_model(model_config: dict | None = None, mcp_tools: list[A
         api_base=api_base,
         temperature=temperature,
         mcp_tools=mcp_tools or [],
+        style=style,
     )
 
 
@@ -134,6 +150,40 @@ async def lifespan(app: FastAPI):
     from .db import init_db
 
     init_db()
+    # Round 1 SPEC §4.2: 默认 Project 自动迁移 — DB 初始化后立即跑,
+    # 确保 sessions.project_id 不为 NULL,后续 agent 构造能立即拿到上下文。
+    try:
+        from .projects.storage import (
+            ensure_default_project,
+            migrate_sessions_to_default,
+        )
+
+        ensure_default_project()
+        migrate_sessions_to_default()
+    except (OSError, sqlite3.OperationalError, sqlite3.IntegrityError) as exc:
+        # 环境异常(磁盘满 / 权限 / FK 半迁移状态):降级 warning + 继续启动,
+        # 让旧 Nexus 安装(没有 ~/Nexus/projects/ 目录)能成功跑起来。
+        # 真正的系统错误继续向外抛,例如后续 SPEC §5.1 严格化时直接 raise。
+        logger.warning("[projects] 默认 Project 迁移失败(继续启动): %s", exc, exc_info=True)
+    # 恢复上次激活的 Project；必须在默认 Project 创建后验证 DB 行是否存在。
+    try:
+        from .agent._system_prompt import set_active_project_id
+        from .db import get_db
+        from .projects.storage import read_active_project_id
+
+        active_project_id = read_active_project_id()
+        if active_project_id is not None:
+            with get_db() as conn:
+                project_exists = conn.execute(
+                    "SELECT 1 FROM projects WHERE id = ?",
+                    (active_project_id,),
+                ).fetchone()
+            if project_exists is not None:
+                set_active_project_id(active_project_id)
+            else:
+                logger.warning("[projects] active Project 不存在,跳过恢复: %s", active_project_id)
+    except (OSError, json.JSONDecodeError, sqlite3.Error) as exc:
+        logger.warning("[projects] active Project 恢复失败(继续启动): %s", exc, exc_info=True)
     # 扫描运行时 skills(2026-07-15 引入)
     # WHY init_db 之后:skill 加载失败不应阻断 DB 初始化。
     # WHY 单独 try-except:用户 ~/.nexus/skills/ 损坏不该阻断整个启动。
@@ -142,8 +192,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001 — 兜底任意扫描异常,不阻断启动
         logger.warning("[skills] scan 失败,继续启动(无 skill 可用): %s", e, exc_info=True)
     # 清空 system prompt 缓存,下次 get_system_prompt 会拼上新加载的 skills
-    from .agent._system_prompt import reload_system_prompt
-
     reload_system_prompt()
     # MCP 加载延后到 agent 首次构造时（省 0.5-3s）
     _mcp_tools = []
@@ -179,7 +227,7 @@ async def lifespan(app: FastAPI):
     _reset_checkpointer_cache()
 
 
-def _ensure_agent_ready(app) -> None:
+def _ensure_agent_ready(app, style: str = "default") -> None:
     """懒构造 Agent：首次调用时同步阻塞完成。
 
     由于构造过程涉及 langchain / deepagents 的大量 import，无法在 async 上下文
@@ -190,8 +238,11 @@ def _ensure_agent_ready(app) -> None:
     正则),judge_llm 也不再需要。质量门走 deepagents RubricMiddleware
     (见 agent.py QualityGateMiddleware + MemoryFilter)。本函数只构造
     Agent + MCP,不再附加 LLM 全局。
+
+    Round 6.1:加 ``style`` 参数透传到 ``create_agent``;构造成功后记录
+    ``_agent_singleton_style``,后续风格变化时由 ``_get_current_agent`` 检测并触发重建。
     """
-    global _agent, _mcp_tools
+    global _agent, _mcp_tools, _agent_singleton_style
     with _agent_lock:
         if _agent is not None:
             return
@@ -203,9 +254,10 @@ def _ensure_agent_ready(app) -> None:
             except Exception as e:  # noqa: BLE001
                 logger.warning("MCP 加载失败，继续启动: %s", e, exc_info=True)
                 _mcp_tools = []
-        new_agent = _create_agent_with_model(mcp_tools=_mcp_tools)
+        new_agent = _create_agent_with_model(mcp_tools=_mcp_tools, style=style)
         if new_agent is not None:
             _agent = new_agent
+            _agent_singleton_style = style
 
 
 app = FastAPI(title="Nexus Backend", lifespan=lifespan)
@@ -222,8 +274,34 @@ API_PREFIX = "/api"
 
 # 注册会话路由
 app.include_router(sessions_router)
+# Round 3 Task 3.2:全文搜索路由(/api/search/messages)
+app.include_router(search_router)
+# Round 3 Task 3.3:share token CRUD + 公开 markdown(/api/share/{token})
+app.include_router(share_router)
+app.include_router(public_share_router)
 # 注册模型配置路由
 app.include_router(model_config_routes.router)
+# Round 1 SPEC §4.3:Project REST API(Round 1 骨架第三步)
+app.include_router(projects_routes.router)
+# Round 2 SPEC §4.3:附件上传 REST API(POST/GET/DELETE /api/attachments)
+from .routes.attachments import router as attachments_router  # noqa: E402
+
+app.include_router(attachments_router)
+# Round 4 Task 4.3:语音转写 endpoint(POST /api/asr,Whisper + mock fallback)
+from .routes.asr import router as asr_router  # noqa: E402
+
+app.include_router(asr_router)
+# Round 5 Task 5.1:插件清单路由(GET /api/plugins)
+app.include_router(plugins_routes.router)
+
+# Round 4 T4.4: E2E 诊断端点(GET /api/e2e/last-messages),仅
+# NEXUS_E2E_MOCK=1 时挂载 — 生产路径不应暴露 LLM 注入链路观测面。
+# 路由内部还会再 check 一次 env, 双重保险让任何漏配都返回 404
+# 而不是泄露消息内容。
+if os.environ.get("NEXUS_E2E_MOCK") == "1":
+    from .routes.e2e_diagnostics import router as e2e_diagnostics_router  # noqa: E402
+
+    app.include_router(e2e_diagnostics_router)
 
 # CORS 白名单：环境变量 NEXUS_ALLOWED_ORIGINS 逗号分隔；默认本地开发地址
 _cors_origins = [
@@ -345,36 +423,106 @@ async def get_memory() -> dict[str, Any]:
 
 
 @app.get(f"{API_PREFIX}/mcp/tools", dependencies=[Depends(require_token)])
-async def get_mcp_tools() -> dict[str, Any]:
-    """列出已连接的 MCP 服务器与加载到的工具(供前端工具面板展示)。
+async def get_mcp_tools(project_id: str | None = None) -> dict[str, Any]:
+    """列出当前 Project 的 MCP 服务器与工具(供前端工具面板展示)— SPEC §4.5。
 
-    复用主进程已加载的 ``_mcp_tools`` 全局(agent 构造时由 load_all_mcp_tools
-    填充),不重新 spawn stdio server,避免每次请求 8s 超时。find_mcp_config
-    给出服务器配置来源,用于展示"已配置但未加载"的服务器。
+    Query:
+        ``project_id``:可选。缺省时按以下顺序回退(与 ``/skills`` 端点一致):
+            1. ``~/.nexus/active_project.json``(前端 ``setActiveProject`` 写入)
+            2. ``"default"``
+
+    per-project mcp.json 由 :func:`load_mcp_config_for_project` 解析,
+    再走现有 ``_load_tools_for_server`` 临时加载每个 server 的 tools(本轮"够用"
+    标准;agent 热重建复用 ``_mcp_tools`` 全局的路径留后续轮)。单个 server 失败
+    只记 warning 并跳过,不整体报错(工具面板容错优先)。
+
+    返回结构保持不变(``servers`` / ``tools`` / ``server_count`` / ``tool_count``),
+    前端 ``McpToolsResponse`` 依赖;仅新增 ``project_id`` 字段。
     """
-    global _mcp_tools
-    servers = find_mcp_config()
+    from .projects.mcp_loader import load_mcp_config_for_project
+
+    resolved_id = project_id
+    if not resolved_id:
+        active_file = _get_nexus_home() / "active_project.json"
+        if active_file.exists():
+            try:
+                import json
+
+                payload = json.loads(active_file.read_text(encoding="utf-8"))
+                resolved_id = payload.get("active_project_id")
+            except (OSError, json.JSONDecodeError):
+                resolved_id = None
+    resolved_id = resolved_id or "default"
+
+    server_cfgs = load_mcp_config_for_project(resolved_id)
     server_list = [
         {
             "name": s.get("name", "unknown"),
             "source": s.get("source", ""),
             "enabled": s.get("disabled", False) is False,
         }
-        for s in servers
+        for s in server_cfgs
     ]
-    tools = [
-        {
-            "name": getattr(t, "name", str(t)),
-            "description": (getattr(t, "description", "") or "").strip(),
-        }
-        for t in (_mcp_tools or [])
-    ]
+
+    tools_out: list[dict[str, str]] = []
+    for cfg in server_cfgs:
+        name = cfg.get("name", "unknown")
+        try:
+            server_tools = await _load_tools_for_server(name, cfg)
+        except OSError as exc:
+            logger.warning("加载 MCP 服务器 %s 失败: %s", name, exc)
+            continue
+        for t in server_tools:
+            tools_out.append(
+                {
+                    "name": getattr(t, "name", str(t)),
+                    "description": (getattr(t, "description", "") or "").strip(),
+                }
+            )
+
     return {
+        "project_id": resolved_id,
         "servers": server_list,
-        "tools": tools,
+        "tools": tools_out,
         "server_count": len(server_list),
-        "tool_count": len(tools),
+        "tool_count": len(tools_out),
     }
+
+
+@app.get(f"{API_PREFIX}/skills", dependencies=[Depends(require_token)])
+async def list_project_skills(project_id: str | None = None) -> dict[str, Any]:
+    """列出当前 Project 的可用 skills — SPEC §4.4。
+
+    Query:
+        ``project_id``:可选。缺省时按以下顺序回退:
+            1. ``~/.nexus/active_project.json``(前端 ``setActiveProject`` 写入)
+            2. ``"default"``
+
+    Returns:
+        ``{"project_id": str, "skills": [{"name", "path", "source"}]}``
+        失败 / Project 不存在 → ``skills=[]``(绝**不**返回 404,
+        skills 是 best-effort 特性,前端拿到空 list 自然显示空态)。
+
+    WHY 不抛错:Settings / PreferencesModal 进入 Skills tab 时如果某个
+        Project 被删了,UI 不该白屏。
+    """
+    from .projects.skills_loader import list_skills
+
+    resolved_id = project_id
+    if not resolved_id:
+        active_file = _get_nexus_home() / "active_project.json"
+        if active_file.exists():
+            try:
+                import json
+
+                payload = json.loads(active_file.read_text(encoding="utf-8"))
+                resolved_id = payload.get("active_project_id")
+            except (OSError, json.JSONDecodeError):
+                resolved_id = None
+    resolved_id = resolved_id or "default"
+
+    skills = list_skills(resolved_id)
+    return {"project_id": resolved_id, "skills": skills}
 
 
 @app.get(f"{API_PREFIX}/model", dependencies=[Depends(require_token)])
@@ -400,12 +548,27 @@ _agent_init_started = False
 _app_ref: FastAPI | None = None
 
 
-def _ensure_agent_async(app) -> None:
+def _ensure_agent_async(app, style: str = "default") -> None:
     """懒构造 Agent：在子线程里跑，构造期间 /health 已经能 200。
     用一次性触发：一旦构造过就 noop。
+
+    Round 6.1 风格维度:如果传入的 style 与当前 ``_agent_singleton_style``
+    不一致,重置 ``_agent`` / ``_agent_singleton_style`` / ``_agent_init_started``,
+    强制下一轮走 create_agent 走新 style bucket。reload_system_prompt() 由
+    调用方 ``_get_current_agent`` 负责 —— 本函数只负责触发构造。
     """
-    global _agent_init_started, _agent_ready_event
+    global _agent_init_started, _agent_ready_event, _agent, _agent_singleton_style
     with _agent_lock:
+        # 风格变化 → 必须重建。
+        # 边界:`_agent_singleton_style is None` 表示 agent 是外部注入的(``_set_global_agent``
+        # 或测试 ``patch(main._agent, ...)``),风格"未知",不该当作"风格已变更"
+        # 销毁现有实例 —— 否则测试 mock 会被无条件抹掉,WS handler 卡 60s ready gate。
+        # 生产路径上 `_ensure_agent_ready` 成功后必写 `_agent_singleton_style`,
+        # 正常风格切换 default↔其它 逻辑不受影响。
+        if _agent is not None and _agent_singleton_style is not None and _agent_singleton_style != style:
+            _agent = None
+            _agent_singleton_style = None
+            _agent_init_started = False
         if _agent is not None or _agent_init_started:
             return
         _agent_init_started = True
@@ -414,7 +577,7 @@ def _ensure_agent_async(app) -> None:
 
     def _run_init_and_signal() -> None:
         try:
-            _ensure_agent_ready(app)
+            _ensure_agent_ready(app, style=style)
         finally:
             # 跨线程设置 asyncio.Event:必须用 call_soon_threadsafe
             if _main_loop and not _main_loop.is_closed() and _agent_ready_event is not None:
@@ -427,16 +590,34 @@ def _ensure_agent_async(app) -> None:
     ).start()
 
 
-def _get_current_agent() -> Any:
+def _get_current_agent(style: str = "default") -> Any:
     """返回当前 agent。Agent 尚未构造时返回 None;Gateway 走 astream 时
     会拿到 None → RuntimeError → 走 _send_error 错误路径(同 WS 行为)。
 
     入口兜底:WS 端 / Gateway 首次调用此函数都会触发 _ensure_agent_async,
     确保 WeChat 消息先于 WS 连接到达时也能进入懒构造路径。
     模块级函数,供 _AgentProxy 在 lifespan 后通过 lambda: _get_current_agent 解析。
+
+    Round 6.1 风格维度:style 与当前 ``_agent_singleton_style`` 不一致时,
+    reload_system_prompt() 清 system prompt 缓存(让下条消息走 cache miss
+    重建 prompt),然后清 ``_agent`` + 触发 _ensure_agent_async 走 create_agent
+    重建实例。默认 style='default' 走原 cache bucket,零行为变化。
     """
+    global _agent, _agent_singleton_style, _agent_init_started
+    with _agent_lock:
+        # 风格切换:清 prompt 缓存 + 现有 agent 实例,触发重建。
+        # 边界:`_agent_singleton_style is None` 表示 agent 是外部注入的
+        # (``_set_global_agent`` 或测试 ``patch(main._agent, ...)``),
+        # 风格"未知",不该当作"风格已变更"销毁 — 否则测试 mock 会被抹掉,
+        # WS handler 卡 60s ready gate。生产路径上 ``_ensure_agent_ready``
+        # 成功后必写 ``_agent_singleton_style``,正常 default↔其它 切换不受影响。
+        if _agent is not None and _agent_singleton_style is not None and _agent_singleton_style != style:
+            reload_system_prompt()
+            _agent = None
+            _agent_singleton_style = None
+            _agent_init_started = False
     if _agent is None and not _agent_init_started and _app_ref is not None:
-        _ensure_agent_async(_app_ref)
+        _ensure_agent_async(_app_ref, style=style)
     with _agent_lock:
         return _agent
 
@@ -534,7 +715,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await handle_websocket(
         websocket,
-        get_agent=_get_current_agent,
+        get_agent=lambda style="default": _get_current_agent(style=style),
         channel_broadcasts={"wechat": _build_broadcast_to_ws(websocket)},
         get_quality_pipeline=_get_quality_pipeline,
     )

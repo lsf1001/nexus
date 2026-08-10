@@ -65,6 +65,99 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
+### [1.5.5] — 2026-08-10 Round 6.x hardening + Round 7 chat 右侧截断
+
+本段覆盖预发强化,作为 `1.5.5` 候选。共 19 个 commit,后端 pytest 1081
+PASS + 13 skipped,前端 vitest 416 PASS(61 文件),lint 双清。
+
+#### Added — Round 6.1 会话风格持久化 (2026-08-05, 13 commits)
+
+风格维度从 agent 层贯穿到 DB + WS 协议 + UI 徽标:用户可在 Composer 顶部
+切换「通用 / 学术 / 代码 / 营销」四档 directive,agent 重建 + system prompt
+cache key 加 style 维度,前端侧栏 + send 帧同步带 style,跨刷新保留。
+
+**后端**
+
+- `nexus/backend/styles/` 模块:4 套 directive 文案(`general` / `academic` /
+  `code` / `marketing`),system prompt 拼接时按 `style` 维度取对应 directive
+- `_build_system_prompt` 缓存 key 加 `(style, ...)` 元组,不同风格 prompt
+  走不同 cache bucket 互不污染
+- `sessions.style` 列(`db.py` 自动迁移,`update_session_style` action),
+  `create_agent(style=...)` + `get_agent(style)` 重建路径:style 变更时
+  reload_system_prompt + 清 `_agent` + `_ensure_agent_async` 触发 create_agent
+- WS 帧 style 字段透传:QualityGateMiddleware 透传 `llm._nexus_style`,
+  `build_user_message` 不销毁未标 style 的注入 agent(测试 mock 兼容)
+- REST:`PATCH /api/sessions/{id}` 接收 style 更新并触发重建
+
+**前端**
+
+- `Session.style` 字段 + `setSessionStyle` reducer + `apiPatch` helper(走
+  PATCH 而非 PUT,半更新语义)
+- `ComposerToolbar` 接 store:风格切换 chip 调 PATCH,实时显示当前风格
+- `Sidebar` 会话项右端渲染风格徽标(emoji + label)
+- WS `send` 帧带 `style` 字段:服务端据此重建 agent
+
+**E2E**
+
+- `journey-round6-style-persistence.spec.ts` 覆盖切风格 → 新消息走新
+  directive → 徽标同步 → 跨刷新保留
+- `journey-redesign` 默认断言改为「切回原风格后徽标消失」,允许切风格流程
+  自然演化而不锁死 UX
+
+#### Added — Round 6.2 StreamGuard vendor/model 切片 (2026-08-05, 2 commits)
+
+StreamGuard retry 日志之前只有 `classified.kind` / `classified.message`,
+定位 vendor-side 故障需反查 httpx POST URL,慢且易漏。本轮把 vendor_id +
+model_id 显式挂载到 LLM 实例 + StreamGuard,retry 日志直接带维度。
+
+- `nexus/backend/agent/_agent_builder.py`:`llm._nexus_vendor_id` /
+  `llm._nexus_model_id` 字段,从 `api_base` + `model_name` 解析
+  (`_vendor_id_from_api_base` helper 把 `apihub.agnes-ai.com` /
+  `api.minimaxi.com` 映射成稳定 vendor id)
+- `nexus/backend/resilience/stream_guard.py`:构造器接收 `vendor_id` /
+  `model_id` 可选参数 + 属性暴露,retry 日志格式改为
+  `"StreamGuard retry %d/%d vendor=%s model=%s after %s: %s"`,未设时 fallback
+  `-`(不抛)
+- `nexus/backend/api/ws/streaming.py`:`_resolve_vendor_id()` /
+  `_resolve_model_id()` 从 `llm._nexus_*` 解析后传给 `_build_stream_guard`
+
+**测试**:`tests/test_stream_guard.py` 新增 4 个 vendor/model 用例
+(属性默认值 / 构造器透传 / retry 日志带维度 / dash fallback),24/24 PASS。
+
+#### Fixed — Round 6.2 placeholder leak + Round 7 chat 右侧截断 (2026-08-05, 3 commits)
+
+- **Placeholder leak**:`error` 帧先于任何 `chunk` / `final` 到达时
+  `appendAssistantPatch({})` 留下的空 assistant 占位不被清理,下一轮
+  `pushUserAndPlaceholder` 把它当 last 续写 thinking → 出现「重复思考卡片 +
+  孤立你好」。修法:store 新增 `discardEmptyAssistantPlaceholder` action,
+  由 `handleError` 触发 — 空占位 pop,thinking-only 占位 content 改写为错误
+  文案(thinking 保留,产品反馈),已有 content 不动(避免覆盖真实回复)。
+  同样 gate 思路落地 `streamingPaused`(从 useChatStream 内部 stoppedRef
+  升级到 store 全局态),`handleFinal` 读取后保留 `[已停止]` marker
+- **chat 右侧截断**:`.main` 旧 `overflow:hidden` 在 ≥ 900px 视口把 chat 内容
+  切右边;现改 `min-width:0` 让 grid cell 正确收缩,长 Markdown 代码块 +
+  链接不被截
+- **Cmd+= 失效**(`useFontScaleRoot` 同步问题):font scale 切换时 React 19
+  整树重建擦掉 inline style 写过的 `--fs`;新增 `MutationObserver` 兜底
+  dual-write 到 `:root` + `.nexus-desktop`
+
+#### Changed — Round 6.2 chunk 帧 stale error gate (2026-08-05, 1 commit)
+
+`handleChunk` 每个 chunk 都调 `setLastError(null)` 无谓触发 React re-render,
+语义上也偏激进(用户关掉 banner 后又会被新 chunk 清一遍)。本轮新增
+`getLastError()` getter 给 `WsRouterCtx`,`handleChunk` 只在 stale banner
+**实际显示**时才清。
+
+- `wsHandlers.WsRouterCtx`:加 `getLastError: () => LastError | null`,
+  ChatArea 用 `useCallback` 包装保证引用稳定(wsCtx useMemo 不会因此重建;
+  useWebSocket / useTauriWs 用 ref 桥接,wsCtx 重建不触发 WS 重连)
+- `wsHandlers.handleChunk`:`setLastError(null)` gate 在
+  `if (ctx.getLastError() !== null)` 后
+- 3 个 handler 单测 mock ctx 补 `getLastError: () => null`,新增
+  `useWsMessageRouter`「无 stale 不调 + 有 stale 才调」两路径 case
+
+---
+
 ### [Unreleased] — Pre-release hardening (2026-07-14)
 
 #### Added — 右栏 Artifacts 产物面板 + 三栏布局 (第十三轮 2026-07-20)

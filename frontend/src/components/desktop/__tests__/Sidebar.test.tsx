@@ -37,6 +37,7 @@ const baseProps = {
   wechatInboxCount: 0,
   onSelectConversation: vi.fn(),
   onDeleteConversation: vi.fn(),
+  onRenameConversation: vi.fn(),
   onNewTask: vi.fn(),
 };
 
@@ -139,7 +140,14 @@ describe('Sidebar 搜索 + 重命名(第九轮 UI 重设计)', () => {
     );
     const delBtn = container.querySelector('button.delete-btn');
     expect(delBtn).not.toBeNull();
-    delBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    // 第一步:点 × 进入确认态(不调 onDelete,不应冒泡触发 onSelect)
+    fireEvent.click(delBtn!);
+    expect(onDel).not.toHaveBeenCalled();
+    expect(onSel).not.toHaveBeenCalled();
+    // 第二步:点 "确定?" 才真正调 onDeleteConversation
+    const confirmBtn = container.querySelector('button.delete-confirm');
+    expect(confirmBtn).not.toBeNull();
+    fireEvent.click(confirmBtn!);
     expect(onDel).toHaveBeenCalledWith('1');
     expect(onSel).not.toHaveBeenCalled();
   });

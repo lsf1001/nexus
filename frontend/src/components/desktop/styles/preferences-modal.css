@@ -685,3 +685,241 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ===== Tabs 导航(Round 1 §4.4 / §4.5)— Skills / MCP ===== */
+.preferences-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.preferences-tab {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--ink-3);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  margin-bottom: -1px;
+}
+
+.preferences-tab:hover {
+  color: var(--ink-2);
+}
+
+.preferences-tab.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.preferences-tab:focus-visible {
+  outline: 2px solid var(--ink-2);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+/* ===== Skills / MCP / Plugins 面板列表 ===== */
+.skills-panel-list,
+.mcp-panel-list,
+.plugins-panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skills-panel-item,
+.mcp-panel-item {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) 1fr auto;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  font-size: var(--font-sm);
+  align-items: center;
+}
+
+/* Plugins 行布局:三行 — 主行(name+version+type) / description / path */
+.plugins-panel-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  font-size: var(--font-sm);
+}
+
+.plugins-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.skills-panel-name,
+.mcp-panel-name,
+.plugins-panel-name {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.plugins-panel-version {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+}
+
+.plugins-panel-type {
+  font-size: var(--font-10);
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--ink-2);
+  border-radius: 999px;
+  padding: 1px 8px;
+  flex-shrink: 0;
+  line-height: 1.6;
+  margin-left: auto;
+}
+
+.plugins-panel-description {
+  font-size: var(--font-xs);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.plugins-panel-path {
+  font-size: var(--font-2xs);
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-panel-path,
+.mcp-panel-source {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-panel-source.is-project {
+  color: var(--accent);
+}
+
+.mcp-panel-summary {
+  font-size: var(--font-xs);
+  color: var(--ink-2);
+  margin-bottom: 8px;
+}
+
+.skills-panel-loading,
+.skills-panel-error,
+.skills-panel-empty,
+.mcp-panel-loading,
+.mcp-panel-error,
+.mcp-panel-empty,
+.plugins-panel-loading,
+.plugins-panel-error,
+.plugins-panel-empty {
+  font-size: var(--font-sm);
+  color: var(--ink-2);
+  padding: 16px 8px;
+}
+
+.skills-panel-error,
+.mcp-panel-error,
+.plugins-panel-error {
+  color: #d44;
+}
+
+.plugins-panel-empty code {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  background: var(--paper-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ===== Drafts tab(SPEC §4.6,2026-07-24)===== */
+.drafts-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--ink-3);
+  font-size: var(--font-sm);
+}
+
+.drafts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drafts-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 80px auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.drafts-row-project {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drafts-row-preview {
+  font-size: var(--font-xs);
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drafts-row-time {
+  font-size: var(--font-xs);
+  color: var(--ink-3);
+}
+
+.drafts-row-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.drafts-row-jump,
+.drafts-row-delete {
+  padding: 4px 8px;
+  font-size: var(--font-xs);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.drafts-row-jump:hover,
+.drafts-row-delete:hover {
+  background: var(--sidebar-hover-bg);
+  color: var(--ink);
+}

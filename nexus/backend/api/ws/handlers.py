@@ -29,7 +29,12 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from ...db import create_session, get_session, update_session
+from ...db import (  # noqa: F401  # update_session_style 供 _resolve_session_style 间接使用
+    create_session,
+    get_session,
+    update_session,
+    update_session_style,
+)
 from ...intent.router import DEFAULT_INTENT
 from ...observability import ChatStart, IntentClassified
 from ...resilience.resume import InvalidResumeToken, verify_token
@@ -58,11 +63,89 @@ logger = logging.getLogger(__name__)
 # 时解析:本模块是 leaf(无反向 import 副作用),首次进 handle_websocket 时
 # main 已经 import 完,可安全引用。测试可通过 ``monkeypatch.setattr(h, "get_agent", ...)``
 # 在模块级替换,行为与生产一致。
-def get_agent() -> Any:
-    """返回当前 Agent 实例(从 main 模块懒解析,见上方说明)。"""
+#
+# WHY 接 style(Round 6.1 Task 6):ws 帧可携带 style 字段临时切换本条
+# 消息的风格,需要触发 ``main._get_current_agent`` 的 cache 清 + 重建。
+def get_agent(style: str = "default") -> Any:
+    """返回当前 Agent 实例(从 main 模块懒解析,见上方说明)。
+
+    Args:
+        style: 风格维度,触发 main 侧 cache key 变化 + agent 重建。
+    """
     from ... import main as _main
 
-    return _main._get_current_agent()
+    return _main._get_current_agent(style=style)
+
+
+# 模块级 per-session 风格缓存(Ws 帧临时覆盖层)。
+#
+# WHY:用户在 PATCH /api/sessions/{id} 设了 DB 持久风格后,某些场景
+# 想"本条消息临时切风格但不动 DB"(如让本轮更专业),帧里带 style
+# 字段即可;下一条消息不传 frame.style 时,本层仍保留最近一次生效的
+# resolved style,避免每轮都走 DB SELECT。但 DB 仍是事实基线 —— 进程
+# 重启 / 切会话后本层失效,回落到 DB。
+#
+# 设计取舍:不直接覆盖 DB(避免污染 PATCH 设置值);不写新表(本轮
+# Round 6.1 不引入持久化"per-frame override"概念,留给后续如果
+# 用户真要"会话内风格流"再加)。
+_ws_session_style: dict[str, str] = {}
+
+
+def _resolve_session_style(
+    frame_style: str | None,
+    session_id: str,
+    persist: bool = False,
+) -> str:
+    """根据 WS 帧 ``style`` 字段解析当前会话应使用的风格。
+
+    解析优先级:
+      1. ``frame_style`` 在合法枚举内 → 用 ``frame_style``(per-frame 覆盖)
+      2. 否则读 ``sessions.style``(DB 持久值,可能因 PATCH 接口写入)
+      3. 会话不存在 / DB style 缺列 / 非法值 → ``"default"``
+
+    WHY persist:用户本条消息选了"professional",但 DB 还存"concise",
+    下一条消息若不传 frame.style 应继续用 DB 值。persist=True 把
+    解析后的 resolved 落库,让 DB 与本轮实际生效值一致;persist=False
+    则只解析不动 DB(测试 / 特殊路径)。
+
+    Args:
+        frame_style: WS 帧里的 ``style`` 字段(None 或三档枚举之一)。
+        session_id: 会话 id,用于回查 DB。
+        persist: True 时把 frame_style 合法值写回 DB(覆盖 DB 持久值)。
+
+    Returns:
+        解析后的 style 字符串,总在合法枚举内 ``("default" | "concise" | "professional")``。
+    """
+    valid = ("default", "concise", "professional")
+    if frame_style in valid:
+        resolved = frame_style
+    else:
+        session = get_session(session_id)
+        resolved = (
+            session["style"]
+            if session and isinstance(session.get("style"), str) and session["style"] in valid
+            else "default"
+        )
+    # persist:frame 给出合法值,且与 DB 已存值不同 → 写回 DB 让事实基线同步;
+    # 非法 / 等于已存值 → 跳过(幂等,不触发冗余 UPDATE / updated_at 变化)。
+    if persist and frame_style in valid:
+        session = get_session(session_id)
+        db_style = (
+            session["style"]
+            if session and isinstance(session.get("style"), str) and session["style"] in valid
+            else None
+        )
+        if frame_style != db_style:
+            try:
+                update_session_style(session_id, frame_style)
+            except ValueError:
+                # 会话不存在等防御:不阻断 WS 主流程,日志留给调用方
+                logger.warning(
+                    "_resolve_session_style persist 失败: sid=%s style=%s",
+                    session_id,
+                    frame_style,
+                )
+    return resolved
 
 
 # confirmation_response 路径 aget_state 进程内缓存:
@@ -119,8 +202,12 @@ async def _resolve_pending_interrupts(session_id: str) -> _InterruptsLookup:
     cached = _interrupts_cache.get(session_id)
     if cached is not None and (now - cached[0]) < _INTERRUPTS_CACHE_TTL_SECONDS:
         # 命中:agent 此时不需要(handler 多半已经有),但仍取一次保合约
-        return _InterruptsLookup(interrupts=cached[1], cache_status="hit", agent=get_agent())
-    agent = get_agent()
+        return _InterruptsLookup(
+            interrupts=cached[1],
+            cache_status="hit",
+            agent=get_agent(_ws_session_style.get(session_id, "default")),
+        )
+    agent = get_agent(_ws_session_style.get(session_id, "default"))
     try:
         snapshot = await agent.aget_state({"configurable": {"thread_id": session_id}})
         interrupts: tuple[Any, ...] = tuple(snapshot.interrupts) if snapshot.interrupts else ()
@@ -176,7 +263,7 @@ def _build_interrupt_resume_payload(
 async def handle_websocket(
     websocket: WebSocket,
     *,
-    get_agent: Callable[[], Any],
+    get_agent: Callable[[str], Any],
     channel_broadcasts: dict[str, Callable] | None = None,
     get_quality_pipeline: Callable[[], Any] | None = None,
 ) -> None:
@@ -189,11 +276,16 @@ async def handle_websocket(
     自造模块下线(intent/router.py 改用纯函数正则推断),不再需要
     注入 intent LLM。
 
+    2026-08-05 重构(Round 6.1 Task 6):``get_agent`` 签名从 ``Callable[[], Any]``
+    改为 ``Callable[[str], Any]`` —— 客户端可在 WS 帧携带 ``style`` 字段
+    临时覆盖 DB 持久风格,服务端解析后调用 ``get_agent(style)`` 触发
+    ``main._get_current_agent`` 的 cache 清 + agent 重建。
+
     Args:
         websocket: FastAPI 注入的 WebSocket 连接。
-        get_agent: 无参可调用,返回当前 Agent 实例(线程安全)。
-            通常用 ``lambda: _agent``,并在 ``main.py`` 中通过 ``_agent_lock``
-            保证一致性。
+        get_agent: 单参 ``style`` 可调用,返回当前 Agent 实例(线程安全)。
+            ``style`` 维度触发 cache 失效 + agent 重建。生产中通常用
+            ``lambda style="default": _get_current_agent(style=style)``。
         channel_broadcasts: dict[channel_type_value -> async fn],WS 客户端连接时
             给 Gateway 注入广播,Gateway.route_message 走完会把响应推给所有
             注入的 broadcast。``None`` 或空 dict 表示不广播(仅 WS 自用)。
@@ -478,7 +570,23 @@ async def handle_websocket(
             )
 
             # 使用 SessionManager 构建带记忆的 prompt
-            prompt = session_manager.build_prompt(session_id, user_content)
+            #
+            # WHY 显式透传 attachment_ids(2026-07-30 修):前端 useChatSend 在
+            # idsArr 非空时给 WSMessage 挂 ``attachment_ids``,后端
+            # ``sessions.build_prompt`` 也已支持该参数(拉附件元数据拼 multi-part
+            # 让 LLM 真的看到附件),但本处一直是裸调 —— 前端发了等于静默丢弃,
+            # 用户传的文件/图片 LLM 完全看不见。
+            #
+            # None / 空列表都走原纯 text 路径(零回归):空 list 若透传下去会让
+            # build_prompt 拿空 placeholders 去查 attachments 表,拉不到元数据
+            # 反而多一次无谓查询。
+            _raw_attachment_ids = data.get("attachment_ids")
+            attachment_ids: list[str] | None = (
+                [str(x) for x in _raw_attachment_ids]
+                if isinstance(_raw_attachment_ids, list) and _raw_attachment_ids
+                else None
+            )
+            prompt = session_manager.build_prompt(session_id, user_content, attachment_ids)
 
             # 可选:客户端在消息帧中携带 resume_token(兼容旧客户端)
             resume_from_event_id: int | None = None
@@ -496,7 +604,17 @@ async def handle_websocket(
                     continue
 
             # 运行 agent 流(已自带 StreamGuard + error_code/retryable)
-            agent = get_agent()
+            #
+            # WHY 解析 style(Round 6.1 Task 6):客户端可在 WS 帧携带
+            # ``style`` 字段临时覆盖 DB 持久风格;持久化由 ``persist=True``
+            # 负责(用户在本条消息里选的 style 会落库,让 DB 与本轮生效值
+            # 保持一致);同时把 resolved 写进 ``_ws_session_style`` 让
+            # confirmation_response 路径(走 ``_resolve_pending_interrupts``)
+            # 能拿到同样的风格 —— HITL 续流必须用同一 style,否则会出现
+            # "user 用 A 风格触发工具审批,approve 后 LLM 续流却走 B 风格"。
+            style = _resolve_session_style(data.get("style"), session_id, persist=True)
+            _ws_session_style[session_id] = style
+            agent = get_agent(style)
             (
                 last_event_id,
                 response_text,

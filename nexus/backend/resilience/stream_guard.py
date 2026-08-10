@@ -91,6 +91,8 @@ class StreamGuard:
         astream_events: AstreamFactory,
         retry_policy: RetryPolicy | None = None,
         max_total_retries: int = 2,
+        vendor_id: str | None = None,
+        model_id: str | None = None,
     ) -> None:
         """构造 StreamGuard。
 
@@ -100,6 +102,10 @@ class StreamGuard:
                 （仅 raise 的最简形式，如 mock）。
             retry_policy: 重试判定策略；为 ``None`` 时使用默认值。
             max_total_retries: 最大重试次数（不含首次），``0`` 表示不重试。
+            vendor_id: 上游供应商标识（仅用于日志）,如 ``"minimaxi"`` /
+                ``"agnes-cachellm"``,便于 vendor-side 故障定位(2026-08-08 Round 6.2)。
+            model_id: 实际模型名（仅用于日志），如 ``"MiniMax-M2"`` /
+                ``"agnes-video-v2.0"``。可与 vendor_id 配合精确切片。
 
         Raises:
             ValueError: ``max_total_retries < 0``。
@@ -110,11 +116,23 @@ class StreamGuard:
         self._retry_policy = retry_policy or RetryPolicy()
         self._max_total_retries = max_total_retries
         self._event_id = 0
+        self._vendor_id = vendor_id
+        self._model_id = model_id
         self._stats: dict[str, int] = {
             "retries": 0,
             "fallbacks": 0,
             "events_emitted": 0,
         }
+
+    @property
+    def vendor_id(self) -> str | None:
+        """返回 vendor_id（构造时传入,用于日志切片）。"""
+        return self._vendor_id
+
+    @property
+    def model_id(self) -> str | None:
+        """返回 model_id（构造时传入,用于日志切片）。"""
+        return self._model_id
 
     @property
     def stats(self) -> dict[str, int]:
@@ -194,9 +212,11 @@ class StreamGuard:
                 attempt += 1
                 self._stats["retries"] += 1
                 logger.info(
-                    "StreamGuard retry %d/%d after %s: %s",
+                    "StreamGuard retry %d/%d vendor=%s model=%s after %s: %s",
                     attempt,
                     self._max_total_retries,
+                    self._vendor_id or "-",
+                    self._model_id or "-",
                     classified.kind,
                     classified.message,
                 )

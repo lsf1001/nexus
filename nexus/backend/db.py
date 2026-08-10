@@ -10,7 +10,7 @@ import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,13 @@ DB_PATH = Path.home() / ".nexus" / "nexus.db"
 
 # 是否已执行过表初始化(进程内单次)
 _INITED = False
+
+# Round 3 Task 3.2:首次 search_messages 调用时触发一次 FTS5 'rebuild',
+# 把 init_db 之前已存在的 messages 行灌进 messages_fts(外部内容表 + triggers
+# 只覆盖 INSERT / UPDATE / DELETE 路径,老行的反向同步需要 'rebuild')。
+# 模块级 bool + global:与同模块 _INITED 标志同模式,见 get_db();副作用
+# 只在首次 search 时跑一次 SQL,后续查询纯走 MATCH,无锁/无线程问题。
+_FTS_REBUILT = False
 
 
 def _get_db_path() -> Path:
@@ -67,8 +74,19 @@ def get_db() -> Iterator[sqlite3.Connection]:
             # _create_tables 失败时回滚 flag,允许同进程重试
             # (lifespan 重启 / 测试 setup 重入 / 启动期 transient 故障)。
             # rollback 清理已开事务里可能残留的 DDL,finally 仍会 close。
+            # WHY 重置 _INITED:上一行已经把它设 True,失败时必须回滚,
+            # 否则下次 get_db() 会跳过 _create_tables,拿到一张未初始化库
+            # (test_db_init_retry 守护这条不变量)。
+            _INITED = False
             conn.rollback()
             raise
+        # 建表成功才确保默认 Project 行存在 — sessions.project_id='default'
+        # 写 FK → projects,默认行缺失会 IntegrityError。
+        # 挪到 try 之外:_create_tables 失败路径不进入这里,test_db_init_retry
+        # 的 retry 场景不会被 ensure_default_project 读 projects 表炸掉。
+        from .projects.storage import ensure_default_project
+
+        ensure_default_project()
     try:
         yield conn
         conn.commit()
@@ -93,6 +111,54 @@ def _create_tables(conn: sqlite3.Connection) -> None:
 
     _ensure_column(conn, "sessions", "channel", "TEXT DEFAULT 'main'")
 
+    # Round 1 SPEC §4.1:Project 骨架第一步。
+    # 新表存储 Project 元数据;每个 Project 对应一个 ~/Nexus/projects/<name>/
+    # 目录,内含独立 AGENTS.md / skills/ / mcp.json。name / path 都设 UNIQUE
+    # 约束防止重复(同一台机器上不允许两个同名 Project)。
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            display_name TEXT,
+            path TEXT NOT NULL UNIQUE,
+            description TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name)")
+
+    # Round 2 SPEC §4.3:attachments 表(per-project 上传文件元数据)。
+    # file_path 指向 ~/Nexus/projects/{project_id}/uploads/{att_<uuid>.<ext>};
+    # ON DELETE CASCADE 配合 Project 删除时一起清,避免孤儿文件。
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attachments (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            original_name TEXT NOT NULL,
+            stored_filename TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            mime TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            uploaded_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_attachments_project ON attachments(project_id)")
+
+    # sessions.project_id 外键;RESTRICT 防止误删还有会话的 Project。
+    # _ensure_column 在旧库上 ALTER TABLE ADD COLUMN,新库则包含在 CREATE TABLE 里。
+    # 禁止手工 ALTER TABLE(违反 CLAUDE.md / SPEC §4.1)。
+    _ensure_column(
+        conn,
+        "sessions",
+        "project_id",
+        "TEXT REFERENCES projects(id) ON DELETE RESTRICT",
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id) WHERE deleted_at IS NULL")
+
     # Plan 5 (2026-07-12):wechat 索引化 — sessions 表加 account_id /
     # wechat_user_id / channel_meta 列,把 user_id → session_id 映射从
     # messages.content LIKE 检索迁到正经列(性能 100k 行 100-500ms → < 5ms)。
@@ -100,6 +166,9 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "sessions", "account_id", "TEXT")
     _ensure_column(conn, "sessions", "wechat_user_id", "TEXT")
     _ensure_column(conn, "sessions", "channel_meta", "TEXT")
+    # Round 6.1:Composer 风格选择器写入 sessions.style,后端 LLM 实际
+    # 收到 prompt 段。新会话默认 'default',老库 ALTER ADD COLUMN 自动补齐。
+    _ensure_column(conn, "sessions", "style", "TEXT NOT NULL DEFAULT 'default'")
 
     # partial index:WHERE deleted_at IS NULL 把软删行排除在外,索引体积更小,
     # 查询计划走更窄的范围。wechat_user_id 索引额外过滤 IS NOT NULL,
@@ -186,9 +255,84 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_resume_tokens_session ON resume_tokens(session_id)")
 
+    # Round 3 (2026-08-05):FTS5 全文搜索。
+    # WHY:Sidebar 当前只按 title 搜索,"我昨天那条说 BTC 的在哪里?"
+    # 没法用。FTS5 给 messages.content / thinking_content 建倒排索引,
+    # 配合 3 triggers 保持同步(insert / delete / update)。
+    # content='messages' + content_rowid='rowid' 走 external-content FTS5,
+    # 原表 messages 已经存了完整文本,FTS 不重复存,
+    # 节省 ~50% 体积;触发器负责把 rowid ↔ 文本双向同步。
+    # Task 3.2 增补:tokenize='trigram' 让中文也能搜。
+    # 默认 unicode61 tokenizer 把 CJK 字符归到 Lo(按 Unicode 分类),
+    # 不在默认 categories 列表里,导致 "元力股份" 一整段被当作 1 个
+    # token,partial MATCH(如 prefix / 子串)直接 0 命中。
+    # trigram tokenizer 按 3 字符滑动窗口切,中文 / 英文 / 数字统一处理,
+    # 实测 "元力股份" / "BTC" / "基本面" 都能精确 + 前缀匹配。
+    # 限制:查询词长度 < 3 字符时 trigram 不会生成 token,
+    # 单字 / 双字搜索需调用方主动补全(产品上 1-2 字搜索意义不大)。
+    # 迁移:如果 messages_fts 已用旧 tokenizer(<= 88e1a25 提交)存在,
+    # _migrate_messages_fts_to_trigram() 删 triggers + 旧表 + 重建,
+    # 重灌索引由 _rebuild_fts_once() 首次 search 时跑。
+    _migrate_messages_fts_to_trigram(conn)
+    conn.executescript(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+            content,
+            thinking_content,
+            content='messages',
+            content_rowid='rowid',
+            tokenize='trigram'
+        );
+        CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+            INSERT INTO messages_fts(rowid, content, thinking_content)
+            VALUES (new.rowid, new.content, new.thinking_content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+            INSERT INTO messages_fts(messages_fts, rowid, content, thinking_content)
+            VALUES ('delete', old.rowid, old.content, old.thinking_content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+            INSERT INTO messages_fts(messages_fts, rowid, content, thinking_content)
+            VALUES ('delete', old.rowid, old.content, old.thinking_content);
+            INSERT INTO messages_fts(rowid, content, thinking_content)
+            VALUES (new.rowid, new.content, new.thinking_content);
+        END;
+        """
+    )
+
+    # Round 3 (2026-08-05):share_tokens 表。
+    # WHY:会话分享链接需要 server-side token 映射 —
+    # ``resume_tokens`` 是 WS 续传 HMAC(短命,与 ws 帧挂钩),
+    # 不能复用。share_tokens 是显式 user 触发的"创建公开只读快照",
+    # 可以 7 天过期 + 撤销。
+    # FK session_id → sessions(id):share 出来后发现原会话被删,
+    # 可手动级联清理 share_tokens;这里不写 ON DELETE CASCADE 是因为
+    # 业务上希望"原会话删了,share 链接还能看历史快照"(后续可能
+    # 改成 snapshot 表 + token 关联,不在本轮范围)。
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS share_tokens (
+            token TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            revoked_at TEXT,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_share_tokens_session
+            ON share_tokens(session_id);
+        """
+    )
+
 
 def init_db() -> None:
-    """显式初始化数据库表。get_db() 已自动调用,此函数主要给 CLI/启动入口使用。"""
+    """显式初始化数据库表。get_db() 已自动调用,此函数主要给 CLI/启动入口使用。
+
+    get_db() 内已自动 ensure_default_project(),这里只需建表 + 列迁移。
+    test_project_meta_default_missing_returns_unknown 故意验证 projects 表为
+    空时的边界,不该被自动 ensure 行为破坏 — 该测试显式调 init_db() 之后
+    不会再走 get_db() 自动 ensure 路径。
+    """
     global _INITED
     with get_db() as conn:
         _create_tables(conn)
@@ -294,6 +438,7 @@ def create_session(
     account_id: str | None = None,
     wechat_user_id: str | None = None,
     channel_meta: dict[str, Any] | None = None,
+    project_id: str | None = None,
 ) -> dict:
     """创建新会话(idempotent — 已存在则复用,避免 FK constraint)。
 
@@ -304,25 +449,39 @@ def create_session(
     failed,WS 连接异常断开。
 
     现改为 ``INSERT OR IGNORE``:已存在则不写,再 SELECT 拿回真实行
-    (title / channel / account_id / wechat_user_id 保留原值,新传入的
-    这些参数仅在新行生效)。
+    (title / channel / account_id / wechat_user_id / project_id 保留原值,
+    新传入的这些参数仅在新行生效)。
 
     Plan 5 (2026-07-12):加 ``account_id`` / ``wechat_user_id`` / ``channel_meta``
     三个可选参。channel_meta 是 dict(用 json.dumps 序列化为 TEXT 存储),
     留给未来 feishu / telegram 通道的元数据扩展;旧调用方不传则保持原行为
     (None → NULL)。
 
+    Round 1 SPEC §4.4:加 ``project_id`` 参。调用方若传,新会话以此挂载;
+    若未传(None),回落到当前 active project(active_project.json)— 避免
+    无 project 上下文时写出 project_id=NULL 的孤儿会话(否则 list_sessions
+    按 project_id 过滤时无法命中)。
+
     Returns:
         实际写入或已存在的 sessions 行 dict。
     """
     now = datetime.now().isoformat()
     channel_meta_json = json.dumps(channel_meta, ensure_ascii=False) if channel_meta is not None else None
+    # active project fallback:空调用方不会得到 project_id=NULL 的孤儿会话
+    if project_id is None:
+        try:
+            from .projects.storage import read_active_project_id
+
+            project_id = read_active_project_id() or "default"
+        except (ImportError, OSError, sqlite3.OperationalError):
+            # storage 还没就绪(早期启动)时退到 default,留给迁移脚本再清理
+            project_id = "default"
     with get_db() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO sessions "
-            "(id, title, created_at, updated_at, channel, account_id, wechat_user_id, channel_meta) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, title, now, now, channel, account_id, wechat_user_id, channel_meta_json),
+            "(id, title, created_at, updated_at, channel, account_id, wechat_user_id, channel_meta, project_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, title, now, now, channel, account_id, wechat_user_id, channel_meta_json, project_id),
         )
         row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if row is None:
@@ -408,16 +567,18 @@ def find_latest_session_by_user(
         return row["id"] if row else None
 
 
-def list_sessions(limit: int = 50) -> list[dict]:
-    """列出所有未删除会话，按更新时间倒序。
+def list_sessions(limit: int = 50, project_id: str | None = None) -> list[dict]:
+    """列出未删除会话,按更新时间倒序;可选按 project_id 过滤。
 
-    微信会话按 account_id 分组，每组只返回最新一个。
+    微信会话按 account_id 分组,每组只返回最新一个;``project_id=None``
+    时不过滤(后端 route 在未传参场景保持旧行为 — 方便无 project 概念的
+    单元测试与外部调用)。
     """
     with get_db() as conn:
         rows = conn.execute(
             """
             SELECT id, title, created_at, updated_at, deleted_at, channel,
-                   account_id, wechat_user_id, channel_meta
+                   account_id, wechat_user_id, channel_meta, style
               FROM (
                   SELECT s.*,
                          ROW_NUMBER() OVER (
@@ -428,12 +589,13 @@ def list_sessions(limit: int = 50) -> list[dict]:
                          ) AS rn
                     FROM sessions s
                    WHERE s.deleted_at IS NULL
+                     AND (? IS NULL OR s.project_id = ?)
               )
              WHERE channel != 'wechat' OR rn = 1
              ORDER BY updated_at DESC
              LIMIT ?
             """,
-            (limit,),
+            (project_id, project_id, limit),
         ).fetchall()
         return [dict(row) for row in rows]  # ``rn`` 仅作过滤,不返回给调用方
 
@@ -493,8 +655,6 @@ def permanent_delete_session(session_id: str) -> bool:
 
 def purge_old_sessions(days: int = 30) -> int:
     """清理指定天数前的已删除会话。返回删除数量。"""
-    from datetime import timedelta
-
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
     with get_db() as conn:
         cursor = conn.execute("DELETE FROM sessions WHERE deleted_at IS NOT NULL AND deleted_at < ?", (cutoff,))
@@ -558,3 +718,102 @@ def get_conversation_history(session_id: str) -> list[dict]:
     """获取会话的历史消息，用于 AI 对话。"""
     messages = get_messages(session_id)
     return [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+
+
+def _migrate_messages_fts_to_trigram(conn: sqlite3.Connection) -> None:
+    """旧 unicode61 tokenizer 的 messages_fts 重建为 trigram,支持中文搜索。
+
+    WHY:Task 3.1(commit 88e1a25)默认 unicode61,中文 partial MATCH 0 命中;
+    Task 3.2 改 trigram,但已存在的 FTS5 表不会自动升级 — 必须 DROP + CREATE。
+    检测:sqlite_master 里 messages_fts 的 CREATE SQL 含 'tokenize='trigram'' 则 no-op。
+    """
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_fts'").fetchone()
+    if row is None:
+        return
+    sql = row[0] or ""
+    if "tokenize='trigram'" in sql:
+        return
+    # 先 DROP 触发器:DROP TABLE 不会级联 DROP 依赖 triggers,留 dangling triggers
+    # 会导致重建同名表时新 triggers DROP 失败,触发器路径坏。
+    conn.execute("DROP TRIGGER IF EXISTS messages_ai")
+    conn.execute("DROP TRIGGER IF EXISTS messages_ad")
+    conn.execute("DROP TRIGGER IF EXISTS messages_au")
+    conn.execute("DROP TABLE IF EXISTS messages_fts")
+    # 老表数据由 _rebuild_fts_once() 首次 search 时跑 'rebuild' 命令反向灌回。
+
+
+def _rebuild_fts_once() -> None:
+    """老 DB 升级后,首次 search 时跑 'rebuild' 把 messages 已有行反向灌进 messages_fts。
+
+    external-content FTS5 + 3 triggers 只同步后续 INSERT/UPDATE/DELETE,老行不在索引里,
+    不 rebuild 用户搜不到历史消息。
+    """
+    global _FTS_REBUILT
+    if _FTS_REBUILT:
+        return
+    with get_db() as conn:
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+    _FTS_REBUILT = True
+
+
+def search_messages(query: str, limit: int = 50) -> list[dict]:
+    """FTS5 全文搜索 messages 表。
+
+    Args:
+        query: FTS5 表达式(支持 OR / AND / "phrase" / prefix* / NEAR)。<3 字符
+            在 trigram tokenizer 下不命中,调用方需补全或包双引号短语。
+        limit: 返回数量上限(默认 50)。
+
+    Returns:
+        list of dict,含 session_id / role / content / snippet / created_at,
+        按 bm25 排序。snippet 用 <mark>...</mark> 高亮,前后最多 32 token。
+    """
+    if not query or not query.strip():
+        return []
+    _rebuild_fts_once()
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT m.session_id, m.role, m.content, m.created_at,
+                   snippet(messages_fts, 0, '<mark>', '</mark>', '…', 32) AS snippet
+            FROM messages_fts
+            JOIN messages m ON m.rowid = messages_fts.rowid
+            WHERE messages_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+            """,
+            (query, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# share_tokens 管理已迁出至 ``share_store.py``(Round 3 Task 3.3:
+# db.py 拆分,避免 800 行硬约束触发)。
+
+
+# Round 6.1:Composer 风格选择器 → sessions.style 写入。
+# 风格枚举与 ``nexus/backend/styles.py`` 的 STYLE_DIRECTIVES 保持一致:
+# 三档 hard-coded 字面量,不引外部枚举,避免循环依赖。
+_VALID_SESSION_STYLES: tuple[str, ...] = ("default", "concise", "professional")
+
+
+def update_session_style(session_id: str, style: str) -> None:
+    """更新会话风格。
+
+    Args:
+        session_id: 会话 id。
+        style: 'default' / 'concise' / 'professional' 三选一。
+
+    Raises:
+        ValueError: style 不在合法枚举内,或 session 不存在。
+    """
+    if style not in _VALID_SESSION_STYLES:
+        raise ValueError(f"invalid style: {style}")
+    if get_session(session_id) is None:
+        raise ValueError(f"session 不存在: {session_id}")
+    now = datetime.now().isoformat()
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE sessions SET style = ?, updated_at = ? WHERE id = ?",
+            (style, now, session_id),
+        )

@@ -6,7 +6,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::{Child, Command};
 use tokio::sync::RwLock;
-use tokio::time::Instant;
+use tokio::time::{timeout, Instant};
+
+/// 等内核 reap 旧 sidecar 的兜底时长。无 timeout 时 zombie / uninterruptible IO
+/// 可永久阻塞,前端 SplashView retry 按钮因此卡在 Starting 无救济路径。
+const SIDECAR_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 // build.rs 生成的编译期常量 WS_TOKEN(64 hex 字符),从 OUT_DIR 拿
 include!(concat!(env!("OUT_DIR"), "/ws_token.rs"));
@@ -112,6 +116,38 @@ pub async fn start_sidecar(app: &AppHandle) -> Result<(), String> {
 
     app.emit("runtime-status", RuntimeStatus::Ready).ok();
     Ok(())
+}
+
+/// 用户手动点 SplashView「重试」时调:kill 当前 sidecar 后重新拉起。
+/// 与 supervise_sidecar 的自动重启不同 — 这是显式用户意图,**不限流**。
+/// 成功后 start_sidecar 会 emit runtime-status: Ready;失败把 Err 返回给前端(invoke reject)。
+#[tauri::command]
+pub async fn restart_sidecar(app: AppHandle) -> Result<(), String> {
+    // 1. 取出并 kill 当前 sidecar(若存在)。取出后旧 Child 归本函数所有,
+    //    随后 start_sidecar 覆盖 state.sidecar。
+    let old = {
+        let state: tauri::State<AppState> = app.state();
+        let mut guard = state.sidecar.write().await;
+        guard.take()
+    };
+    if let Some(mut child) = old {
+        if let Err(e) = child.start_kill() {
+            log::warn!("restart_sidecar: start_kill failed: {e}");
+        }
+        // SIGKILL 已发,等内核 reap,加 2s 兜底防卡死。无 timeout 时 zombie /
+        // uninterruptible IO 可永久阻塞 child.wait。
+        match timeout(SIDECAR_WAIT_TIMEOUT, child.wait()).await {
+            Ok(_exit_status) => {}
+            Err(_elapsed) => {
+                log::warn!(
+                    "sidecar wait timed out after 2s, skipping wait for exit_code"
+                );
+            }
+        }
+    }
+
+    // 2. 重新拉起;start_sidecar 内部成功后 emit runtime-status: Ready。
+    start_sidecar(&app).await
 }
 
 fn resolve_sidecar_path(_app: &AppHandle) -> Result<std::path::PathBuf, String> {

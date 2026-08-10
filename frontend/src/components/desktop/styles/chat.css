@@ -35,6 +35,44 @@
   justify-content: safe center;
 }
 
+/* 第十一轮(2026-07-23)浮动"跳到底部"按钮 — 用户滚上看历史时出现,
+ * 点 → 平滑滚到 chat-scroll 底部 + 重置 userScrolledUp。
+ * 第十一轮-2(2026-07-23)spec review 修复:position: sticky 必须有 top/bottom
+ * 锚点,否则在 flex/grid 父容器里默认锚到边界 → 按钮跟着消息流末尾,
+ * 上滚时被滚出视野 → 不符合"上滚时浮动可见"。补 bottom: 16px 让按钮在
+ * .chat-scroll 内一直贴底显示。align-self: flex-end 让 sticky 在 flex 列
+ * 里也能正确生效(否则 sticky 退化 relative)。 */
+.jump-to-bottom {
+  position: sticky;
+  bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-end;
+  margin: 0 0 12px 0;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--paper) 90%, transparent);
+  color: var(--ink-2);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: background-color 120ms ease, color 120ms ease;
+  font-family: inherit;
+  z-index: 2;
+}
+.jump-to-bottom:hover {
+  background: var(--paper);
+  color: var(--ink);
+  border-color: var(--line-2);
+}
+.nexus-desktop[data-theme="dark"] .jump-to-bottom {
+  background: color-mix(in srgb, var(--paper-2) 90%, transparent);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.30);
+}
+
 .empty-state {
   max-width: 680px;
   width: 100%;
@@ -78,9 +116,14 @@
   padding-top: 8px;
 }
 
-/* V3 (2026-07-20):主区共享 720px 限宽 — EmptyState / message-list / composer
- * 全部走这个容器,确保主对话区永远 720px 居中(主区宽 1000+ 时两侧留白)。 */
-.chat-scroll,
+/* V3 (2026-07-20):主区共享 720px 限宽 — composer-shell / empty-state
+ * 走这个容器,主对话区永远 720px 居中(主区宽 1000+ 时两侧留白)。
+ *
+ * chat-scroll 不再限宽:实测 1280 整窗 + sidebar 260 下,被压到 720 + 68px
+ * padding = 内容可用 652px,比 .message-list max-width 720 还小,气泡被父
+ * 容器压扁,长 Markdown 段落右侧字符被 .main { overflow: hidden } 硬裁。
+ * 改为 100% 撑满父(chat-area 已被父 chat-area-wrap 限到 main 列宽),
+ * 真正的 720 居中交给 .message-list(它本身 max-width: 720 / 790 后置)。 */
 .composer-shell,
 .empty-state {
   width: min(720px, 100%);
@@ -396,30 +439,24 @@
   letter-spacing: 0.02em;
 }
 
-.tool-call-args code {
-  display: block;
-  font-family: var(--font-mono);
-  font-size: var(--font-base);
-  background: rgba(0, 0, 0, 0.04);
-  padding: 8px 10px;
-  border-radius: 6px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--ink);
+/* ToolCallCard 内的 CodeBlock —— 第十一轮用 .code-block + .code-pre,
+ * 这里只微调外边距(跟 .tool-call-section-label 留 4px 间距)+ result
+ * 段最大高度(避免超长命令输出撑爆整张卡)。 */
+.tool-call-code-block {
+  margin: 0;
 }
 
-.tool-call-result pre {
-  font-family: var(--font-mono);
-  font-size: var(--font-base);
-  background: rgba(0, 0, 0, 0.04);
-  padding: 8px 10px;
-  border-radius: 6px;
+.tool-call-section + .tool-call-section .tool-call-code-block {
+  /* 结果段限高,过长命令/文件输出可滚 */
+  max-height: 240px;
+}
+
+.tool-call-code-block .code-pre {
+  /* ToolCallCard 内的 code 跟 ChatBubble 不一样:这里的命令输出要
+   * 保留换行(wrap),且字号略小一档(跟正文协调) */
   white-space: pre-wrap;
   word-break: break-word;
-  margin: 0;
-  color: var(--ink);
-  max-height: 240px;
-  overflow: auto;
+  font-size: var(--font-base);
 }
 
 /* 联动到右栏 Artifacts 面板的入口(SPEC §5) */
@@ -1113,8 +1150,8 @@
 .status-card .row .label { font-size: var(--font-15); }
 .status-card .row .value { font-size: var(--font-15); }
 
-.message-list { max-width: 790px; gap: 22px; }
-.message-bubble { max-width: 700px; border-radius: 16px; padding: 14px 16px; }
+.message-list { max-width: 720px; gap: 22px; }
+.message-bubble { max-width: 680px; border-radius: 16px; padding: 14px 16px; }
 /* Claude 三层结构覆盖:用户块=左侧 1px 浅线 + 加粗;助手块=极浅背景 */
 .message-user { background: transparent; border: 0; border-left: 2px solid var(--muted-foreground); color: var(--foreground); box-shadow: none; border-radius: 0; }
 .message-assistant { background: var(--muted); border: 0; color: var(--foreground); box-shadow: none; border-radius: var(--r-lg); }
@@ -1556,4 +1593,182 @@
   background: #1a1f1a;
   border-color: #2f3a30;
   color: #e5e7e0;
+}
+
+/* ===== Attachment bar（SPEC §4.2）===== */
+.attachment-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  max-height: 110px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+
+.attachment-bar[hidden] {
+  display: none;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 48px;
+  padding: 0 6px 0 0;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 180px;
+  max-width: 240px;
+}
+
+.attachment-chip.is-failed {
+  border-color: #c2410c;
+}
+
+.attachment-chip-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--paper);
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--ink-2);
+  font-weight: 600;
+  font-size: var(--font-sm);
+  flex: 0 0 auto;
+}
+
+.attachment-chip-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachment-chip-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.attachment-chip-name {
+  font-size: var(--font-sm);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-chip-meta {
+  font-size: var(--font-xs);
+  color: var(--ink-3);
+}
+
+.attachment-chip-remove {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: transparent;
+  border: 0;
+  color: var(--ink-3);
+  font-size: 14px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.attachment-chip-remove:hover {
+  background: var(--sidebar-hover-bg);
+  color: var(--ink);
+}
+
+.attachment-image-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 24px;
+  cursor: zoom-out;
+}
+
+.attachment-image-dialog img {
+  max-width: 92vw;
+  max-height: 92vh;
+  object-fit: contain;
+}
+
+/* ===== Composer 拖拽高亮 + + 按钮 (SPEC §4.1,2026-07-24) ===== */
+.composer.is-drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.composer-attach-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.composer-attach-btn:hover:not(:disabled) {
+  background: var(--sidebar-hover-bg);
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
+.composer-attach-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== MicButton (Round 4 T4.2,2026-08-05 加) ===== */
+.mic-button {
+  position: relative;
+  /* 默认 ghost(透明 + hover 才出底色);recording 时切 destructive */
+}
+
+.mic-button-recording {
+  animation: mic-button-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mic-button-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55); }
+  50%      { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+}
+
+.mic-button-elapsed {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: var(--danger, #dc2626);
+  color: #fff;
+  pointer-events: none;
 }

@@ -20,6 +20,9 @@ import { DEFAULT_MODEL } from '../../lib/config';
  *
  * 命名稳定:setter 名与原 useStore 完全一致(Plan 4 §Phase 5 迁移约束)。
  */
+/** 搜索作用域:'title' 只匹配 title(默认);'all' 走 /api/search/messages。 */
+export type SearchScope = 'title' | 'all';
+
 export interface ConversationsSlice {
   conversationMessages: Message[];
   models: Model[];
@@ -28,6 +31,8 @@ export interface ConversationsSlice {
   isLoading: boolean;
   /** 用户点 stop 后置 true;WS handler 写入前查这个 gate,防止"已停止"标记被覆盖。 */
   streamingPaused: boolean;
+  /** Sidebar 搜索作用域(Round 3 Task 3.5):title 仅本地匹配;all 走后端 FTS5。 */
+  searchScope: SearchScope;
   setConversationMessages: (messages: Message[]) => void;
   clearConversationMessages: () => void;
   setModels: (models: Model[]) => void;
@@ -36,7 +41,14 @@ export interface ConversationsSlice {
   setIsLoading: (loading: boolean) => void;
   /** 把 patch 写到 assistant 占位(自动检查 streamingPaused gate);无 placeholder 时建。 */
   appendAssistantPatch: (patch: { content?: string; thinking?: string }) => void;
+  /** 2026-08-08 Round 6.2:error 帧到达时清理末尾 assistant 占位,防止 placeholder leak。
+   *  - 末尾是空占位(content==='' && !thinking):直接 pop(用户没看过,零信息损失)
+   *  - 末尾是 thinking-only 占位(用户看见过思考痕迹):content 改写为 errorText,
+   *    thinking 保留(产品反馈"上一轮没拿到回复,思考过程是 X"),不再泄漏到下一轮
+   *  - 末尾已经有 content / 不是 assistant:不动 */
+  discardEmptyAssistantPlaceholder: (errorText: string) => void;
   setStreamingPaused: (paused: boolean) => void;
+  setSearchScope: (scope: SearchScope) => void;
 }
 
 export const createConversationsSlice: StateCreator<ConversationsSlice, [], [], ConversationsSlice> = (set, get) => ({
@@ -46,6 +58,7 @@ export const createConversationsSlice: StateCreator<ConversationsSlice, [], [], 
   modelName: DEFAULT_MODEL,
   isLoading: false,
   streamingPaused: false,
+  searchScope: 'title',
   setConversationMessages: (messages) => set({ conversationMessages: messages }),
   clearConversationMessages: () => set({ conversationMessages: [] }),
   setModels: (models) => set({ models }),
@@ -78,4 +91,28 @@ export const createConversationsSlice: StateCreator<ConversationsSlice, [], [], 
     set({ conversationMessages: cloned });
   },
   setStreamingPaused: (paused) => set({ streamingPaused: paused }),
+  discardEmptyAssistantPlaceholder: (errorText) => {
+    const state = get();
+    // 与 appendAssistantPatch 的 streamingPaused gate 行为一致:用户点 stop
+    // 之后,后续 chunk/thinking/final 全 noop;error 帧也应当尊重,不去清理
+    // 占位 — 否则会把 handleStop 留下的 [已停止] marker 抹掉。
+    // 下一轮 pushUserAndPlaceholder 进来时先 setStreamingPaused(false),自然
+    // 走新 placeholder 替换旧占位的路径。
+    if (state.streamingPaused) return;
+    const msgs = state.conversationMessages;
+    const last = msgs[msgs.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    const empty = last.content === '' || last.content === undefined;
+    const noThinking = !last.thinking || last.thinking.length === 0;
+    if (empty && noThinking) {
+      set({ conversationMessages: msgs.slice(0, -1) });
+      return;
+    }
+    if (empty) {
+      const next = [...msgs];
+      next[next.length - 1] = { ...last, content: errorText };
+      set({ conversationMessages: next });
+    }
+  },
+  setSearchScope: (scope) => set({ searchScope: scope }),
 });

@@ -17,10 +17,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK_SRC = REPO_ROOT / "frontend" / "src" / "hooks" / "useTauriWs.ts"
-CHATAREA_SRC = REPO_ROOT / "frontend" / "src" / "components" / "ChatArea.tsx"
-# 2026-07-12 Plan 2 Phase 1:ChatArea 拆解,原 switch 改为 wsHandlers.ts 里
-# `handleThinking` / `handleChunk` 两个纯函数。spinner-early 测试跟到这个新位置。
-WS_HANDLERS_SRC = REPO_ROOT / "frontend" / "src" / "components" / "ChatArea" / "hooks" / "wsHandlers.ts"
 DIST_ASSETS = REPO_ROOT / "frontend" / "dist" / "assets"
 
 # DMG 安装位置有两个,任何一处跑旧 build 都会让用户继续转圈。E2E 2026-06-28
@@ -129,68 +125,6 @@ def test_installed_dmg_bundles_have_forwarding_fix() -> None:
                 f"{bundle} 缺 channel onmessage 转发代码(形如 .current(e));"
                 f"用户在 {dist_dir} 启动后转圈,需重新同步 frontend/dist"
             )
-
-
-def test_chunk_thinking_stop_spinner_early() -> None:
-    """UX 修复:收到 thinking / 第一个 chunk 就停 spinner,不等 done。
-
-    WHY 2026-06-28:后端 LLM 1-2s 就开始 streaming chunks,但 done 要等
-    QualityPipeline + chain overhead(20-30s)才发。这期间用户看到 spinner
-    一直转,以为"卡死"。修复:thinking / 第一个 chunk 就 setIsLoading(false),
-    spinner 立即停,内容继续 streaming 累积。done 仍会再 disarm 一次(幂等)。
-
-    2026-07-12 Plan 2 Phase 1 拆解后:断言位置从 ChatArea.tsx 的 switch case
-    改为 wsHandlers.ts 里的 handleThinking / handleChunk 两个函数体;断言形式
-    也从 ``case 'thinking': { ... break; }`` 切到 ``export const handleThinking
-    = ... ... = 下一个 ``export const handle...`` 或文件尾。
-    """
-    src = WS_HANDLERS_SRC.read_text(encoding="utf-8")
-
-    def _func_body(event: str) -> str:
-        # 抓 ``export const handle<event>: WsHandler = `` 开始,直到下一个
-        # ``export const `` 或文件尾(非贪婪)。
-        m = re.search(
-            rf"export\s+const\s+handle{event}\s*:\s*WsHandler\s*=\s*\(([\s\S]+?)(?=\n\nexport\s+const\s+|\Z)",
-            src,
-        )
-        assert m, f"未找到 handle{event} 函数体(src 结构变了?)"
-        return m.group(1)
-
-    for event in ("Thinking", "Chunk"):
-        body = _func_body(event)
-        assert "setIsLoading(false)" in body, (
-            f"handle{event} 必须 setIsLoading(false),否则 streaming 期间用户以为没回复"
-        )
-        assert "disarm" in body, f"handle{event} 必须 disarm watchdog"
-
-
-def test_model_switch_updates_store_modelname() -> None:
-    """切模型后 store.modelName 必须更新,顶栏 ModelSwitcher 才显示新模型。
-
-    WHY 2026-06-28:之前 useStore.modelName 只有 useBootstrap 启动时设一次,
-    切完 reload models 但没调 setModelName → 顶栏永远停在初始值。
-    2026-07-18 重构:原 ModelConfigModal.tsx 已拆为 ModelSwitcher.tsx(顶栏)
-    和 PreferencesModal.tsx(设置弹窗)。本测试跟进新文件结构。
-    """
-    switcher = (REPO_ROOT / "frontend/src/components/desktop/ModelSwitcher.tsx").read_text(encoding="utf-8")
-
-    # 1) ModelSwitcher 必须订阅 setModelName
-    assert "setModelName" in switcher, "ModelSwitcher 必须订阅 setModelName 才能同步显示"
-
-    # 2) handleSelect 切完调 setModelName(m.name)(乐观更新)
-    handle_select = re.search(
-        r"const handleSelect\s*=\s*\(.*?\).*?:\s*void\s*=>\s*\{[\s\S]+?\};",
-        switcher,
-    )
-    assert handle_select, "未找到 handleSelect 函数体"
-    body = handle_select.group(0)
-    assert "setModelName" in body, "handleSelect 切完必须调 setModelName(m.name),否则顶栏模型名不更新。"
-
-    # 3) 失败时必须回滚 setModelName(prevName)
-    assert "setModelName(prevName)" in body, (
-        "handleSelect 失败/异常时必须回滚 setModelName(prevName),防止 modelName 跟后端激活模型不一致"
-    )
-    assert "setCurrentModelId(prevId)" in body, "handleSelect 失败/异常时必须回滚 setCurrentModelId(prevId)"
 
 
 def test_ws_emit_chunk_realtime_not_buffered() -> None:

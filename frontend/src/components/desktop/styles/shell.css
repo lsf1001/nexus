@@ -180,6 +180,43 @@
   text-overflow: ellipsis;
 }
 
+/* 标题 + 风格徽标 同行 — 标题 flex:1 占满,徽标收缩到内容宽度。
+ * 风格徽标为 default 时不渲染元素(SessionStyleBadge 返回 null),
+ * 此规则只对有徽标的会话项生效。 */
+.task-item-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.task-item-title-row strong {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.task-item-style-badge {
+  flex: 0 0 auto;
+  font-size: var(--font-2xs);
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.task-item-style-badge--concise {
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-fg-secondary);
+}
+.task-item-style-badge--professional {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+/* 深色模式 — 紫底压暗 + 紫字提亮,避免深色 canvas 上 #ede9fe 刺眼 */
+.dark-mode .task-item-style-badge--professional,
+[data-theme="dark"] .task-item-style-badge--professional {
+  background: #4c1d95;
+  color: #ddd6fe;
+}
+
 .task-item-body span {
   margin-top: 3px;
   color: var(--sidebar-fg-tertiary);
@@ -287,6 +324,12 @@
  * 包住 chat-status-bar(36px 顶部状态条) + ChatArea(内部 flex column)
  * 用 flex column 让 chat-area 自然占满剩余空间 */
 .chat-area-wrap {
+  /* Round 7 Bug A 修复(2026-08-08):flex 子项默认 min-width:auto,
+   * 会按内容撑爆 grid cell(viewport=900 + artifacts 展开时
+   * .main 被压到 320px,但 chat-scroll 内容 411.9px 撑出去,
+   * 被 .main{overflow:hidden} 切右 92px — 用户截图"约/2/件"切边)。
+   * 加 min-width:0 强制约束在父 grid cell 内。 */
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1041,6 +1084,36 @@
 
 .memory-panel-refresh:hover {
   background: var(--paper-2);
+}
+
+/* #14 记忆面板操作按钮(2026-07-23):复制路径 / 复制内容 / 下载 + 刷新。 */
+.memory-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.memory-panel-action {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink-2);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: var(--font-xs);
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.memory-panel-action:hover:not(:disabled) {
+  background: var(--paper-2);
+}
+
+.memory-panel-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .memory-panel-body {

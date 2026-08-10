@@ -24,6 +24,7 @@ from __future__ import annotations
 
 # 重新导出所有公共符号,保持与旧 agent.py 一致的导入路径
 from ._agent_builder import create_agent
+from ._attachment_inject import build_messages_with_attachments
 from ._backend import _create_backend, _select_filesystem_backend
 from ._checkpoint import (
     _CHECKPOINTER_CACHE,
@@ -54,6 +55,8 @@ from ._system_prompt import (
 __all__ = [
     # 主入口
     "create_agent",
+    # 附件注入
+    "build_messages_with_attachments",
     # 系统提示词
     "_build_system_prompt",
     "get_system_prompt",

@@ -38,24 +38,23 @@ test.skip(
 test('流期间点 stop 按钮', async ({ page }) => {
   test.setTimeout(90_000);
 
-  // 2026-07-13:mock scenario 第一次写 .nexus/outputs/e2e_allow.md 后,后续
-  // spec(顺序跑)deepagents 看到 file 已存在,tool 返回 'Cannot write ... because
-  // it already exists' 错误文本(进入 reflection 路径)。这让 mock LLM 在
-  // 多轮上下文里行为变化,stop-mid-stream 的"stop 后立即 [已停止] marker"
-  // 断言与 reflection 文本叠加,toContainText 误判失败。
-  // 解决:每个 stop-mid-stream spec 实例运行时清掉 mock artifact,确保 mock
-  // 第一次进入 tool_calls 路径(不污染 reflection)。
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const os = await import('node:os');
-  const artifact = path.join(os.homedir(), '.nexus', 'outputs', 'e2e_allow.md');
-  await fs.rm(artifact, { force: true });
+  // 2026-07-22:不再预先 fs.rm e2e_allow.md。改 e2e_mock.py 让 scenario 写到
+  // $NEXUS_HOME/outputs/(Playwright 注入的隔离 /tmp/.../nexus-playwright-<pid>/),
+  // 跨 spec 顺序跑时 FilesystemBackend / deepagents 模块单例不共享 → mock
+  // 第一次就进 tool_calls 路径,stop-mid-stream 直接拿到流式 chunk → stop
+  // 按钮可见 → [已停止] marker 命中。之前 ~50 行注释里的"reflection 路径污染"
+  // 场景由 mock 改动根治。
 
   await journeyOpenHome(page);
 
-  // 1. 触发流
+  // 1. 触发流。`click({ force: true })` 跳过 Playwright 的 stability + enabled
+  //    auto-wait:full suite 下 mock 流期间 React 持续重渲染(stop-button ↔ send-button
+  //    反复切换),button DOM 元素永远 stable 不下来,默认 `click()` 会卡 14~36 秒,
+  //    等到流结束 click 才返回,届时 stop-button 已不存在 → 测试 FAIL。`force: true`
+  //    直接派发 mouse event,不 auto-wait。isolated 跑下流更"快"自然也 OK,但统一
+  //    加 force 保证两套时序下都稳。
   await messageInput(page).fill('Python 一句话介绍');
-  await sendButton(page).click();
+  await sendButton(page).click({ force: true });
 
   // 2. 等 stop 按钮出现(替换 send 按钮)
   const stopButton = page.locator('button.stop-button');

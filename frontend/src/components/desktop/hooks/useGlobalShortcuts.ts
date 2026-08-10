@@ -1,11 +1,16 @@
 import { useEffect } from 'react';
 import { useStore } from '../../../store';
+import { useGlobalSearchStore } from '../store/useGlobalSearchStore';
 
 export interface UseGlobalShortcutsOptions {
   /** Cmd+N / Ctrl+N 新建对话 */
   onNewTask?: () => void;
   /** Cmd+K / Ctrl+K 聚焦 sidebar 搜索框 */
   onFocusSearch?: () => void;
+  /** Cmd+F / Ctrl+F 唤起全局消息搜索面板(Round 3 Task 3.4)
+   *  — 跟 onFocusSearch 互不冲突:Cmd+K 走 sidebar input,Cmd+F 走
+   *    全局浮层(搜的是后端 FTS5 历史消息,而不是 sidebar 已有会话标题) */
+  onOpenGlobalSearch?: () => void;
   /** Cmd+/ / Ctrl+/ 聚焦 composer textarea */
   onFocusComposer?: () => void;
   /** Esc 关闭最上层 modal(优先 .preferences-modal-overlay,其次 .model-config-modal-overlay / .wechat-plugin-modal-overlay / .setup-overlay) */
@@ -31,18 +36,31 @@ export interface UseGlobalShortcutsOptions {
  *   - Cmd+\ / Ctrl+\ 折叠/展开右栏 Artifacts 面板
  *
  * 字号缩放(2026-07-21):Mac 浏览器风格的 Cmd+= / Cmd+- / Cmd+0 切三档字号
- * (在 user 集中反馈"Mac 快捷键 无法放大窗口及字体"后增加)。与既有 4 个快捷
- * 键的关键差异:这 3 个新增 isTextInput guard——`=`/`-`/`0` 是高频输入字符,
- * 在 textarea / input 内必须放行输入;既有的 N/K/`/`/`\` 沿用无 guard 现状。
+ * (在 user 集中反馈"Mac 快捷键 无法放大窗口及字体"后增加)。
+ *
+ * 第十一轮-3(2026-07-23,#9 键盘守卫):既有 4 个老快捷键(N/K/`/`/\)在
+ * textarea/input/contenteditable 内也会被拦截,跟输入字符冲突(Cmd+N 是
+ * textarea 高频快捷键 — 选词 / 移动到行首 / 操作系统级新建窗口等等;
+ * Cmd+K 在 sidebar 搜索外也是高频编辑组合)。修复:所有 5 个 modKey 快捷
+ * 键 + Cmd+\ 都加 isTextInput guard — focus 在文本输入元素内时,
+ * e.preventDefault() 不调 + callback 不触发,让浏览器原生行为跑。
+ *
+ * 注意:hook docstring 之前声称"在 input / textarea / [contenteditable]
+ * 内不抢键",实际 hook 从来没有这逻辑。本次才真正落实(2026-07-23)。
  *
  * modKey = e.metaKey || e.ctrlKey,让 macOS / Win / Linux 通用。
- *
- * 注意:hook docstring 之前声称"在 input / textarea / [contenteditable] 内不
- * 抢键",实际 hook 从来没有这逻辑 —— 既有 N/K/`/`/`\` 也抢。仅新增 zoom 3
- * 个补上 guard,因为输入字符冲突会影响实际写作流。
  */
 export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
-  const { onNewTask, onFocusSearch, onFocusComposer, onCloseModal, onZoomIn, onZoomOut, onZoomReset } = options;
+  const {
+    onNewTask,
+    onFocusSearch,
+    onOpenGlobalSearch,
+    onFocusComposer,
+    onCloseModal,
+    onZoomIn,
+    onZoomOut,
+    onZoomReset,
+  } = options;
 
   useEffect(() => {
     const isTextInput = (target: EventTarget | null): boolean => {
@@ -55,35 +73,51 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
     const handler = (e: KeyboardEvent): void => {
       const modKey = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
+      const inTextInput = isTextInput(e.target);
 
-      if (modKey && key === 'n' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        onNewTask?.();
-        return;
+      // 第十一轮-3(2026-07-23,#9 键盘守卫):modKey 快捷键在文本输入元素内
+      // 放行,让浏览器原生行为跑(Cmd+N 在 textarea 不再被拦 → 不再"按 Cmd+N
+      // 切到新会话结果 textarea 焦点被吞")。
+      if (modKey && !e.altKey && !inTextInput) {
+        if (key === 'n' && !e.shiftKey) {
+          e.preventDefault();
+          onNewTask?.();
+          return;
+        }
+        if (key === 'k' && !e.shiftKey) {
+          e.preventDefault();
+          onFocusSearch?.();
+          return;
+        }
+        // Round 3 Task 3.4:Cmd+F / Ctrl+F 唤起全局消息搜索面板。
+        // 走全局 useGlobalSearchStore 而不是 options 回调,让 hook 不必知道
+        // 哪个 component 负责渲染 panel — DesktopShell 挂一次组件就够。
+        if (key === 'f' && !e.shiftKey) {
+          e.preventDefault();
+          useGlobalSearchStore.getState().setOpen(true);
+          onOpenGlobalSearch?.();
+          return;
+        }
+        if (key === '/' && !e.shiftKey) {
+          e.preventDefault();
+          onFocusComposer?.();
+          return;
+        }
+        // Cmd+\ / Ctrl+\ 翻转右栏折叠态(SPEC §6)
+        if (e.key === '\\' && !e.shiftKey) {
+          e.preventDefault();
+          useStore.getState().toggleArtifactsCollapsed();
+          return;
+        }
       }
 
-      if (modKey && key === 'k' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        onFocusSearch?.();
-        return;
-      }
-
-      if (modKey && key === '/' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        onFocusComposer?.();
-        return;
-      }
-
-      // Cmd+\ / Ctrl+\ 翻转右栏折叠态(SPEC §6)
-      if (modKey && e.key === '\\' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        useStore.getState().toggleArtifactsCollapsed();
-        return;
-      }
-
-      // 字号缩放:Cmd+= / Cmd++ / Cmd+- / Cmd+0 —— input focus 时放行。
-      // macOS Cmd+= 给的 e.key 是 '=';若用户按了 Shift(=+ 字符),也兼容 '+'。
-      if (modKey && !e.altKey && !isTextInput(e.target)) {
+      // 字号缩放:Cmd+= / Cmd++ / Cmd+- / Cmd+0 — 不走 isTextInput guard。
+      // WHY:macOS / 浏览器原生 zoom 在 textarea / input / contenteditable
+      // 内同样生效;被 inTextInput guard 误吞 = "输入框聚焦时按 Cmd+= 无
+      // 反应"(用户截图复现)。Cmd+N/K/F// 不同 — 它们抢原生编辑快捷键,
+      // 必须守卫。仍守卫 modKey + !altKey(避免 Ctrl+Alt+= 类组合冲突)
+      // 和 Shift 条件(见 '+' 分支注释)。
+      if (modKey && !e.altKey) {
         if ((e.key === '=' || e.key === '+') && !e.shiftKey) {
           e.preventDefault();
           onZoomIn?.();
@@ -110,7 +144,16 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onNewTask, onFocusSearch, onFocusComposer, onCloseModal, onZoomIn, onZoomOut, onZoomReset]);
+  }, [
+    onNewTask,
+    onFocusSearch,
+    onOpenGlobalSearch,
+    onFocusComposer,
+    onCloseModal,
+    onZoomIn,
+    onZoomOut,
+    onZoomReset,
+  ]);
 }
 
 /** 实用工具:focus selector 对应元素,失败 fallback 到 querySelector。 */

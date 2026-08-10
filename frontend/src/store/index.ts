@@ -23,6 +23,7 @@ import { createArtifactsSlice, type ArtifactsSlice } from './slices/artifacts';
 import { createChannelsSlice, type ChannelsSlice } from './slices/channels';
 import { createConversationsSlice, type ConversationsSlice } from './slices/conversations';
 import { createMemorySlice, type MemorySlice } from './slices/memory';
+import { createProjectsSlice, type ProjectsSlice } from './slices/projects';
 import { createUiPrefsSlice, type UiPrefsSlice } from './slices/uiPrefs';
 import { createWsStatusSlice, type WsStatusSlice } from './slices/wsStatus';
 
@@ -52,7 +53,7 @@ const safeStorage = {
 };
 
 export type Store =
-  UiPrefsSlice & WsStatusSlice & ConversationsSlice & ChannelsSlice & ArtifactsSlice & MemorySlice;
+  UiPrefsSlice & WsStatusSlice & ConversationsSlice & ChannelsSlice & ArtifactsSlice & MemorySlice & ProjectsSlice;
 
 export const useStore = create<Store>()(
   persist(
@@ -63,6 +64,7 @@ export const useStore = create<Store>()(
       ...createChannelsSlice(...a),
       ...createArtifactsSlice(...a),
       ...createMemorySlice(...a),
+      ...createProjectsSlice(...a),
     }),
     {
       name: 'nexus-preferences',
@@ -72,6 +74,12 @@ export const useStore = create<Store>()(
         darkMode: state.darkMode,
         showThinking: state.showThinking,
         fontScale: state.fontScale,
+        // starredIds 是用户跨会话保留的偏好(会话列表星标置顶分组),持久化
+        starredIds: state.starredIds,
+        // activeProjectId:跨会话保留当前激活 project,避免每次启动重置到 default
+        activeProjectId: state.activeProjectId,
+        // Round 6.1:per-session 回复风格,跨 reload 保留用户偏好
+        sessionStyles: state.sessionStyles,
       }),
       skipHydration: true,
     }

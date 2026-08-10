@@ -19,13 +19,18 @@ WHY 存在:
 
 from __future__ import annotations
 
-# deepagents 0.6.x 暴露给 LLM 的写文件工具名集合。
-# 主路径: edit_file / write_file (核心写工具, 必须评估)。
+# deepagents 0.7.x 暴露给 LLM 的写文件工具名集合。
+# 主路径: edit_file / write_file / delete(0.7.0 新增,文件/目录删除,核心写工具)。
 # 别名: create_file / apply_patch / patch_file / str_replace_editor / write_document。
+# WHY ``delete`` 是单独工具名而非 ``delete_file``:0.7.4 实测
+# FilesystemMiddleware 工具注册的 ``tool.name == "delete"``(FS_TOOL_ORDER:
+# ``("ls","read_file","write_file","edit_file","delete","glob","grep")``)。
+# 若 deepagents 后续改名为 ``delete_file``,``"_file"`` 模式自动覆盖。
 FILE_TOOLS: frozenset[str] = frozenset(
     {
         "edit_file",
         "write_file",
+        "delete",
         "create_file",
         "apply_patch",
         "patch_file",
@@ -37,6 +42,14 @@ FILE_TOOLS: frozenset[str] = frozenset(
 # 黑名单兜底模式: 工具名包含这些子串即视为写文件工具。
 # WHY 子串而非正则:deepagents 工具名都是 snake_case,子串 ``in name``
 # 已经覆盖 99% 场景;正则匹配是过度工程,而且要处理 ``.*`` 边界 case。
+#
+# 0.7.4 实测:FilesystemMiddleware 工具注册名 = 字面 ``"delete"``(不是
+# ``"delete_file"``)。该字面名已加入 :data:`FILE_TOOLS` 精确白名单。
+# 兜底模式保留 ``"_file"`` 是为了未来 deepagents 改名为 ``delete_file``
+# 时自动覆盖;``"_dir"`` / ``"_directory"`` 用于目录级删除工具。
+# 回归测试锁定当前合约:
+#   - ``tests/test_write_tools_helper.py::test_is_write_tool_delete_file_returns_true``
+#   - ``tests/test_write_tools_helper.py::test_is_write_tool_delete_directory_returns_false``
 WRITE_TOOL_PATTERNS: tuple[str, ...] = (
     "write_",
     "edit_",

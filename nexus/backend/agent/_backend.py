@@ -36,9 +36,9 @@ def _select_filesystem_backend(project_root: Path) -> Any:
     WHY env-gated:LangSmithSandbox / ContextHubBackend 都依赖 LangSmith 账号
     + 配额,生产默认关。只在本地开发 / 评测场景按需启用。
 
-    ⚠️ 所有 execution backend 都跟 FilesystemPermission 互斥(deepagents 0.6.8
-    框架限制,源码 ``filesystem.py:737-744``)。开启 = LLM 写源码不再触发
-    HITL,源码侧由 confirmation 层兜底。
+    ⚠️ 所有 execution backend 都跟 FilesystemPermission 互斥(deepagents 0.7.4
+    框架限制;0.6.x → 0.7.x 仍未放开,源码 ``filesystem.py:737-744``)。
+    开启 = LLM 写源码不再触发 HITL,源码侧由 confirmation 层兜底。
     """
     import os as _os
 
@@ -118,7 +118,7 @@ def _create_backend(project_root: Path, *, store: BaseStore | None = None):
 
     ⚠️ **execution backend 警告**:
         LocalShellBackend / LangSmithSandbox / ContextHubBackend 让 LLM 可以
-        跑 shell / 远程代码。deepagents 0.6.8 的 FilesystemMiddleware
+        跑 shell / 远程代码。deepagents 0.7.4 的 FilesystemMiddleware
         **不支持同时配 permissions 和 execution backend**(框架会主动禁用
         permissions,源码 ``filesystem.py:737-744``)。开启 = LLM 写源码不再
         触发 HITL,由用户自负风险。建议只在本地开发 / CI 测试环境开启,
@@ -134,7 +134,18 @@ def _create_backend(project_root: Path, *, store: BaseStore | None = None):
         ".nexus/state/": StateBackend(),
     }
     if store is not None:
-        routes["/memories/"] = StoreBackend(store=store)
+        # deepagents 0.7.0 起 ``StoreBackend`` 强制要求 ``namespace`` callable
+        # (签名 ``Callable[[Runtime], tuple[str, ...]]``),返回 tuple 给 store
+        # key 加前缀隔离 — 不传会抛 ``TypeError: missing 'namespace'``。
+        # WHY 固定 ``("memories",)``:Nexus 是单用户个人助理,``/memories/``
+        # 路由下的所有 key 在同一 namespace 足以;thread 隔离由 langgraph
+        # store 的内置 key 完成(``AsyncSqliteStore`` 把 thread_id 编进
+        # ``put/get`` 调用)。Runtime 在 Nexus 这层不可达(仅 deepagents
+        # 内部 graph runtime),所以 factory 忽略参数,直接返回固定 tuple。
+        def _memory_namespace(_runtime: Any) -> tuple[str, ...]:
+            return ("memories",)
+
+        routes["/memories/"] = StoreBackend(namespace=_memory_namespace, store=store)
 
     return CompositeBackend(
         default=fs_backend,

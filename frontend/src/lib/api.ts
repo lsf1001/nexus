@@ -203,3 +203,173 @@ export async function switchModel(id: string): Promise<void> {
     throw new Error(`切换模型失败: ${res.status} ${detail}`);
   }
 }
+
+// ============ Projects ============
+
+export interface Project {
+  id: string;
+  name: string;
+  display_name: string;
+  path: string;
+  description?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateProjectInput {
+  name: string;
+  display_name: string;
+  description?: string;
+}
+
+/** 列出所有项目。 */
+export async function fetchProjects(): Promise<Project[]> {
+  const res = await apiFetch('/api/projects');
+  if (!res.ok) throw new Error(`读取 Projects 失败: ${res.status}`);
+  return (await res.json()) as Project[];
+}
+
+/** 创建一个新项目,返回后端持久化的对象(含 path)。 */
+export async function createProject(input: CreateProjectInput): Promise<Project> {
+  const res = await apiFetch('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`创建 Project 失败: ${res.status} ${detail}`);
+  }
+  return (await res.json()) as Project;
+}
+
+/** 把指定项目置为全局 active,后端落盘到 ~/.nexus/active_project.json。 */
+export async function activateProject(id: string): Promise<void> {
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(id)}/activate`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`切换 Project 失败: ${res.status} ${detail}`);
+  }
+}
+
+/** 单条 skill 记录。source 由后端 skills_loader 给出:`"local"`(本地目录)或 `"project"`(链接到项目)。 */
+export interface SkillItem {
+  name: string;
+  path: string;
+  source: 'local' | 'project';
+}
+
+/** `GET /api/skills` 返回的包装 — 与 MCP 的 `McpToolsResponse` 对齐结构。 */
+export interface SkillsResponse {
+  project_id: string;
+  skills: SkillItem[];
+}
+
+/** 读取某项目下可用的 skills 列表。后端返的是 `{project_id, skills[]}` 包装对象,不要直接当成数组用。 */
+export async function fetchSkills(projectId: string): Promise<SkillsResponse> {
+  const res = await apiFetch(`/api/skills?project_id=${encodeURIComponent(projectId)}`);
+  if (!res.ok) throw new Error(`读取 skills 失败: ${res.status}`);
+  return (await res.json()) as SkillsResponse;
+}
+
+/** 读取某项目作用域下的 MCP 工具(与无参 fetchMcpTools 不同 — 后者走全局默认)。 */
+export async function fetchMcpToolsForProject(projectId: string): Promise<McpToolsResponse> {
+  const res = await apiFetch(`/api/mcp/tools?project_id=${encodeURIComponent(projectId)}`);
+  if (!res.ok) throw new Error(`读取 MCP 工具失败: ${res.status}`);
+  return (await res.json()) as McpToolsResponse;
+}
+
+// ============ Plugins(Round 5 Task 5.2)============
+
+/** 单条 plugin manifest — 与后端 `nexus/backend/plugins_scanner.py` 字段对齐。 */
+export interface PluginManifest {
+  name: string;
+  version: string;
+  description: string;
+  type: string;
+  path: string;
+}
+
+/** `GET /api/plugins` 返回的包装对象。 */
+export interface PluginsResponse {
+  plugins: PluginManifest[];
+}
+
+/** 列出 ~/.nexus/plugins/ 下扫描到的 manifest。本轮只读,无安装/卸载入口。 */
+export async function fetchPlugins(): Promise<PluginsResponse> {
+  const res = await apiFetch('/api/plugins');
+  if (!res.ok) throw new Error(`读取 plugins 失败: ${res.status}`);
+  return (await res.json()) as PluginsResponse;
+}
+
+// ============ 消息全文搜索(Round 3 Task 3.4)============
+
+export interface SearchResult {
+  session_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  /** SQLite FTS5 snippet() 生成,含 <mark>...</mark> 高亮,前端 dangerouslySetInnerHTML 渲染 */
+  snippet: string;
+  created_at: string;
+}
+
+export interface SearchMessagesResponse {
+  results: SearchResult[];
+  count: number;
+}
+
+/**
+ * 全局搜索消息正文 — GET /api/search/messages?q=...&limit=50。
+ *
+ * 后端走 SQLite FTS5(nexus/backend/search.py),snippet 字段已经含 <mark> 高亮,
+ * 前端用 dangerouslySetInnerHTML 渲染。注意 content 是完整文本,snippet 是
+ * 摘要(高亮 + 上下文),UI 上展示 snippet 就够,content 留给将来"点开看全
+ * 文"扩展。
+ */
+export async function searchMessages(q: string, limit = 50): Promise<SearchMessagesResponse> {
+  const qs = new URLSearchParams({ q, limit: String(limit) });
+  const res = await apiFetch(`/api/search/messages?${qs.toString()}`);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`搜索失败: ${res.status} ${detail}`);
+  }
+  return (await res.json()) as SearchMessagesResponse;
+}
+
+// ============ 通用 PATCH(Round 6.1 Task 8)============
+
+/**
+ * 通用 PATCH helper — Content-Type: application/json,返回解析后的 JSON。
+ *
+ * WHY 单独 helper:`apiFetch` 是底层 fetch wrapper(返 Response 不解析),
+ * 上层 80% GET/POST/DELETE 场景都直接 fetch。只有 PATCH 当前只有 PATCH
+ * /api/sessions/{id} style 这一处,但 Round 后续字段(title? show_thinking?)
+ * 仍会走此 helper,避免每处都重复 method/headers/body/JSON/throw 模板。
+ *
+ * 错误处理:非 2xx 抛 ``Error(`${status}: ${detail}`)``,detail 优先取
+ * ``response.json().detail``,fallback 到 statusText。422(Pydantic Literal
+ * 校验失败)/ 400(非法 style)/ 404(session 不存在)都走这条路径。
+ */
+export async function apiPatch<T = unknown>(
+  path: string,
+  body: unknown,
+): Promise<T> {
+  const res = await apiFetch(path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const data = (await res.json()) as { detail?: string };
+      if (data?.detail) detail = data.detail;
+    } catch {
+      /* body 非 JSON,保留 statusText */
+    }
+    throw new Error(`${res.status}: ${detail}`);
+  }
+  return (await res.json()) as T;
+}

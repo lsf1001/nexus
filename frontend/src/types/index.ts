@@ -18,6 +18,11 @@ export interface ToolCall {
   result?: string;
 }
 
+/** Round 6.1:会话级回复风格 — 后端 sessions.style 三档枚举。
+ *  default 走 backend model 原生 system prompt;concise / professional
+ *  在 build_prompt 阶段拼风格指令(SPEC §4.10)。 */
+export type StyleOption = 'default' | 'concise' | 'professional';
+
 export interface Conversation {
   id: string;
   title: string;
@@ -25,6 +30,8 @@ export interface Conversation {
   createdAt: Date;
   updatedAt: string;
   channel?: string;
+  /** Round 6.1:会话级回复风格。后端 sessions.style 同步;前端 ws send 帧携带。 */
+  style?: StyleOption;
 }
 
 export interface SessionResponse {
@@ -33,6 +40,8 @@ export interface SessionResponse {
   created_at: string;
   updated_at: string;
   channel?: string;
+  /** Round 6.1:GET /api/sessions 列表项携带的会话风格。 */
+  style?: StyleOption;
 }
 
 /**
@@ -116,6 +125,21 @@ export interface WSMessage {
   content: string;
   session_id?: string;
   title?: string;  // 用于创建新会话时传递标题
+  /** 已上传附件的 server id 列表(可空);后端 sessions.build_prompt 按需拼 multi-part。
+   *  空数组时后端走原纯 text 路径(SPEC §4.4 零回归)。 */
+  attachment_ids?: string[];
+  /**
+   * Round 6.1 Task 11:本次消息生效的回复风格。
+   *
+   * 始终从 store.sessionStyles[sid] 同步读取并显式携带(default 也传),
+   * 让后端 _resolve_session_style 路径能直接命中本条消息的 style,
+   * 不依赖 DB 持久值或 ws_session_state 的隐式 fallthrough(SPEC §4.10)。
+   *
+   * 后端解析顺序:本帧 style → DB sessions.style → 'default'。
+   * 新会话(getSessionId=null)时不携带,等首次消息落库后由后端默认
+   * 写 'default',下次会话回写即可同步。
+   */
+  style?: StyleOption;
 }
 
 export interface Model {

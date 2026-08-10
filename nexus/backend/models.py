@@ -14,6 +14,10 @@ class WSMessage(BaseModel):
 
     session_id: str | None = None
     content: str = Field(..., min_length=1, description="消息内容")
+    style: Literal["default", "concise", "professional"] | None = Field(
+        default=None,
+        description="可选:本条消息的风格(覆盖 DB 持久值,Round 6.1 加)",
+    )
 
 
 class StreamEvent(BaseModel):

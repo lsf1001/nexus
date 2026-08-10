@@ -1,12 +1,16 @@
 """按 provider:model 注册 HarnessProfile —— Nexus tier 路由。
 
-deepagents 0.6.14 真实 API(从 ``deepagents.profiles`` 公开 re-export):
+deepagents 0.7.4 真实 API(0.6.x 以来字段集未变;从 ``deepagents.profiles`` 公开 re-export):
   - :class:`HarnessProfile` 字段:
     - init_kwargs: 注入 init_chat_model 的 kwargs
     - base_system_prompt: 替换 BASE_AGENT_PROMPT(完整替换 base)
     - system_prompt_suffix: 拼到 base prompt 末尾
     - tool_description_overrides: 改写工具描述
-    - pre_init / init_kwargs_factory: 副作用钩子
+    - excluded_tools: 从 main agent 工具集中排除
+    - excluded_middleware: 从 middleware 链中移除指定类
+    - extra_middleware: 追加的 middleware 实例(可 callable 延迟构造)
+    - general_purpose_subagent: 控制 framework auto-add 的 ``general-purpose``
+      subagent(``GeneralPurposeSubagentProfile(enabled=False)`` 可禁用)
   - :func:`register_harness_profile(key, profile)`:注册到 ``_HARNESS_PROFILES``
     - key: provider 名(如 ``"openai"``)或完整 spec(如 ``"openai:MiniMax-M3"``)
     - 同 key 多次注册会**累加合并**(见 ``_merge_profiles``)
@@ -21,6 +25,22 @@ WHY 分 tier:
 Nexus 当前激活模型来自 models.json,name 可能是 "MiniMax-M3" / "agnes-2.0-flash"。
 deepagents 通过 ``init_chat_model(model_name)`` 解析后,会以
 ``openai:MiniMax-M3`` 这种 ``provider:model`` 形式作为 spec 匹配 key。
+
+general-purpose subagent 决策(2026-08-04 对齐):
+  - Nexus 显式注册了 ``code_writer`` + ``researcher`` 两个 subagent,但
+    ``create_deep_agent`` 看到 caller 没传名字叫 ``general-purpose`` 的
+    subagent,会**自动追加 framework 默认的 ``general-purpose`` subagent**
+    (见 deepagents/graph.py:457 的 auto-add 逻辑)。
+  - 0.5.3 时 Nexus 在 ``HarnessProfile.general_purpose_subagent`` 槽设过
+    自定义 prompt,但 0.6.x 重构后该槽保持 None,框架走默认 general-purpose。
+  - 当前**不动这个槽**:framework 默认 subagent 多一个 LLM 候选不是坏事,
+    且 Nexus 自己两个 subagent 仍占主导。如果未来产品决定"只要
+    code_writer + researcher,不要 framework 默认",把下面两行改成::
+
+        HarnessProfile(
+            system_prompt_suffix=_WEAK_SUFFIX,
+            general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
+        )
 """
 
 from __future__ import annotations

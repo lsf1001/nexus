@@ -10,6 +10,31 @@ import { afterEach, beforeEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import { useStore } from '../store'
 
+// jsdom 未实现 <dialog>.showModal() / close() / open — AttachmentBar 用
+// 受控 ref 模式,需要补齐让 onClick → showModal → onClick → close 流程跑通。
+if (typeof HTMLDialogElement !== 'undefined') {
+  const proto = HTMLDialogElement.prototype as HTMLDialogElement & {
+    showModal?: () => void
+    close?: () => void
+  }
+  if (!proto.showModal) {
+    proto.showModal = function (this: HTMLDialogElement) {
+      this.setAttribute('open', '')
+    }
+  }
+  if (!proto.close) {
+    proto.close = function (this: HTMLDialogElement) {
+      this.removeAttribute('open')
+    }
+  }
+  Object.defineProperty(HTMLDialogElement.prototype, 'open', {
+    get(this: HTMLDialogElement) {
+      return this.hasAttribute('open')
+    },
+    configurable: true,
+  })
+}
+
 afterEach(() => {
   cleanup()
 })
@@ -29,6 +54,14 @@ beforeEach(() => {
     isLoading: false,
     channelInbox: {},
     pendingConfirmation: null,
+    projects: [],
+    activeProjectId: null,
+    loading: false,
+    // Round 6.1 Task 11:清 uiPrefs 持久化字段,跨 test 状态隔离。
+    // 原 setup 漏了 sessionStyles / starredIds 等 persisted slice 字段,
+    // 持久化中间件跨 test 复用时会让"上次切风格"残留到本 test。
+    sessionStyles: {},
+    starredIds: [],
   } as never)
   // Persist middleware 写的 localStorage 清掉,避免跨 test 状态污染
   try {

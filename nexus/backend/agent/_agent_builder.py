@@ -21,12 +21,35 @@ from typing import Any
 logger = __import__("logging").getLogger(__name__)
 
 
+def _vendor_id_from_api_base(api_base: str | None) -> str:
+    """把 api_base URL 映射成简短 vendor 标识,供 StreamGuard 日志切片。
+
+    映射规则(2026-08-08 Round 6.2):
+      - ``apihub.agnes-ai.com`` → ``agnes-cachellm``
+      - ``api.minimaxi.com`` → ``minimaxi``
+      - 其它 / 空 → ``unknown``
+
+    WHY 不直接拿 host 当 vendor:同一 host 下可能有多个 distributor
+    (agnes 现在 cachellm 一家,但未来加新供应商时,需要 vendor 粒度更细)。
+    现阶段 URL → vendor 的简单映射已经够 vendor-side 故障定位。
+    """
+    if not api_base:
+        return "unknown"
+    base = api_base.lower()
+    if "agnes-ai.com" in base:
+        return "agnes-cachellm"
+    if "minimaxi.com" in base or "minimax" in base:
+        return "minimaxi"
+    return "unknown"
+
+
 def create_agent(
     model_name: str | None = None,
     api_key: str | None = None,
     api_base: str | None = None,
     temperature: float | None = None,
     mcp_tools: list[Any] | None = None,
+    style: str = "default",
 ) -> Any:
     """创建带完整 Nexus 能力的智能体。
 
@@ -43,6 +66,9 @@ def create_agent(
         api_base: API 端点
         temperature: 温度参数
         mcp_tools: MCP 服务器加载的工具列表
+        style: 风格维度。'default' / 'concise' / 'professional';Round 6.1 新增,
+            注入到 system prompt 末尾风格段。切换风格必须重建 agent ——
+            prompt 字符串在首次构造时已固化,运行期 messages[0] 改不了。
     """
     from deepagents import create_deep_agent
 
@@ -80,9 +106,33 @@ def create_agent(
         from ..llm.e2e_mock import make_e2e_mock_llm
 
         llm = make_e2e_mock_llm()
+        # 注册到 e2e_diagnostics 路由,使 /api/e2e/last-messages 能读到这个实例
+        # 的 last_messages。生产路径不挂 e2e_diagnostics router,所以这个注册
+        # 只在 NEXUS_E2E_MOCK=1 时实际生效(main.py 路由器挂载同样受 env 控制)。
+        from ..routes.e2e_diagnostics import register_e2e_mock
+
+        register_e2e_mock(llm)
         logger.warning("[E2E-MOCK] using mock LLM scenario=%s", llm.scenario)
     else:
         llm = get_llm(model_name, api_key, api_base, temperature)
+
+    # Round 6.1 style bug fix:把 style 维度写到 LLM 实例上,供
+    # ``DynamicIdentityMiddleware`` 在 wrap_model_call 阶段读取。
+    # WHY:middleware 入口处 ``request.system_message.content`` 是空字符串
+    # (deepagents 0.7.4 在 wrap_model_call 前把 system_prompt 字符串吃掉了),
+    # 走 Bug A 防御重建 SystemMessage 时如果不传 style,会拿默认风格的
+    # ``get_system_prompt()``,覆盖掉 agent 在 create_agent 阶段按 style 拼进
+    # messages[0] 的【回复风格 · 专业】段 → LLM 永远按 default 风格回复。
+    # 把 style 挂在 LLM(model 实例,BaseChatModel 子类)上而非全局状态,
+    # 避免 ws 多客户端 / 切换风格时 race;每个 agent 实例对应一个 LLM,
+    # 风格切换时 ``_get_current_agent`` 会重建新 LLM + 新 ``_nexus_style``。
+    llm._nexus_style = style  # type: ignore[attr-defined]
+    # 2026-08-08 Round 6.2:把 vendor/model 维度挂到 LLM 实例上,供 StreamGuard
+    # 日志切片(``StreamGuard retry vendor=... model=...``)。WHY:vendor-side
+    # 故障(例如 agnes-cachellm distributor 下线)此前只能从 httpx POST URL
+    # 反向推断,慢且易漏;vendor_id 显式挂载后日志一眼可定位。
+    llm._nexus_model_id = model_name or ""  # type: ignore[attr-defined]
+    llm._nexus_vendor_id = _vendor_id_from_api_base(api_base)  # type: ignore[attr-defined]
 
     # 顺序敏感:**先 checkpointer 再 store**。
     # _create_checkpointer() 走 sync sqlite3 + 同步 DDL(``_ensure_sqlite_checkpoint_tables``),
@@ -171,7 +221,7 @@ def create_agent(
     # 单一数据源(models.json),绝无缓存滞留。
     from ..middleware.dynamic_identity import dynamic_identity_middleware
 
-    # 上下文自动压缩:由 deepagents 0.6.8 主 agent stack 自动注入
+    # 上下文自动压缩:由 deepagents 0.7.4 主 agent stack 自动注入
     # ``create_summarization_middleware(model, backend)``,trigger 通过
     # ``ResilientRunnable._resolve_model_profile()`` 暴露的 profile 计算:
     #   1. profile 含 max_input_tokens → deepagents 用 ``("fraction", 0.85)``,
@@ -212,7 +262,10 @@ def create_agent(
         # 2026-06-29 重构:``_build_system_prompt`` 只输出与激活模型无关的
         # 产品规则(身份 / 思考格式 / 澄清 / 安全)。模型特定指令由
         # HarnessProfile 的 ``system_prompt_suffix`` 按 provider:model 注入。
-        system_prompt=get_system_prompt(model_name or CONFIG.get("model_name", "")),
+        system_prompt=get_system_prompt(
+            model_name or CONFIG.get("model_name", ""),
+            style=style,
+        ),
         backend=backend,
         subagents=subagents,
         permissions=permissions,

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import threading
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 
+from .agent._system_prompt import reload_system_prompt
 from .api.ws import require_token
 from .db import (
     add_message,
@@ -23,7 +26,9 @@ from .db import (
     purge_old_sessions,
     restore_session,
     update_session,
+    update_session_style,
 )
+from .share import render_session_markdown
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"], dependencies=[Depends(require_token)])
 
@@ -87,20 +92,30 @@ class SessionManager:
         """
         return find_latest_session_by_user(user_id, channel=channel, account_id=account_id)
 
-    def build_prompt(self, session_id: str, user_message: str) -> dict:
+    def build_prompt(
+        self,
+        session_id: str,
+        user_message: str,
+        attachment_ids: list[str] | None = None,
+    ) -> dict:
         """构建带对话历史的 prompt。
 
         身份 / 规则 / 长期记忆由 deepagents :class:`MemoryMiddleware` 从
         AGENTS.md 注入 system prompt;本方法只组装历史 + 当前 user 消息。
 
+        WHY attachment_ids 可选:无附件时必须走原纯 text 路径(零回归),
+        仅当传入 attachment_ids 时才拉元数据拼 multi-part,让 LLM 看到附件。
+
         Args:
             session_id: 会话 ID
             user_message: 用户消息
+            attachment_ids: 附件 ID 列表(可选),对应 /api/attachments 落库记录
 
         Returns:
             包含 session_id、messages 的字典
         """
-        from .db import get_conversation_history
+        from .agent import build_messages_with_attachments
+        from .db import get_conversation_history, get_db
 
         # 若最后一条就是当前 user 消息（调用方先入库再调本方法），去掉以免重复
         history = get_conversation_history(session_id)
@@ -110,7 +125,19 @@ class SessionManager:
         # 组装消息：身份由 AGENTS.md 注入,这里 system 段留空
         messages: list[dict] = [{"role": "system", "content": ""}]
         messages.extend(history)
-        messages.append({"role": "user", "content": user_message})
+
+        # 拉附件元数据(若有),再拼成 multi-part user 消息
+        attachments_meta: list[dict] = []
+        if attachment_ids:
+            with get_db() as conn:
+                placeholders = ",".join("?" * len(attachment_ids))
+                rows = conn.execute(
+                    f"SELECT file_path, mime, original_name FROM attachments WHERE id IN ({placeholders})",
+                    attachment_ids,
+                ).fetchall()
+            attachments_meta = [dict(r) for r in rows]
+
+        messages.extend(build_messages_with_attachments(user_message, attachments_meta))
 
         return {
             "session_id": session_id,
@@ -134,9 +161,12 @@ def get_session_manager() -> SessionManager:
 
 
 @router.get("")
-async def get_sessions(limit: int = 50) -> list[dict]:
-    """获取会话列表。"""
-    return list_sessions(limit=limit)
+async def get_sessions(limit: int = 50, project_id: str | None = None) -> list[dict]:
+    """获取会话列表。可选按 project_id 过滤(前端 useConversationCrud 在切
+    activeProjectId 时会带上) — 未传则保持旧行为(全量),便于无项目概念的
+    调用方(测试 / 微信通道会话检索等)。
+    """
+    return list_sessions(limit=limit, project_id=project_id)
 
 
 @router.post("")
@@ -247,3 +277,61 @@ async def add_message_to_session(session_id: str, body: dict) -> dict:
 
     message_id = str(uuid.uuid4())
     return add_message(message_id, session_id, role, content, thinking_content)
+
+
+@router.get("/{session_id}/export.md", response_class=PlainTextResponse)
+async def export_session_markdown(session_id: str) -> PlainTextResponse:
+    """导出整个会话为 markdown(纯文本,text/markdown; charset=utf-8)。
+
+    给用户提供「把对话贴到公众号 / GitHub / 邮件附件」的便携路径。
+    markdown 渲染格式与 :func:`nexus.backend.share.render_session_markdown`
+    一致(share 公开链接 + 本地导出看到同一份格式)。
+
+    WHY 单独 endpoint 而不是 query param ``?format=md``:
+    1. ``.md`` 后缀让 curl / 浏览器直接以 attachment 形式下载;
+    2. RESTful 资源导向 — 每个 URL 一种表示,不变换语义;
+    3. 未来加 ``export.json`` / ``export.html`` 不用碰现有 endpoint。
+    """
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    messages = get_messages(session_id)
+    body = render_session_markdown(session, messages)
+    return PlainTextResponse(content=body, media_type="text/markdown; charset=utf-8")
+
+
+# ============================================================================
+# Round 6.1: PATCH /sessions/{id} — 风格更新 + cache invalid
+# ============================================================================
+
+
+class SessionStylePatch(BaseModel):
+    """PATCH /api/sessions/{id} body schema。
+
+    WHY 单字段 PATCH: 本期只 style; 后续加 title / show_thinking 等
+    都走这同一 endpoint, BodyModel 加字段。
+    """
+
+    style: Literal["default", "concise", "professional"]
+
+
+@router.patch("/{session_id}", response_model=None)
+async def patch_session(session_id: str, body: SessionStylePatch) -> dict:
+    """更新会话属性(目前仅支持 style)。
+
+    触发 system prompt 缓存清空 —— 未来若 style 进 cache 必须 invalid
+    (Round 6.1 已 multi-bucket, 但 PATCH 仍 reload 兜底, 确保其它
+    未覆盖的 cache 维度也清)。
+
+    Returns:
+        ``{"ok": True, "style": "<新风格>"}``。
+
+    Raises:
+        HTTPException 400: style 不合法 / session 不存在。
+    """
+    try:
+        update_session_style(session_id, body.style)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    reload_system_prompt()
+    return {"ok": True, "style": body.style}

@@ -21,18 +21,30 @@
  * 用户主动行为。event.isTrusted 最稳(UserGesture API 标记):浏览器对所有
  * wheel / touch / keyboard scroll 置 isTrusted=true,JS scrollTo /
  * scrollIntoView 置 false。
+ *
+ * 第十一轮(2026-07-23)扩展:导出 userScrolledUp state + scrollToBottom
+ * callback,让 ChatArea 在用户离开贴底时条件渲染"↓ 跳到底部"浮动按钮。
+ * 原内部 userScrolledUpRef 从 useRef 升 useState — 外部需要响应式触发
+ * re-render 才能看到按钮出现。
  */
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface UseAutoScrollArgs {
   /** 触发滚动的依赖数组(典型:消息数 + loading) */
   trigger: ReadonlyArray<unknown>;
   /** 滚动容器 ref — 必须指向 overflow:auto 的 .chat-scroll 自身。
    *  如果误指向无 overflow 的末尾空 div(如 messagesEndRef),scrollTo 不会带动
-   *  父容器,viewport 不动,2026-07-13 真 LLM multi-turn 暴露 viewport ratio 0
-   *  就是这个错。 */
+   * 父容器,viewport 不动,2026-07-13 真 LLM multi-turn 暴露 viewport ratio 0
+   * 就是这个错。 */
   containerRef: React.RefObject<HTMLElement | null>;
+}
+
+export interface UseAutoScrollReturn {
+  /** 用户当前是否在"滚上看历史"位置(贴底 = false,离开贴底 = true) */
+  userScrolledUp: boolean;
+  /** 手动滚到容器底部(smooth 默认 true);同时重置 userScrolledUp 为 false */
+  scrollToBottom: (smooth?: boolean) => void;
 }
 
 /**
@@ -42,10 +54,11 @@ export interface UseAutoScrollArgs {
 export function useAutoScroll({
   trigger,
   containerRef,
-}: UseAutoScrollArgs): void {
+}: UseAutoScrollArgs): UseAutoScrollReturn {
   const rafRef = useRef<number | null>(null);
   // 用户主动滚轮 / touch / scrollbar drag 标记。JS scrollTo 不计(isTrusted=false)。
-  const userScrolledUpRef = useRef(false);
+  // 第十一轮:从 useRef 升 useState,让外部 ChatArea 响应式条件渲染"跳到底部"按钮。
+  const [userScrolledUp, setUserScrolledUp] = useState(false);
   // 滚动容器节点 — 用 callback ref 直接捕获,避免 .current 反应性陷阱。
   const scrollElRef = useRef<HTMLElement | null>(null);
 
@@ -61,16 +74,37 @@ export function useAutoScroll({
         el.scrollHeight - el.scrollTop - el.clientHeight;
       // 用户已经回到贴底位置 → 重置标记,后续新消息继续自动滚
       if (distanceToBottom <= 8) {
-        userScrolledUpRef.current = false;
+        setUserScrolledUp(false);
         return;
       }
-      userScrolledUpRef.current = true;
+      setUserScrolledUp(true);
     };
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       el.removeEventListener('scroll', onScroll);
     };
   }, [containerRef]);
+
+  // 外部点跳到底部按钮时调用 — 平滑滚到底 + 重置 userScrolledUp。
+  // 不重置的话按钮一直亮(下一次 scroll 事件才会取消)。
+  const scrollToBottom = useCallback(
+    (smooth = true) => {
+      const el = scrollElRef.current ?? containerRef.current;
+      if (!el) return;
+      setUserScrolledUp(false);
+      if (smooth && 'scrollTo' in el) {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        // smooth 滚完后浏览器不保证派发 scroll 事件 → 显式兜底一次,
+        // 否则按钮可能要等下一次用户 scroll 才会消失。
+        requestAnimationFrame(() => {
+          if (el) el.scrollTop = el.scrollHeight;
+        });
+      } else {
+        el.scrollTop = el.scrollHeight;
+      }
+    },
+    [containerRef],
+  );
 
   // trigger 变化 → 滚到底部(贴底 + 用户未主动滚的情况下)
   useEffect(() => {
@@ -80,7 +114,7 @@ export function useAutoScroll({
       const el = scrollElRef.current ?? containerRef.current;
       if (el) {
         // 用户主动滚上去了,不要硬拽回去
-        if (userScrolledUpRef.current) return;
+        if (userScrolledUp) return;
         // 设置 scrollTop 到 scrollHeight 即可。
         // 关键:必须拉到 max scrollTop —— scrollHeight 在 rAF 后可能还增长
         // (LLM 流最后 chunk 没到),所以同一帧设两次,先让浏览器 paint,再
@@ -102,4 +136,6 @@ export function useAutoScroll({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, trigger);
+
+  return { userScrolledUp, scrollToBottom };
 }

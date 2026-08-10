@@ -27,12 +27,16 @@ def build_interrupt_on_for_agent(project_root: Path) -> None:
     """(已废弃,2026-06-24 删除具体逻辑)。
 
     原实现手动构造 ``interrupt_on`` 的 ``when`` 谓词试图对"未在白名单的路径
-    触发 HITL"。E2E 实测发现该实现与 deepagents 0.6.8 内部的
+    触发 HITL"。E2E 实测发现该实现与 deepagents 0.6.12 内部的
     ``_make_exact_when_predicate`` 语义错位 — 后者直接调 ``_check_fs_permission``,
     而手动版用 regex 白名单匹配,后者在 macOS symlink 等场景下漏判,导致
     "LLM 写项目源码未触发 HITL"。修复:把项目源码目录加入
     ``FilesystemPermission`` 的 ``mode="interrupt"`` rules,让 deepagents
     自动从 permissions 生成 ``interrupt_on``(语义最权威)。
+
+    NOTE:0.7.4 的内部实现可能改名 / 改位置,但 Nexus 行为对齐的是
+    :class:`FilesystemPermission` ``mode="interrupt"`` 公开 API,
+    不再依赖内部 ``_make_exact_when_predicate`` 函数。
 
     本函数保留为空签名(返回 ``None``)以兼容历史调用方;``create_agent``
     """
@@ -46,11 +50,17 @@ def _load_compiled_subagent_specs() -> list[Any]:
       - runnable 的 state schema 含 ``messages`` 键(框架硬要求)
       - ``runnable.invoke({...})`` 能跑通(无 import 错误 / 无依赖缺失)
 
-    JSON 字段(对应 :class:`deepagents.CompiledSubAgent`):
-      - ``name`` (必填):subagent 唯一标识
-      - ``description`` (必填):主代理看到的描述
-      - ``module_path`` (必填):Python 模块路径,如 ``nexus.backend.my_agent``
-      - ``factory`` (必填):模块内的可调用名(返回 ``Runnable``)
+    JSON 字段:
+      - ``name`` (必填):subagent 唯一标识 → 对应 :class:`CompiledSubAgent.name`
+      - ``description`` (必填):主代理看到的描述 → 对应 :class:`CompiledSubAgent.description`
+      - ``module_path`` (必填,Nexus 自定义):Python 模块路径,如 ``nexus.backend.my_agent``
+      - ``factory`` (必填,Nexus 自定义):模块内的可调用名(返回 ``Runnable``)
+
+    0.6.12 → 0.7.4 字段集未变:``CompiledSubAgent`` TypedDict required={name,
+    description, runnable}。Nexus 把 ``module_path`` + ``factory`` 在加载期合
+    成为 ``runnable``,等价于把字段从"用户视角"重命名为"框架视角",所以
+    Nexus 校验的 required 是 {name, description, module_path, factory},与框
+    架 required 兼容。
 
     加载失败时记 warning + 跳过该条;不让单条坏配置炸整个 ``create_agent``。
 
@@ -120,11 +130,18 @@ def _load_async_subagent_specs() -> list[Any]:
     服务器,需要 ``LANGGRAPH_API_KEY`` / 自托管 URL / headers 等额外配置。
     没这些就跑不起来。
 
-    JSON 字段(对应 :class:`deepagents.AsyncSubAgent`):
+    JSON 字段(对应 :class:`deepagents.AsyncSubAgent` 0.6.12 → 0.7.4 字段集
+    未变,TypedDict):
       - ``name`` (必填):subagent 唯一标识
       - ``description`` (必填):主代理看到的描述
-      - ``url`` (可选):Agent Protocol server URL;缺省走 LangGraph Platform
+      - ``graph_id`` (必填):Agent Protocol 服务器上的部署 ID(deployment_id)
+      - ``url`` (可选):Agent Protocol server URL;缺省走 LangGraph Platform 默认地址
       - ``headers`` (可选 dict):自托管鉴权 headers
+
+    0.6.12 → 0.7.4 字段集未变:``AsyncSubAgent`` TypedDict required={name,
+    description, graph_id},url/headers 是 optional。Nexus 历史上允许 url 缺省,
+    但漏检 graph_id —— 缺 graph_id 时框架在首次调用才炸(延迟到运行期),
+    这里加前端校验,启动期就拒绝。
 
     返回空列表 = 不附加 AsyncSubAgent,等价于只跑 sync SubAgent。
     """
@@ -152,13 +169,15 @@ def _load_async_subagent_specs() -> list[Any]:
         if not isinstance(entry, dict):
             logger.warning("AsyncSubAgent 配置项必须是 dict,跳过: %r", entry)
             continue
-        if "name" not in entry or "description" not in entry:
-            logger.warning("AsyncSubAgent 缺 name/description,跳过: %r", entry)
+        required = {"name", "description", "graph_id"}
+        missing = required - set(entry.keys())
+        if missing:
+            logger.warning("AsyncSubAgent 缺字段 %s,跳过: %r", missing, entry)
             continue
-        # TypedDict 接受任何 dict,字段缺失会在运行时炸 — 这里先做基本校验
         spec: AsyncSubAgent = {  # type: ignore[typeddict-item]
             "name": str(entry["name"]),
             "description": str(entry["description"]),
+            "graph_id": str(entry["graph_id"]),
         }
         if "url" in entry:
             spec["url"] = str(entry["url"])
@@ -180,9 +199,10 @@ def create_subagents(model=None):
         重试;鉴权/上下文错误不应重试)。
 
     Args:
-        model: 可选的 LLM 实例;如果不提供则使用 CONFIG 中的默认模型
-            (CONFIG 也没 API key 时 ``model=None``,subagent 仅承载提示词
-            和描述,由调用方决定是否注入模型)。
+        model: 可选的 LLM 实例。调用方(``_agent_builder.create_agent``)总是
+            传 ``model=llm``(truthy)。``model=None`` 是历史兼容路径(测试 /
+            mock 场景):模型为 None 时 subagent 仅承载提示词和描述,不附工具,
+            ``SubAgentMiddleware`` 会把它当 pure-prompt 子节点处理。
 
     Returns:
         :class:`SubAgent` 列表,包含 ``code_writer`` 与 ``researcher``。
@@ -191,13 +211,11 @@ def create_subagents(model=None):
         读取,JSON 数组格式)。没配就不返回 — AsyncSubAgent 需要外部 Agent Protocol
         服务器,空配置不会误启用。
     """
-    from ..config import CONFIG
     from ..tools import TOOLS
-    from ._llm_factory import get_llm
 
-    # 如果没有提供模型且 CONFIG 中也没有 API key,跳过工具
-    use_tools = model is not None or CONFIG.get("minimax_api_key")
-
+    # subagent 必须有模型才能加载工具。调用方(``_agent_builder.create_agent``)
+    # 总是传 ``model=llm``(truthy),``model=None`` 是历史兼容路径(测试 / mock
+    # 场景):模型为 None 时 subagent 仅承载提示词和描述,不附工具。
     code_writer_prompt = (
         "你是一个专业的 Python 代码助手,负责编写高质量、生产级别的代码。\n\n"
         "【重试策略】本 agent 内的工具调用最多 0 次重试,超时上限 300 秒。\n"
@@ -220,16 +238,16 @@ def create_subagents(model=None):
     # 移除原 "execute" 死引用(tools.py 未注册该工具)。
     code_writer = SubAgent(
         name="code_writer",
-        model=model or get_llm(model_name=CONFIG["model_name"]) if use_tools else None,
-        tools=[t for t in TOOLS if t.name in {"ask_user", "get_current_date"}] if use_tools else [],
+        model=model,
+        tools=[t for t in TOOLS if t.name in {"ask_user", "get_current_date"}] if model else [],
         system_prompt=code_writer_prompt,
         description="代码编写专家",
     )
 
     researcher = SubAgent(
         name="researcher",
-        model=model or get_llm(model_name=CONFIG["model_name"]) if use_tools else None,
-        tools=[t for t in TOOLS if t.name in ("web_search", "browse")] if use_tools else [],
+        model=model,
+        tools=[t for t in TOOLS if t.name in ("web_search", "browse")] if model else [],
         system_prompt=researcher_prompt,
         description="研究分析专家",
     )

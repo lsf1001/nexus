@@ -33,6 +33,7 @@ export function ShellLayout({ shellCtx }: ShellLayoutProps) {
         currentConversationId={shellCtx.currentConversationId}
         onSelectConversation={shellCtx.onSelectConversation}
         onDeleteConversation={shellCtx.onDeleteConversation}
+        onRenameConversation={shellCtx.onRenameConversation}
         onNewTask={shellCtx.onNewTask}
         onOpenPreferences={shellCtx.onOpenPreferences}
       />

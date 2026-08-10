@@ -32,6 +32,17 @@ export interface WsRouterCtx {
     } | null,
   ) => void;
   disarmWatchdog: () => void;
+  /**
+   * 2026-08-08 Round 6.2:返回当前 React local 的 lastError,供 wsHandler 判
+   * 断"是否有 stale 错误"再决定清不清。函数引用由 ChatArea 用 useCallback 包装
+   * 保证稳定(wsCtx useMemo 不会因此重建)。
+   *
+   * WHY 要 gate:handleChunk 在每个 chunk 都调 setLastError(null) 会覆盖用户
+   * 主动留下的 banner 显示意图,真正"流活着 = 旧错作废"的语义只在 banner 实际
+   * 显示时才有意义。handleError 已经负责新错误覆盖;banner.onClose 走
+   * 用户显式关闭。handleChunk 只清"已显示"的 stale 状态。
+   */
+  getLastError: () => LastError | null;
   onSessionCreated?: (sessionId: string, title: string) => void;
 }
 
@@ -108,18 +119,33 @@ export const handleThinking: WsHandler = (ev, ctx) => {
     // 已并入 appendAssistantPatch,这里用空 patch 调用即可。
     appendPatch(ctx, {});
   }
-  ctx.setIsLoading(false);
+  // 2026-07-22 修复:thinking 帧是"流还在进行"的标志 — 不应关闭 isLoading。
+  // 原逻辑收到第一个 thinking 帧就 setIsLoading(false),导致 stop 按钮在 mock
+  // 流 ~50ms 内就消失,Playwright 抓不到持续可见状态(journey-stop-mid-stream
+  // full suite 一直 FAIL,isolated 因 React batch 时序侥幸通过)。
+  // 流未结束期间(isLoading=true)保持,直到 handleFinal / handleDone / handleError。
+  // armWatchdog 由 handleSend 在发消息时设,这里无需重复 arm。
+  // 仍 disarmWatchdog 让 30s 兜底 watchdog 在每一帧活动时清零重计时,
+  // 避免 mock 慢 / 真 LLM 慢的场景下被误清 loading。
   ctx.disarmWatchdog();
 };
 
 export const handleChunk: WsHandler = (ev, ctx) => {
-  ctx.setLastError(null);
+  // 2026-08-08 Round 6.2:gate 清 stale lastError — 只有当前真有 stale 错
+  // 误(banner 还在显示)时才清,避免每个 chunk 都触发 setLastError(null) setter
+  // 调用,语义上也更贴合"流活着 = 旧错作废"(只在旧错真出现过时才"作废")。
+  // 副作用:用户主动关闭 banner(ErrorBanner.onClose → setLastError(null))仍走
+  // 原路径;新一轮 error 帧到达时 handleError 用新 banner 覆盖,不动 handleChunk。
+  if (ctx.getLastError() !== null) {
+    ctx.setLastError(null);
+  }
   if (typeof ev.content === 'string') {
     appendPatch(ctx, { content: ev.content });
   } else {
     appendPatch(ctx, {});
   }
-  ctx.setIsLoading(false);
+  // 2026-07-22 修复:chunk 帧同 thinking — 流还在出,保持 isLoading=true,
+  // 详见 handleThinking 注释。
   ctx.disarmWatchdog();
 };
 
@@ -168,6 +194,11 @@ export const handleDone: WsHandler = (_ev, ctx) => {
 export const handleError: WsHandler = (ev, ctx) => {
   ctx.setIsLoading(false);
   ctx.disarmWatchdog();
+  // 2026-08-08 Round 6.2:error 帧到达时清理末尾空 assistant 占位,防止下一轮
+  // pushUserAndPlaceholder 把旧占位当 last 续写 thinking → "重复思考卡片 +
+  // 孤立你好"。契约:空占位 pop;thinking-only 占位 content 改写为错误文案,
+  // thinking 保留(产品反馈);已有 content 占位不动(避免覆盖真实回复)。
+  useStore.getState().discardEmptyAssistantPlaceholder(ev.content || '未知错误');
   ctx.setLastError({
     message: ev.content || '未知错误',
     retryable: ev.retryable ?? false,

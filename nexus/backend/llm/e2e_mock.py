@@ -4,7 +4,7 @@
 平时不加载,不影响生产。
 
 设计:NEXUS_E2E_SCENARIO 环境变量决定返回哪种预定义 AIMessage(tool_calls)。
-支持 7 类工具场景 + 2 类错误注入场景,覆盖 HITL 全部路径 + 错误兜底:
+支持 8 类工具场景 + 2 类错误注入场景,覆盖 HITL 全部路径 + 错误兜底:
 
 工具场景:
   - allow_nexus_write:返回 write_file 写到 .nexus/(应直接 allow,无 HITL)
@@ -14,6 +14,8 @@
   - multi_tool_calls:返回 2 个 tool_calls(1 allow + 1 interrupt)— HITL 批处理
   - reject_then_reflect:返回 write_file 写源码 → HITL → reject → 反思不再写
   - edit_file_interrupt:返回 edit_file 改源码(应 HITL)
+  - delete_interrupt:返回 delete 删 nexus/backend/x.py(deepagents 0.7.4 新增
+    ``delete`` 工具;验证 ``is_write_tool("delete") is True`` → 弹 HITL)
 
 错误注入场景(每次 invoke 都 raise,不走 _build_message):
   - auth_401:抛 openai.AuthenticationError(密钥失效)→ 走 stream_guard → error 帧
@@ -35,18 +37,58 @@ from typing import Any
 
 import httpx
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import Field
 
 
+def _home() -> Path:
+    """返回 mock 文件应该落到的根目录。
+
+    优先读 :envvar:`NEXUS_HOME`;缺省回到 ``~/.nexus``。
+
+    WHY:Playwright E2E (``playwright.config.ts``)把后端进程的 ``NEXUS_HOME``
+    指向 ``/tmp/nexus-playwright-<pid>/``,每个进程独占一份;若 mock 还硬
+    编码 ``~/.nexus/outputs/e2e_allow.md``,跨 spec 顺序跑时 :
+    - FilesystemBackend 拒绝二次写入(返回 ``Cannot write ... because it
+      already exists``)
+    - deepagents 模块级单例 ``_agent`` 累积前序 ``ToolMessage``,再次进入
+      LLM 时 ``_build_message`` 走 reflection 路径(只有 ``has_tool_result``
+      时返回 reflection),emit ``done`` 帧而不是 ``on_chat_model_stream``
+      chunk → 前端看不到 stop 按钮 / 流式输出
+    """
+    return Path(os.environ.get("NEXUS_HOME", str(Path.home() / ".nexus")))
+
+
 def _abs(path: str) -> str:
-    """展开 ``~`` 为绝对路径(deepagents FilesystemMiddleware 拒绝 ``~``)。"""
+    """展开 ``~`` 为绝对路径(deepagents FilesystemMiddleware 拒绝 ``~``)。
+
+    E2E mock 下(NEXUS_E2E_MOCK=1) ``~/.nexus/...`` 自动重定向到
+    :envvar:`NEXUS_HOME`,这样后端 deepagents FilesystemMiddleware 仍按
+    真实 ``~/.nexus/`` 语义正常放行(allow-list 命中),但文件落到 Playwright
+    注入的隔离目录;scenario 写路径保持"写 .nexus/"语义不变,
+    FilesystemBackend HITL 不会被触发。
+    """
+    is_e2e = os.environ.get("NEXUS_E2E_MOCK") == "1"
+    home_root = _home()
+    if is_e2e and "~/.nexus" in path:
+        path = path.replace("~/.nexus", str(home_root))
     return str(Path(path).expanduser().resolve())
 
 
+def _e2e_path(name: str) -> str:
+    """把 scenario 文件名挂到当前 NEXUS_HOME 上,保证 E2E 隔离 + 用户 ``~/.nexus/`` 不被污染。"""
+    return str(_home() / "outputs" / name)
+
+
 _SCENARIOS: dict[str, list[dict[str, Any]]] = {
-    # 1. 写 .nexus/ → 应 allow,无 HITL
+    # 1. 写 $NEXUS_HOME/.nexus/outputs/e2e_allow.md → 应 allow,无 HITL
+    #    E2E 下 _abs() 自动把 ``~/.nexus/...`` 重定向到
+    #    :envvar:`NEXUS_HOME` ``/outputs/...``,保证跨 spec 顺序跑时
+    #    文件不残留(避免 FilesystemBackend "already exists" → mock
+    #    _build_message 误入 reflection 路径) + 用户 ``~/.nexus/`` 不被污染。
+    #    deepagents FilesystemMiddleware 看到的仍是 ``.nexus/`` 路径语义,
+    #    命中 allow-list 无 HITL,scenario 行为不变。
     "allow_nexus_write": [
         {
             "name": "write_file",
@@ -126,6 +168,17 @@ _SCENARIOS: dict[str, list[dict[str, Any]]] = {
             },
         },
     ],
+    # 8. delete 删项目源码 → HITL(deepagents 0.7.4 新增 ``delete`` 工具)
+    # 验证 PathAwareHITLMiddleware 识别 ``is_write_tool("delete") is True`` →
+    # 弹 .confirm-card。spec 在 beforeAll 先创建目标文件,afterAll 兜底删除。
+    "delete_interrupt": [
+        {
+            "name": "delete",
+            "args": {
+                "file_path": "/Users/yxb/projects/nexus/nexus/backend/e2e_delete_target.py",
+            },
+        },
+    ],
 }
 
 
@@ -153,16 +206,38 @@ class E2EMockChatModel(BaseChatModel):
 
     scenario: str = Field(default="allow_nexus_write")
     call_count: int = Field(default=0)
+    # E2E 验证用:每次 _generate 调用时把入参 messages 拷一份到这里,供
+    # /api/e2e/last-messages(仅 NEXUS_E2E_MOCK=1 暴露)读出来给 Playwright 断言。
+    # WHY:多模态图片注入链路(用户上传图 → 后端 read_attachment_image_b64 →
+    # build_messages_with_attachments 拼 Anthropic multi-part image block →
+    # LLM 收到 messages)需要端到端验证。生产路径不挂 /api/e2e,所以这个
+    # 字段只服务于测试观察。
+    last_messages: list = Field(default_factory=list)
 
     @property
     def _llm_type(self) -> str:
         return "e2e-mock"
 
     def _generate(self, messages: list, stop=None, run_manager=None, **kwargs: Any) -> ChatResult:
+        # 把入参 messages 拷一份:WebSocket / REST 流式触发 _generate 时,
+        # E2E spec 在流结束后 GET /api/e2e/last-messages 读出来断言"LLM 真收到图"。
+        # 用 list(messages) 防止后续 mutation 影响快照(深拷贝 lazy 即可,langchain
+        # message 对象本轮 astream 后不再修改)。
+        self.last_messages = list(messages) if messages else []
         # E2E 流速控制(2026-07-13):stop-mid-stream spec 依赖"流持续一段时间"
         # 才能让用户点 stop。默认 0(mock 立即返回),NEXUS_E2E_MOCK_DELAY_SEC
         # 设成 2 可让流持续 ~2 秒,足以触发 stop 按钮交互。
         delay = float(os.environ.get("NEXUS_E2E_MOCK_DELAY_SEC", "0"))
+        # 2026-07-22 调试 hook:看 mock 是不是真 sleep + messages 长度。
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "[MOCK-DEBUG] _generate scenario=%s delay=%s messages_len=%s has_tool_result=%s",
+            self.scenario,
+            delay,
+            len(messages) if messages else 0,
+            any(isinstance(m, ToolMessage) for m in (messages or [])),
+        )
         if delay > 0:
             import time as _time
 

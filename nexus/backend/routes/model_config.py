@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from ..api.ws import require_token
-from ..models_config import load_models, save_models, set_active_model
+from ..models_config import get_active_model, load_models, save_models, set_active_model
 
 router = APIRouter(prefix="/api/models", tags=["models"], dependencies=[Depends(require_token)])
 
@@ -131,6 +131,50 @@ async def set_default_model(body: DefaultModelRequest) -> dict:
             _set_global_agent(new_agent)
 
     return {"success": True, "model": target}
+
+
+async def _ping_provider(base_url: str, api_key: str) -> None:
+    """对 Provider 的 ``{base_url}/models`` 端点发一个只读 GET 验证连通性 + 鉴权。
+
+    只读、无副作用、代价小(OpenAI / Anthropic / MiniMax 都支持列模型)。
+    成功返回 None;失败按 httpx 异常类型映射为 HTTPException 抛出,由端点透传。
+    """
+    models_url = f"{base_url.rstrip('/')}/models"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(models_url, headers={"Authorization": f"Bearer {api_key}"})
+            resp.raise_for_status()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=408, detail=f"连接超时: {models_url}") from None
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code
+        if code in (401, 403):
+            raise HTTPException(status_code=code, detail="API Key 无效或无权限") from e
+        raise HTTPException(status_code=code, detail=f"Provider 返回 {code}") from e
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"无法连接 Provider: {type(e).__name__}") from e
+
+
+@router.get("/default/test")
+async def test_default_model() -> dict[str, bool]:
+    """测试当前激活模型的连接:用其 api_key 对 Provider ``/models`` 发只读 ping。
+
+    语义:SetupView「测试连接」按钮的后端支撑。只验证连通性 + 鉴权,不写配置、
+    不重建 Agent。成功 → 200 ``{"ok": true}``;无激活模型 / 无 key → 400;
+    Provider 鉴权失败 → 401/403;超时 → 408。
+    """
+    model = get_active_model()
+    if not model:
+        raise HTTPException(status_code=400, detail="没有激活的模型,请先配置")
+    api_key = model.get("api_key")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="当前模型未配置 API Key")
+    api_base = model.get("api_base") or ""
+    if not api_base:
+        raise HTTPException(status_code=400, detail="当前模型未配置 API 地址")
+
+    await _ping_provider(api_base, api_key)
+    return {"ok": True}
 
 
 @router.get("")

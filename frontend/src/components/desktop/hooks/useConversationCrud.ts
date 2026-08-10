@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/api';
 import { useStore } from '../../../store';
-import type { Conversation } from '../../../types';
+import type { Conversation, StyleOption } from '../../../types';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -11,6 +11,9 @@ export interface ConversationCrud {
   resetCounter: number;
   onSelectConversation: (conv: Conversation) => void;
   onDeleteConversation: (id: string) => void;
+  /** 重命名会话 — PUT /api/sessions/{id} (后端 update_session_title)。
+   *  乐观更新 + 失败静默兜底,UI 立即反映。 */
+  onRenameConversation: (id: string, title: string) => Promise<void>;
   onNewTask: () => void;
   onSessionCreated: (sessionId: string, title: string) => void;
 }
@@ -30,6 +33,7 @@ export function useConversationCrud(): ConversationCrud {
 
   const clearConversationMessages = useStore((state) => state.clearConversationMessages);
   const setConversationMessages = useStore((state) => state.setConversationMessages);
+  const activeProjectId = useStore((state) => state.activeProjectId);
 
   const selectSessionRequestRef = useRef(0);
 
@@ -83,6 +87,35 @@ export function useConversationCrud(): ConversationCrud {
     [currentConversationId, clearConversationMessages]
   );
 
+  /**
+   * 重命名会话 — PUT /api/sessions/{id}?title=... (后端 update_session_title 用 PUT)。
+   *
+   * 设计选择:乐观更新 + 失败兜底。先本地把 title 改了,后端调失败也不回滚
+   * (用户在 sidebar 看到的就是他们输入的值)。后端真正落库失败下次 reload
+   * 会再写一次 — 接受这种短期漂移以换取 UI 响应即时。
+   */
+  const onRenameConversation = useCallback(
+    async (id: string, title: string): Promise<void> => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+
+      // 1. 乐观本地更新
+      setConversations((previous) =>
+        previous.map((conv) => (conv.id === id ? { ...conv, title: trimmed } : conv)),
+      );
+
+      // 2. 后端持久化(失败静默,不回滚 — 用户已看到新 title)
+      try {
+        await apiFetch(`/api/sessions/${id}?title=${encodeURIComponent(trimmed)}`, {
+          method: 'PUT',
+        });
+      } catch {
+        /* 兜底:本地已更新,UI 即时反映 */
+      }
+    },
+    [],
+  );
+
   const onNewTask = useCallback(() => {
     setCurrentConversationId(null);
     setResetCounter((value) => value + 1);
@@ -105,35 +138,60 @@ export function useConversationCrud(): ConversationCrud {
     ]);
   }, []);
 
-  // 首启加载已存在的会话列表。
-  // 之前 conversations 初始为 [] 没有任何 useEffect,导致 reload 后
-  // 整个 sidebar "新任务" 之外的 history 全部丢失,必须从后端 /api/sessions 拉一次。
-  useEffect(() => {
-    let cancelled = false;
-    const loadSessions = async (): Promise<void> => {
-      try {
-        const response = await apiFetch('/api/sessions?limit=6');
-        if (!response.ok) return;
-        const rows = (await response.json()) as Array<Record<string, unknown>>;
-        if (cancelled) return;
-        const loaded: Conversation[] = rows.map((row) => ({
-          id: String(row.id),
+  // 拉取会话列表(按 activeProjectId 过滤)。提取为可复用函数:
+  // 既在首启 mount 调一次,也在 activeProjectId 变化(切 project)时调。
+  // 不做 cancel/race-guard —— 切 project 通常带 resetCounter,即使迟到的
+  // 响应也只是 overwrite 一次,无副作用。
+  const loadSessions = useCallback(async (projectId: string | null): Promise<void> => {
+    const qs = new URLSearchParams({ limit: '6' });
+    if (projectId) qs.set('project_id', projectId);
+    try {
+      const response = await apiFetch(`/api/sessions?${qs.toString()}`);
+      if (!response.ok) return;
+      const rows = (await response.json()) as Array<Record<string, unknown>>;
+      const loaded: Conversation[] = rows.map((row) => {
+        const style = (row.style as StyleOption | undefined) ?? 'default';
+        const sid = String(row.id);
+        // seed store — 加载列表时同步写 sessionStyles(silent 创建,Task 7 已经确认)
+        useStore.getState().setSessionStyle(sid, style);
+        return {
+          id: sid,
           title: (row.title as string | null) ?? '新会话',
           messages: [], // 列表接口不返回 messages,点选时再 GET /api/sessions/{id}/messages
           createdAt: new Date((row.created_at as string | undefined) ?? Date.now()),
           updatedAt: (row.updated_at as string | undefined) ?? new Date().toISOString(),
           channel: (row.channel as string | undefined) ?? 'main',
-        }));
-        setConversations(loaded);
-      } catch {
-        // 拉取失败保留空列表,sidebar 走欢迎页空态即可,不要阻塞首屏
-      }
-    };
-    void loadSessions();
-    return () => {
-      cancelled = true;
-    };
+          style, // Conversation.style,Task 7 已加字段
+        };
+      });
+      setConversations(loaded);
+    } catch {
+      // 拉取失败保留空列表,sidebar 走欢迎页空态即可,不要阻塞首屏
+    }
   }, []);
+
+  // 首启加载已存在的会话列表。
+  useEffect(() => {
+    void loadSessions(activeProjectId);
+  }, [loadSessions, activeProjectId]);
+
+  // 切 project 时清掉当前会话 + 消息,等新列表拉好后再保持空 current。
+  // 不在这里 resetCounter + clearConversationMessages 两次调用同一个 store —
+  // 直接用 resetCounter bump 触发 ChatArea 同步即可,因为 ChatArea useEffect
+  // 看 resetCounter 就会清 messages(详见 ChatArea.tsx)。
+  const prevProjectRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (prevProjectRef.current === undefined) {
+      // 首启:上一值未初始化 → 仅记下,不重置(等拉数据后自然空)
+      prevProjectRef.current = activeProjectId;
+      return;
+    }
+    if (prevProjectRef.current === activeProjectId) return;
+    prevProjectRef.current = activeProjectId;
+    setCurrentConversationId(null);
+    setResetCounter((value) => value + 1);
+    clearConversationMessages();
+  }, [activeProjectId, clearConversationMessages]);
 
   return {
     conversations,
@@ -141,6 +199,7 @@ export function useConversationCrud(): ConversationCrud {
     resetCounter,
     onSelectConversation,
     onDeleteConversation,
+    onRenameConversation,
     onNewTask,
     onSessionCreated,
   };

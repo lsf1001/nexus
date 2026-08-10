@@ -23,7 +23,10 @@ import type { ConfirmationAction } from '../../../types'
 
 type AppendAssistantPatch = (patch: Parameters<ReturnType<typeof useStore.getState>['appendAssistantPatch']>[0]) => void
 
-function makeCtx(spies?: { appendAssistantPatch: Mock }): {
+function makeCtx(spies?: {
+  appendAssistantPatch: Mock
+  initialLastError?: { message: string; retryable: boolean; code: string; at: number } | null
+}): {
   ctx: WsRouterCtx
   spies: {
     appendAssistantPatch: Mock
@@ -33,6 +36,10 @@ function makeCtx(spies?: { appendAssistantPatch: Mock }): {
     setPendingConfirmation: Mock
     disarmWatchdog: Mock
   }
+  // 暴露 setter 让测试在 chunk 帧之前预先"放入 stale lastError"模拟显示中 banner。
+  setMockLastError: (
+    err: { message: string; retryable: boolean; code: string; at: number } | null,
+  ) => void
 } {
   const appendAssistantPatch = spies?.appendAssistantPatch ?? vi.fn()
   // 用一个真实 store action 替换,spy 它
@@ -43,12 +50,20 @@ function makeCtx(spies?: { appendAssistantPatch: Mock }): {
   const setPendingClarification = vi.fn()
   const setPendingConfirmation = vi.fn()
   const disarmWatchdog = vi.fn()
+  // 2026-08-08 Round 6.2:wsCtx 现在含 getLastError getter,handler 用它
+  // gate stale 错误清理;默认 null 表示没有 stale 错误,handleChunk 此时
+  // 不应触发 setLastError(null) 调用。setMockLastError 让测试在 chunk 帧
+  // 之前预先"放入 stale lastError"模拟显示中 banner。
+  const lastErrorRef: { current: { message: string; retryable: boolean; code: string; at: number } | null } = {
+    current: spies?.initialLastError ?? null,
+  }
   const ctx: WsRouterCtx = {
     setLastError,
     setIsLoading,
     setPendingClarification,
     setPendingConfirmation,
     disarmWatchdog,
+    getLastError: () => lastErrorRef.current,
   }
   return {
     ctx,
@@ -59,6 +74,9 @@ function makeCtx(spies?: { appendAssistantPatch: Mock }): {
       setPendingClarification,
       setPendingConfirmation,
       disarmWatchdog,
+    },
+    setMockLastError: (err) => {
+      lastErrorRef.current = err
     },
   }
 }
@@ -87,23 +105,47 @@ describe('useWsMessageRouter', () => {
     // 因为 frame 没 type,narrowing 直接 return,不会调任何 handler
   })
 
-  it('thinking 帧 → store.appendAssistantPatch 写 thinking + disarmWatchdog + setIsLoading(false)', () => {
+  it('thinking 帧 → store.appendAssistantPatch 写 thinking + disarmWatchdog,流仍进行(isLoading 不关)', () => {
     const { ctx, spies } = makeCtx()
     const { result } = renderHook(() => useWsMessageRouter(ctx))
     result.current({ type: 'thinking', content: 'hmm let me think' })
     expect(spies.appendAssistantPatch).toHaveBeenCalledWith({ thinking: 'hmm let me think' })
-    expect(spies.setIsLoading).toHaveBeenCalledWith(false)
+    // 2026-07-22 修复:thinking 帧是流还在进行的标志 — 不应关闭 isLoading,
+    // 原逻辑 setIsLoading(false) 导致 stop 按钮在 mock 流 ~50ms 内消失,
+    // Playwright 抓不到持续可见状态(journey-stop-mid-stream full suite 一直 FAIL)。
+    expect(spies.setIsLoading).not.toHaveBeenCalledWith(false)
+    // 仍 disarmWatchdog 让 30s 兜底 watchdog 在每帧活动时清零重计时。
     expect(spies.disarmWatchdog).toHaveBeenCalledTimes(1)
   })
 
-  it('chunk 帧 → store.appendAssistantPatch 写 content + 清 LastError + disarmWatchdog', () => {
+  it('chunk 帧 + lastError=null → 不调 setLastError(null)(默认无 stale,不浪费 setter call) + appendAssistantPatch + disarmWatchdog', () => {
     const { ctx, spies } = makeCtx()
     const { result } = renderHook(() => useWsMessageRouter(ctx))
     result.current({ type: 'chunk', content: 'hello ' })
     expect(spies.appendAssistantPatch).toHaveBeenCalledWith({ content: 'hello ' })
-    // chunk 帧到时清 lastError(老 error 帧被覆盖)
-    expect(spies.setLastError).toHaveBeenCalledWith(null)
+    // 2026-08-08 Round 6.2:handleChunk gate — lastError 为 null 时**不**主动调
+    // setLastError(null)。原契约是"chunk = 流活着 = 旧错作废",但前提是旧错
+    // 真存在(getLastError() !== null 才清)。
+    expect(spies.setLastError).not.toHaveBeenCalled()
     expect(spies.disarmWatchdog).toHaveBeenCalledTimes(1)
+  })
+
+  it('chunk 帧 + lastError 有值(stale banner 还在显示)→ 才调 setLastError(null)清 stale', () => {
+    // 模拟 stale 状态:前一轮 error 帧把 banner 显示出来,新对话还没走完 error 覆盖,
+    // 此时新流 chunk 帧到 → 把 stale 错误清掉(原来的"流活着 = 旧错作废"语义只在
+    // stale 真存在时才生效)。
+    const { ctx, spies, setMockLastError } = makeCtx()
+    setMockLastError({
+      message: '前一轮失败',
+      retryable: false,
+      code: 'rate_limit',
+      at: Date.now() - 1000,
+    })
+    const { result } = renderHook(() => useWsMessageRouter(ctx))
+    result.current({ type: 'chunk', content: '新对话 ' })
+    expect(spies.appendAssistantPatch).toHaveBeenCalledWith({ content: '新对话 ' })
+    expect(spies.setLastError).toHaveBeenCalledTimes(1)
+    expect(spies.setLastError).toHaveBeenCalledWith(null)
   })
 
   it('error 帧 → setLastError 写 message/retryable/code + disarmWatchdog', () => {

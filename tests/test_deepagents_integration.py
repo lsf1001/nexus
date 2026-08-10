@@ -1,4 +1,4 @@
-"""DeepAgents 0.6.8 模块集成测试。
+"""DeepAgents 0.7.4 模块集成测试(0.6.12 升级后,字段集未变)。
 
 覆盖:
   - ``_create_store``:memory / sqlite 两路 + 异常降级
@@ -143,6 +143,97 @@ class TestProfiles:
         register_nexus_profiles()
         assert profiles_module._PROFILES_REGISTERED is True
 
+    def test_harness_profile_field_set_matches_deepagents_0_7_4(self) -> None:
+        """HarnessProfile 字段集合 == 0.7.4 真实签名(0.6.12 以来未变)。
+
+        WHY:0.6.x 之间字段集可能变化(excluded_tools / excluded_middleware /
+        extra_middleware 在 0.6 中期才加)。0.7.4 字段集与 0.6.12 相同,这个
+        case 是版本基线,任何字段增删都让 case RED 提醒。
+        """
+        import inspect
+
+        from deepagents.profiles.harness.harness_profiles import HarnessProfile
+
+        actual = set(inspect.signature(HarnessProfile.__init__).parameters)
+        # 7 字段 + self,扣除 self
+        actual.discard("self")
+        expected = {
+            "base_system_prompt",
+            "system_prompt_suffix",
+            "tool_description_overrides",
+            "excluded_tools",
+            "excluded_middleware",
+            "extra_middleware",
+            "general_purpose_subagent",
+        }
+        assert actual == expected, (
+            f"deepagents 0.7.4 HarnessProfile 字段集漂移:actual={sorted(actual)}, expected={sorted(expected)}"
+        )
+
+    def test_general_purpose_subagent_field_set_matches_0_7_4(self) -> None:
+        """GeneralPurposeSubagentProfile 字段集合 == 0.7.4 真实签名(0.6.12 未变)。"""
+        import inspect
+
+        from deepagents.profiles.harness.harness_profiles import GeneralPurposeSubagentProfile
+
+        actual = set(inspect.signature(GeneralPurposeSubagentProfile.__init__).parameters)
+        actual.discard("self")
+        expected = {"enabled", "description", "system_prompt"}
+        assert actual == expected, (
+            f"GeneralPurposeSubagentProfile 字段漂移:actual={sorted(actual)}, expected={sorted(expected)}"
+        )
+
+    def test_create_deep_agent_signature_0_7_4(self) -> None:
+        """create_deep_agent 参数集合 == 0.7.4 真实签名(0.6.12 未变,基线)。"""
+        import inspect
+
+        from deepagents.graph import create_deep_agent
+
+        actual = set(inspect.signature(create_deep_agent).parameters)
+        actual.discard("self")
+        expected = {
+            "model",
+            "tools",
+            "system_prompt",
+            "middleware",
+            "subagents",
+            "skills",
+            "memory",
+            "permissions",
+            "backend",
+            "interrupt_on",
+            "response_format",
+            "state_schema",
+            "context_schema",
+            "checkpointer",
+            "store",
+            "debug",
+            "name",
+            "cache",
+        }
+        assert actual == expected, (
+            f"create_deep_agent 参数集漂移:actual={sorted(actual)}, "
+            f"expected={sorted(expected)}\ndiff: actual-only={sorted(actual - expected)}, "
+            f"expected-only={sorted(expected - actual)}"
+        )
+
+    def test_subagent_typeddict_required_keys_0_7_4(self) -> None:
+        """SubAgent / CompiledSubAgent / AsyncSubAgent TypedDict required == 0.7.4。
+
+        这是 2026-08-04 对齐报告 §3/§4 的事实基线:required 字段决定启动期
+        是否需要校验。``AsyncSubAgent`` 把 ``url`` 从 required 降级为
+        optional 自 0.6.12 起已是事实,0.7.4 延续。
+        """
+        from deepagents.middleware.async_subagents import AsyncSubAgent
+        from deepagents.middleware.subagents import CompiledSubAgent, SubAgent
+
+        assert set(SubAgent.__required_keys__) == {"name", "description", "system_prompt"}
+        assert set(CompiledSubAgent.__required_keys__) == {"name", "description", "runnable"}
+        assert set(AsyncSubAgent.__required_keys__) == {"name", "description", "graph_id"}
+        # url 0.6.12 起降级为 optional,0.7.4 延续
+        assert "url" not in set(AsyncSubAgent.__required_keys__)
+        assert "url" in set(AsyncSubAgent.__optional_keys__)
+
 
 # ============================================================================
 # _load_async_subagent_specs
@@ -166,23 +257,44 @@ class TestLoadAsyncSubagentSpecs:
         assert agent_module._load_async_subagent_specs() == []
 
     def test_missing_required_fields_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """缺 name 或 description → 跳过该条 + warning。"""
+        """缺 name/description/graph_id → 跳过该条 + warning。
+
+        0.6.12 / 0.7.4 ``AsyncSubAgent`` TypedDict 字段集未变:required={name,
+        description, graph_id},``graph_id`` 是 LangGraph 平台 deployment_id,
+        缺了首次调用才炸(延迟到运行期)。Nexus 在加载期就拒,启动期
+        失败 = 启动期可观测。
+        """
         monkeypatch.setenv(
             "NEXUS_ASYNC_SUBAGENTS_JSON",
-            '[{"name":"x"},{"description":"y"}]',
+            '[{"name":"x"},{"description":"y"},{"name":"a","description":"b"}]',
         )
         assert agent_module._load_async_subagent_specs() == []
 
     def test_valid_specs_parsed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """完整 spec → 返回 AsyncSubAgent TypedDict。"""
+        """完整 spec → 返回 AsyncSubAgent TypedDict。
+
+        0.6.12 / 0.7.4 ``AsyncSubAgent``:required={name, description, graph_id},
+        optional={url, headers}。url 缺省时框架走 LangGraph Platform 默认地址。
+        """
         monkeypatch.setenv(
             "NEXUS_ASYNC_SUBAGENTS_JSON",
-            '[{"name":"remote_writer","description":"远程写作","url":"https://x.example"}]',
+            '[{"name":"remote_writer","description":"远程写作","graph_id":"deploy-123","url":"https://x.example"}]',
         )
         specs = agent_module._load_async_subagent_specs()
         assert len(specs) == 1
         assert specs[0]["name"] == "remote_writer"
         assert specs[0]["url"] == "https://x.example"
+        assert specs[0]["graph_id"] == "deploy-123"
+
+    def test_url_optional(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """url 缺省仍可解析(0.6.12 / 0.7.4 url 都是 optional)。"""
+        monkeypatch.setenv(
+            "NEXUS_ASYNC_SUBAGENTS_JSON",
+            '[{"name":"r","description":"d","graph_id":"g1"}]',
+        )
+        specs = agent_module._load_async_subagent_specs()
+        assert len(specs) == 1
+        assert "url" not in specs[0]
 
 
 # ============================================================================

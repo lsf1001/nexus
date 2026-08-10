@@ -11,6 +11,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
+import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { Sidebar } from '../Sidebar';
 import { PreferencesModal } from '../PreferencesModal';
 import {
@@ -79,10 +81,20 @@ function Harness() {
         onSelectConversation={vi.fn()}
         onDeleteConversation={vi.fn()}
         onNewTask={vi.fn()}
+        onRenameConversation={vi.fn()}
         onOpenPreferences={() => setOpen(true)}
       />
       <PreferencesModal open={open} onClose={() => setOpen(false)} />
     </>
+  );
+}
+
+/** 用 MemoryRouter 包一层,因为 PreferencesModal 内 useNavigate 需要 Router 上下文(草稿 tab 用)。 */
+function RoutedHarness(): ReactElement {
+  return (
+    <MemoryRouter initialEntries={['/chat']}>
+      <Harness />
+    </MemoryRouter>
   );
 }
 
@@ -107,6 +119,7 @@ describe('模拟人工:设置按钮入口', () => {
         onSelectConversation={vi.fn()}
         onDeleteConversation={vi.fn()}
         onNewTask={vi.fn()}
+        onRenameConversation={vi.fn()}
         onOpenPreferences={vi.fn()}
       />,
     );
@@ -126,6 +139,7 @@ describe('模拟人工:设置按钮入口', () => {
         onSelectConversation={vi.fn()}
         onDeleteConversation={vi.fn()}
         onNewTask={vi.fn()}
+        onRenameConversation={vi.fn()}
         onOpenPreferences={spy}
       />,
     );
@@ -136,7 +150,7 @@ describe('模拟人工:设置按钮入口', () => {
 
 describe('模拟人工:设置弹窗界面偏好', () => {
   it('弹窗内有"显示思考过程"和"深色模式" toggle 按钮', () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
 
@@ -146,7 +160,7 @@ describe('模拟人工:设置弹窗界面偏好', () => {
   });
 
   it('点击"显示思考过程" toggle → setShowThinking', () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
 
@@ -156,7 +170,7 @@ describe('模拟人工:设置弹窗界面偏好', () => {
   });
 
   it('点击"深色模式" toggle → toggleDarkMode', () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
 
@@ -168,7 +182,7 @@ describe('模拟人工:设置弹窗界面偏好', () => {
 
 describe('模拟人工:设置弹窗字号 radio', () => {
   it('字号 radio 组有"小/中/大"三个,默认选中"中"', () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
 
@@ -181,7 +195,7 @@ describe('模拟人工:设置弹窗字号 radio', () => {
   });
 
   it('点击"大" radio → setFontScale(1.25)', () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
     const group = within(dialog).getByRole('radiogroup', { name: '字号' });
@@ -191,7 +205,7 @@ describe('模拟人工:设置弹窗字号 radio', () => {
   });
 
   it('点击"小" radio → setFontScale(0.875)', () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
     const group = within(dialog).getByRole('radiogroup', { name: '字号' });
@@ -203,7 +217,7 @@ describe('模拟人工:设置弹窗字号 radio', () => {
 
 describe('模拟人工:Provider 模型发现', () => {
   it('弹窗包含 PROVIDER + 已导入模型 + 界面 + 关于四个分区', () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
 
@@ -214,7 +228,7 @@ describe('模拟人工:Provider 模型发现', () => {
   });
 
   it('弹窗出现 Base URL + API Key 输入框 + 发现按钮', () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
 
@@ -224,7 +238,7 @@ describe('模拟人工:Provider 模型发现', () => {
   });
 
   it('点"发现模型" → 调 discoverProviderModels 并显示模型列表', async () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
 
@@ -245,7 +259,7 @@ describe('模拟人工:Provider 模型发现', () => {
   });
 
   it('点"导入全部" → 调 importProviderModels 并刷新 store', async () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
 
@@ -265,7 +279,7 @@ describe('模拟人工:Provider 模型发现', () => {
   });
 
   it('点关闭(X)→ 弹窗消失', () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     expect(screen.getByRole('dialog', { name: '设置' })).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
@@ -275,7 +289,7 @@ describe('模拟人工:Provider 模型发现', () => {
 
 describe('模拟人工:模型管理', () => {
   it('弹窗显示已导入的模型列表', () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
 
@@ -285,7 +299,7 @@ describe('模拟人工:模型管理', () => {
   });
 
   it('点击非激活模型 → switchModel', async () => {
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
 
@@ -300,7 +314,7 @@ describe('模拟人工:模型管理', () => {
   it('点击删除按钮 → 确认后调 deleteModel', async () => {
     // mock confirm 返回 true
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(<Harness />);
+    render(<RoutedHarness />);
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     const dialog = screen.getByRole('dialog', { name: '设置' });
 

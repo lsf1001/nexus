@@ -6,12 +6,12 @@
  *
  * 显示字段：
  *   - 连接状态点（online / connecting / offline 三色）
+ *   - 当前 active 模型名（modelName 非空时显示，带 title 提示）
  *   - 右侧 spacer + "local" 提示
  *
  * **2026-07-21 重定位**：EmptyState 任务状态卡已砍,StatusBar 是模型 + 连接
- * 在主界面的唯一可见位置 — 后续如需显示模型名,应在此处加,不再回到
- * EmptyState。暂不显示 token 计数（input_tokens / output_tokens）—— 后端未
- * 下发,留待接入。
+ * 在主界面的唯一可见位置。**2026-07-23 #2**：模型名已在此处显示。暂不显示
+ * token 计数（input_tokens / output_tokens）—— 后端未下发,留待接入。
  */
 import { useStore } from '../../store';
 
@@ -32,9 +32,9 @@ function resolveConnectionLabel(wsConnected: boolean, modelConfigured: boolean):
 }
 
 export function StatusBar({ wsConnected, modelConfigured }: StatusBarProps) {
-  // 故意订阅 store.modelName 但不在 UI 显示 — 保留依赖以便未来 token 计数接入时
-  // 能拿到当前模型上下文。
-  useStore((state) => state.modelName);
+  // 2026-07-23 #2:StatusBar 是模型 + 连接在主界面的唯一可见位置(2026-07-21 决策),
+  // 显示当前 active model 名。modelName 变化时组件重渲染展示新值。
+  const modelName = useStore((state) => state.modelName);
   const { className, text } = resolveConnectionLabel(wsConnected, modelConfigured);
 
   return (
@@ -43,6 +43,11 @@ export function StatusBar({ wsConnected, modelConfigured }: StatusBarProps) {
         <span className={`status-bar-dot ${className}`} />
         {text}
       </span>
+      {modelName && (
+        <span className="status-bar-item" title={`当前模型: ${modelName}`}>
+          {modelName}
+        </span>
+      )}
       <span className="status-bar-spacer" />
       <span className="status-bar-item" title="无账户 · 本地运行">
         local

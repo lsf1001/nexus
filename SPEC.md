@@ -82,7 +82,7 @@ nexus/                 # 仓库根
 - `_select_filesystem_backend()` - 选 backend（FilesystemBackend / LocalShellBackend / LangSmithSandbox / ContextHubBackend）
 - `_ensure_registered()` - 注册 Nexus 的 ProviderProfile + HarnessProfile（minimax / minimax:MiniMax-M3）
 
-#### DeepAgents 0.6.8 模块集成清单
+#### DeepAgents 0.7.4 模块集成清单(0.6.12 升级后,模块清单未变)
 
 | 模块 | 状态 | 入口 / 触发 |
 | --- | --- | --- |
@@ -106,9 +106,9 @@ nexus/                 # 仓库根
 | `QualityGateMiddleware`(AGENTS.md 写忠实度拦截) | 默认 | `nexus/backend/quality/middleware.py` |
 
 ⚠️ **execution backend 警告**:LocalShellBackend / LangSmithSandbox / ContextHubBackend 让
-LLM 可以执行 shell / 远程代码。deepagents 0.6.8 的 FilesystemMiddleware 不支持同时配
-permissions 和 execution backend(框架会主动禁用 permissions)。生产建议禁用,
-本地开发 / CI 测试按需开启。
+LLM 可以执行 shell / 远程代码。deepagents 0.7.4 的 FilesystemMiddleware 不支持同时配
+permissions 和 execution backend(框架会主动禁用 permissions,0.6.x → 0.7.x 仍未放开)。
+生产建议禁用,本地开发 / CI 测试按需开启。
 
 ### 中间件链(middleware,顺序敏感,2026-06-29 重构 + 2026-06-30 追加)
 

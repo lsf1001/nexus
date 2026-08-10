@@ -538,7 +538,7 @@ class TestCreateAgentWiresDeepAgentsMemory:
     def test_middleware_kwarg_does_not_duplicate_summarization(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """``SummarizationMiddleware`` 不应出现在 user-passed middleware 里。
 
-        WHY:deepagents 0.6.8 主 agent stack(line 776-781 of graph.py)已经显式
+        WHY:deepagents 0.6.12 主 agent stack(line 776-781 of graph.py)已经显式
         追加一个 ``create_summarization_middleware(model, backend)``,trigger
         走 ``compute_summarization_defaults(model)``(没有 ``max_input_tokens``
         profile 时给保守值 ``("tokens", 170000)``,``keep=("messages", 6)``)。

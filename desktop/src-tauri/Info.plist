@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Round 4 Task 4.1(2026-08-05 加):macOS 麦克风权限说明。
+    Tauri 2 bundler 会把这个文件 merge 进生成的 Info.plist;没有这条,
+    WKWebView.getUserMedia 在 Tauri 2 内首次调用会无声失败(没有系统弹窗),
+    console 也只会看到 NotAllowedError。
+
+    同时声明 NSCameraUsageDescription 备用 — 后续若加拍照/录像能力
+    直接复用此文件,无需再走一遍 bundler 验证。
+
+    隐私文案要求:必须明确告诉用户「为什么需要这个权限 + 录音时机 +
+    数据去向」。Apple 审核也会卡空泛文案(如「用于提升体验」)。
+  -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Nexus 需要访问麦克风以实现语音输入功能。录音仅在你按下 Composer 旁的麦克风按钮期间进行,不会后台采集也不会上传第三方。</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Nexus 需要访问摄像头以拍摄附件。摄像头仅在你主动选择「拍照插入」时启用,不会后台开启。</string>
+</dict>
+</plist>

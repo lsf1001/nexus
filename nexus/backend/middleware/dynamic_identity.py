@@ -28,8 +28,16 @@ Bug A 修复(2026-06-30):
   LLM 自报身份时不说"我是 Nexus",LLM 不遵守 ``<thinking>`` 格式。
   修复:检测 ``sm_content`` 为空/None 时,**用
   ``request.override(system_message=...)`` 重建完整 system_message
-  = FACT + 静态 product rules(``get_system_prompt()`` 缓存读取,O(1))。
+  = FACT + 静态 product rules(``get_system_prompt(style=...)`` 缓存读取,O(1))。
   非空分支保持原行为(FACT prepend),不退化。
+
+Round 6.1 style bug 修复(2026-08-05):
+  即使 agent 已按 ``style='professional'`` 重建并把【回复风格 · 专业】段
+  拼进 messages[0],旧版 middleware 走 ``get_system_prompt()`` 默认
+  style='default',会把 system message 替换成默认风格版本,导致 LLM
+  永远按 default 风格回复。修复:middleware 入口读 ``request.model._nexus_style``
+  (由 ``_agent_builder.create_agent`` 在 LLM 构造时写入),重建时透传
+  style 参数,保住 agent 注入的【专业】/【简洁】指令段。
 
 契约:
   - 输入 ``request.system_message.content`` 可以是 ``str``、空字符串、或
@@ -171,11 +179,16 @@ async def dynamic_identity_middleware(
       - **不**缓存 FACT 块字符串(每次都重算)—— 缓存就是 bug 来源。
       - **Bug A 修复**:如果 ``request.system_message.content`` 是空字符串或
         ``request.system_message`` 为 ``None``,用 ``request.override()`` 重建
-        SystemMessage = FACT + 静态 product rules(``get_system_prompt()``)。
+        SystemMessage = FACT + 静态 product rules(``get_system_prompt(style=...)``)。
         这是因为 deepagents 0.6.x 在调用本 middleware 时,``sm_content`` 经常
         已经是空字符串(原始 ``system_prompt`` 被 langchain 内部吃掉,稍后
         才由 ``MemoryMiddleware`` 追加 AGENTS.md)。如果仅 prepend FACT 到
         空字符串,LLM 会丢失 Nexus 身份 / 思考格式 / 澄清规则 / 安全规则。
+      - **Round 6.1 style 修复**:重建 SystemMessage 时透传 style 参数
+        (读 ``request.model._nexus_style``,由 ``_agent_builder.create_agent``
+        在 LLM 构造时写入)。否则即便 agent 已按 ``style='professional'``
+        重建并把【专业】段拼进 messages[0],middleware 也会拿默认风格的
+        prompt 替换掉 → LLM 永远按 default 风格回复。
       - 如果 ``sm_content`` 非空(legacy / 测试路径),仍 prepend FACT 块,
         保留原始 static prompt —— 不退化。
       - 用 ``request.override(system_message=...)`` 而非直接
@@ -218,6 +231,20 @@ async def dynamic_identity_middleware(
     sm = request.system_message
     sm_content = sm.content if sm is not None and isinstance(sm.content, str) else ""
 
+    # 2026-08-05 Round 6.1 style 诊断:读 LLM._nexus_style 看 agent 是否按
+    # 风格重建,后续 middleware 重建 SystemMessage 时透传 style 保住【专业】
+    # 指令。这是修复 DynamicIdentityMiddleware 覆写 style 段 bug 的核心
+    # 机制 —— 中间件入口 sm_content 为空时,如果不传 style,get_system_prompt()
+    # 默认 style='default' 就会拿默认风格 prompt,覆盖 agent 拼进 messages[0]
+    # 的【回复风格 · 专业】段。
+    active_style = getattr(request.model, "_nexus_style", "default")
+    logger.info(
+        "dynamic_identity: sm_content_len=%d, _nexus_style=%r, has_messages=%d",
+        len(sm_content),
+        active_style,
+        len(request.messages) if request.messages else 0,
+    )
+
     if not sm_content:
         # Bug A 防御:deepagents 实际运行时 sm_content 是空字符串,这里重建
         # 完整 system_message = FACT + FACT_CHECK_CONSTRAINT + 静态 product rules + FINAL REMINDER。
@@ -226,13 +253,21 @@ async def dynamic_identity_middleware(
         # 四层三明治结构:FACT(顶, 模型身份)+ FACT_CHECK(顶 2, 事实工具主动约束)
         #                 + static prompt(中段, Nexus 静态产品规则)
         #                 + FINAL REMINDER(末尾, 身份自报硬约束)。
-        static_prompt = get_system_prompt()
+        #
+        # Round 6.1 style bug fix:get_system_prompt(style=active_style)
+        # 透传当前 agent 实例对应的风格维度,避免默认 style='default' 覆盖
+        # agent 注入的【回复风格 · 专业】段。active_style 来自
+        # ``request.model._nexus_style``,由 ``_agent_builder.create_agent``
+        # 在构造 LLM 时写入(非 default 风格切换会触发 agent 重建,新 LLM
+        # 带新 _nexus_style)。
+        static_prompt = get_system_prompt(style=active_style)
         rebuilt = SystemMessage(content=fact_block + fact_check_constraint + static_prompt + final_reminder)
         new_request = request.override(system_message=rebuilt)
         logger.info(
             "dynamic_identity_middleware: sm_content 为空,已重建 FACT + FACT_CHECK_CONSTRAINT "
-            "+ 静态 product rules + FINAL REMINDER "
+            "+ 静态 product rules(style=%s) + FINAL REMINDER "
             "(fact=%d chars, fact_check=%d chars, static=%d chars, final=%d chars)",
+            active_style,
             len(fact_block),
             len(fact_check_constraint),
             len(static_prompt),

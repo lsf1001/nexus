@@ -22,6 +22,9 @@ function makeCtx(): WsRouterCtx {
     setPendingClarification: () => undefined,
     setPendingConfirmation: () => undefined,
     disarmWatchdog: vi.fn(),
+    // 2026-08-08 Round 6.2:wsCtx 含 getLastError getter;tool_call / tool_result
+    // 不读它,这里默认 null(无 stale 错误)。
+    getLastError: () => null,
   };
 }
 
