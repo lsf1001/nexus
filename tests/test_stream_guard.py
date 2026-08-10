@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
 from openai import (
     APITimeoutError,
     AuthenticationError,
@@ -497,3 +498,82 @@ def test_stream_guard_default_retry_policy() -> None:
     guard = StreamGuard(astream)
     # 应能正常调用
     assert guard.stats == {"retries": 0, "fallbacks": 0, "events_emitted": 0}
+
+
+# ---------------- Round 6.2:vendor/model 切片 ----------------
+
+
+def test_vendor_id_property_default_none() -> None:
+    """未传 vendor_id 时,vendor_id 属性返回 None(日志会 fallback 到 '-')。"""
+
+    async def astream(input, **kwargs):  # noqa: ARG001
+        yield {"type": "chunk"}
+
+    guard = StreamGuard(astream)
+    assert guard.vendor_id is None
+    assert guard.model_id is None
+
+
+def test_vendor_id_and_model_id_constructor() -> None:
+    """构造时传入 vendor_id / model_id,属性正确暴露。"""
+
+    async def astream(input, **kwargs):  # noqa: ARG001
+        yield {"type": "chunk"}
+
+    guard = StreamGuard(
+        astream,
+        vendor_id="minimaxi",
+        model_id="MiniMax-M2",
+    )
+    assert guard.vendor_id == "minimaxi"
+    assert guard.model_id == "MiniMax-M2"
+
+
+async def test_retry_log_includes_vendor_and_model(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """retry 日志应带 vendor + model 维度,便于 vendor-side 故障定位(2026-08-08 Round 6.2)。
+
+    WHY:此前 retry 日志只有 classified.kind + classified.message,要确认 vendor
+    得反查 httpx POST URL,慢且易漏。vendor_id/model_id 显式挂载后日志一眼可
+    定位"agnes-cachellm distributor 下线"一类问题。
+    """
+
+    async def astream_factory(input, **kwargs):  # noqa: ARG001
+        raise _rate_limit_error()
+
+    guard = StreamGuard(
+        astream_factory,
+        max_total_retries=2,
+        vendor_id="agnes-cachellm",
+        model_id="agnes-1.5-flash",
+    )
+    with caplog.at_level("INFO", logger="nexus.backend.resilience.stream_guard"):
+        async for _ in guard.astream_events({"x": 1}):
+            pass
+
+    retry_logs = [r for r in caplog.records if "StreamGuard retry" in r.message]
+    assert retry_logs, "应有 StreamGuard retry 日志"
+    msg = retry_logs[0].message
+    assert "vendor=agnes-cachellm" in msg, f"日志缺 vendor: {msg}"
+    assert "model=agnes-1.5-flash" in msg, f"日志缺 model: {msg}"
+
+
+async def test_retry_log_vendor_dash_when_unset(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """未设 vendor/model 时,日志 fallback 到 '-' 而不是抛错或写 None。"""
+
+    async def astream_factory(input, **kwargs):  # noqa: ARG001
+        raise _rate_limit_error()
+
+    guard = StreamGuard(astream_factory, max_total_retries=2)
+    with caplog.at_level("INFO", logger="nexus.backend.resilience.stream_guard"):
+        async for _ in guard.astream_events({"x": 1}):
+            pass
+
+    retry_logs = [r for r in caplog.records if "StreamGuard retry" in r.message]
+    assert retry_logs
+    msg = retry_logs[0].message
+    assert "vendor=-" in msg
+    assert "model=-" in msg
