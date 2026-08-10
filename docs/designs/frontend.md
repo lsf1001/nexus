@@ -10,7 +10,7 @@
 ## 1. 产品定位
 
 - 个人 AI 助理（OpenClaw 形态），**无账户 · 本地运行**
-- 唯一分发渠道：macOS DMG（`release/Nexus-<version>-arm64.dmg`，当前 `v1.5.4`）
+- 唯一分发渠道：macOS DMG（`release/Nexus-<version>-arm64.dmg`，当前 `v1.5.5`）
 - 用户数据唯一持久目录：`~/.nexus/`（`models.json` / `nexus.db` / `logs/` / `AGENTS.md` / `skills/`）
 - 设计语言：**借鉴 WorkBuddy / Claude Desktop 的视觉密度但不复刻**（紧凑 22px 顶栏 / 14px 底栏 / 720px 主区限宽 / ⌘K 命令面板）
 

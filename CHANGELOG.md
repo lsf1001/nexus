@@ -65,7 +65,7 @@ Nexus 项目的所有重要变更都记录在此文件。本文件格式基于 [
 
 ---
 
-### [Unreleased] — Round 6.x hardening (2026-08-05)
+### [1.5.5] — 2026-08-10 Round 6.x hardening + Round 7 chat 右侧截断
 
 本段覆盖预发强化,作为 `1.5.5` 候选。共 19 个 commit,后端 pytest 1081
 PASS + 13 skipped,前端 vitest 416 PASS(61 文件),lint 双清。
