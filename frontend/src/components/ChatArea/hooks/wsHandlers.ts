@@ -176,6 +176,11 @@ export const handleDone: WsHandler = (_ev, ctx) => {
 export const handleError: WsHandler = (ev, ctx) => {
   ctx.setIsLoading(false);
   ctx.disarmWatchdog();
+  // 2026-08-08 Round 6.2:error 帧到达时清理末尾空 assistant 占位,防止下一轮
+  // pushUserAndPlaceholder 把旧占位当 last 续写 thinking → "重复思考卡片 +
+  // 孤立你好"。契约:空占位 pop;thinking-only 占位 content 改写为错误文案,
+  // thinking 保留(产品反馈);已有 content 占位不动(避免覆盖真实回复)。
+  useStore.getState().discardEmptyAssistantPlaceholder(ev.content || '未知错误');
   ctx.setLastError({
     message: ev.content || '未知错误',
     retryable: ev.retryable ?? false,
