@@ -21,6 +21,28 @@ from typing import Any
 logger = __import__("logging").getLogger(__name__)
 
 
+def _vendor_id_from_api_base(api_base: str | None) -> str:
+    """把 api_base URL 映射成简短 vendor 标识,供 StreamGuard 日志切片。
+
+    映射规则(2026-08-08 Round 6.2):
+      - ``apihub.agnes-ai.com`` → ``agnes-cachellm``
+      - ``api.minimaxi.com`` → ``minimaxi``
+      - 其它 / 空 → ``unknown``
+
+    WHY 不直接拿 host 当 vendor:同一 host 下可能有多个 distributor
+    (agnes 现在 cachellm 一家,但未来加新供应商时,需要 vendor 粒度更细)。
+    现阶段 URL → vendor 的简单映射已经够 vendor-side 故障定位。
+    """
+    if not api_base:
+        return "unknown"
+    base = api_base.lower()
+    if "agnes-ai.com" in base:
+        return "agnes-cachellm"
+    if "minimaxi.com" in base or "minimax" in base:
+        return "minimaxi"
+    return "unknown"
+
+
 def create_agent(
     model_name: str | None = None,
     api_key: str | None = None,
@@ -105,6 +127,12 @@ def create_agent(
     # 避免 ws 多客户端 / 切换风格时 race;每个 agent 实例对应一个 LLM,
     # 风格切换时 ``_get_current_agent`` 会重建新 LLM + 新 ``_nexus_style``。
     llm._nexus_style = style  # type: ignore[attr-defined]
+    # 2026-08-08 Round 6.2:把 vendor/model 维度挂到 LLM 实例上,供 StreamGuard
+    # 日志切片(``StreamGuard retry vendor=... model=...``)。WHY:vendor-side
+    # 故障(例如 agnes-cachellm distributor 下线)此前只能从 httpx POST URL
+    # 反向推断,慢且易漏;vendor_id 显式挂载后日志一眼可定位。
+    llm._nexus_model_id = model_name or ""  # type: ignore[attr-defined]
+    llm._nexus_vendor_id = _vendor_id_from_api_base(api_base)  # type: ignore[attr-defined]
 
     # 顺序敏感:**先 checkpointer 再 store**。
     # _create_checkpointer() 走 sync sqlite3 + 同步 DDL(``_ensure_sqlite_checkpoint_tables``),

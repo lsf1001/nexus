@@ -361,10 +361,16 @@ def _build_stream_guard(
     ``setup → consume → finalize`` 编排,§1.2 80 行限制可达。
     """
     astream_kwargs = _build_astream_kwargs_with_callbacks(agent, session_id)
+    # 2026-08-08 Round 6.2:把 vendor + model 维度传给 StreamGuard,日志里
+    # 出 retry/fallback 时带上,便于 vendor-side 故障(agnes-cachellm distributor
+    # 下线一类问题)定位 — 此前 stream_guard retry 日志只能从 upstream 维度
+    # 看 httpx POST URL,反向推断 vendor,慢且易漏。
     guard = StreamGuard(
         astream_events=_make_astream_factory(agent),
         retry_policy=WS_RETRY_POLICY,
         max_total_retries=2,
+        vendor_id=_resolve_vendor_id(agent),
+        model_id=_resolve_model_id(agent),
     )
     # v1 is deprecated since langchain-core 1.0; v2 keeps the same event
     # names (on_chat_model_stream / on_tool_start / on_tool_end) and the
@@ -410,6 +416,35 @@ def _build_astream_kwargs_with_callbacks(agent: Any, session_id: str) -> dict[st
         },
     }
     return astream_kwargs
+
+
+def _resolve_vendor_id(agent: Any) -> str | None:
+    """从 agent 拿 vendor 标识,供 StreamGuard 日志切片。
+
+    路径:agent → agent.llm(或 .model) → ``_nexus_vendor_id``(由
+    :func:`nexus.backend.agent._agent_builder.create_agent` 在 llm 实例上挂载)。
+
+    拿不到时返回 ``None`` — StreamGuard 日志会 fallback 到 ``-``,
+    不抛错(agent 可能在 e2e mock / 测试路径下,没挂这个属性)。
+    """
+    llm = getattr(agent, "llm", None) or getattr(agent, "model", None)
+    if llm is None:
+        return None
+    return getattr(llm, "_nexus_vendor_id", None)
+
+
+def _resolve_model_id(agent: Any) -> str | None:
+    """从 agent 拿实际模型名,供 StreamGuard 日志切片。
+
+    路径同 :func:`_resolve_vendor_id`,读 ``_nexus_model_id``。
+    """
+    llm = getattr(agent, "llm", None) or getattr(agent, "model", None)
+    if llm is None:
+        return None
+    value = getattr(llm, "_nexus_model_id", None)
+    if value == "":
+        return None
+    return value
 
 
 def _make_astream_factory(agent: Any):
