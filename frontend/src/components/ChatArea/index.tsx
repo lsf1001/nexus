@@ -129,6 +129,10 @@ export function ChatArea({
   // 全是 useState setter(本就稳定)+ useCallback(依赖稳定),useMemo 几乎可以
   // 移除 — 这里保留 useMemo 是为了未来扩展 setLastError 等可能在 ChatArea 内
   // 重建的 setter 仍走稳定路径。
+  // 2026-08-08 Round 6.2:getLastError 用 useCallback 包成稳定引用,wsHandler
+  // 用它 gate "chunk 帧只在 stale lastError 实际显示时才清",避免每次 chunk
+  // 都触发 setter call。
+  const getLastError = useCallback(() => lastError, [lastError]);
   const wsCtx = useMemo<WsRouterCtx>(
     () => ({
       setLastError,
@@ -136,9 +140,10 @@ export function ChatArea({
       setPendingClarification,
       setPendingConfirmation,
       disarmWatchdog,
+      getLastError,
       onSessionCreated,
     }),
-    [setLastError, setIsLoading, setPendingClarification, setPendingConfirmation, disarmWatchdog, onSessionCreated],
+    [setLastError, setIsLoading, setPendingClarification, setPendingConfirmation, disarmWatchdog, getLastError, onSessionCreated],
   );
   const handleWsMessage = useWsMessageRouter(wsCtx);
 

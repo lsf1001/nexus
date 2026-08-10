@@ -26,6 +26,9 @@ function makeCtx(
     setPendingClarification: () => undefined,
     setPendingConfirmation: () => undefined,
     disarmWatchdog,
+    // 2026-08-08 Round 6.2:wsCtx 含 getLastError getter;handleFinal 不读它,
+    // 这里默认 null(无 stale 错误)即可。
+    getLastError: () => null,
   };
 }
 

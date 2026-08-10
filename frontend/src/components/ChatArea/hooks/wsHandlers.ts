@@ -32,6 +32,17 @@ export interface WsRouterCtx {
     } | null,
   ) => void;
   disarmWatchdog: () => void;
+  /**
+   * 2026-08-08 Round 6.2:返回当前 React local 的 lastError,供 wsHandler 判
+   * 断"是否有 stale 错误"再决定清不清。函数引用由 ChatArea 用 useCallback 包装
+   * 保证稳定(wsCtx useMemo 不会因此重建)。
+   *
+   * WHY 要 gate:handleChunk 在每个 chunk 都调 setLastError(null) 会覆盖用户
+   * 主动留下的 banner 显示意图,真正"流活着 = 旧错作废"的语义只在 banner 实际
+   * 显示时才有意义。handleError 已经负责新错误覆盖;banner.onClose 走
+   * 用户显式关闭。handleChunk 只清"已显示"的 stale 状态。
+   */
+  getLastError: () => LastError | null;
   onSessionCreated?: (sessionId: string, title: string) => void;
 }
 
@@ -120,7 +131,14 @@ export const handleThinking: WsHandler = (ev, ctx) => {
 };
 
 export const handleChunk: WsHandler = (ev, ctx) => {
-  ctx.setLastError(null);
+  // 2026-08-08 Round 6.2:gate 清 stale lastError — 只有当前真有 stale 错
+  // 误(banner 还在显示)时才清,避免每个 chunk 都触发 setLastError(null) setter
+  // 调用,语义上也更贴合"流活着 = 旧错作废"(只在旧错真出现过时才"作废")。
+  // 副作用:用户主动关闭 banner(ErrorBanner.onClose → setLastError(null))仍走
+  // 原路径;新一轮 error 帧到达时 handleError 用新 banner 覆盖,不动 handleChunk。
+  if (ctx.getLastError() !== null) {
+    ctx.setLastError(null);
+  }
   if (typeof ev.content === 'string') {
     appendPatch(ctx, { content: ev.content });
   } else {
