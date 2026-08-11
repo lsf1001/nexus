@@ -140,11 +140,16 @@ export default defineConfig({
         // 把 backend stdout/stderr 写到 /tmp/nexus-e2e-backend-${pid}.log
         // (Playwright 默认 pipe 不落盘,debug 看不到 LLM 请求日志)。
         const backendLog = `/tmp/nexus-e2e-backend-${process.pid}.log`;
+        // 把 backend stdout/stderr 同时:1) 落盘到 ${backendLog} 方便本地
+        // debug,2) 转给 Playwright 子进程 stdout — 启动失败时 Playwright 会
+        // 自动 echo 子进程最后输出到 GH Actions log,这样 CI 失败时能看到
+        // uvicorn 的真实 stderr(2026-08-10 之前 webServer 启动失败只打一行
+        // "Exit code: 1",stderr 被 pipe 走根本没 leak 到 log)。
         if (existsSync(nexusVenv)) {
-          // 装了 nexus CLI 的环境：切到 NEXUS_HOME 跑（NEXUS_HOME 路径下有 nexus 包）
-          return `${seedCmd} && cd ${nexusHome} && ${nexusVenv} -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000 > ${backendLog} 2>&1`;
+          // 装了 nexus CLI 的环境:切到 NEXUS_HOME 跑(NEXUS_HOME 路径下有 nexus 包)
+          return `${seedCmd} && cd ${nexusHome} && ${nexusVenv} -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000 2>&1 | tee ${backendLog}`;
         }
-        return `${seedCmd} && cd .. && ./.venv/bin/python -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000 > ${backendLog} 2>&1`;
+        return `${seedCmd} && cd .. && ./.venv/bin/python -m uvicorn nexus.backend.main:app --host 127.0.0.1 --port 30000 2>&1 | tee ${backendLog}`;
       })(),
       url: 'http://127.0.0.1:30000/health',
       reuseExistingServer: !process.env.CI,
