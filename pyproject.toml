@@ -64,6 +64,14 @@ dependencies = [
     "rank-bm25>=0.2.0",
     "pywebview>=6.0 ; sys_platform == 'darwin'",
     "cryptography>=42.0.0",
+    # WHY 显式声明 ``python-multipart``:routes/attachments.py + routes/asr.py
+    #   用 ``File()`` / ``Form()`` / ``UploadFile``,FastAPI 在路由装饰器阶段
+    #   就会调 ``ensure_multipart_is_installed()`` 检查这个包,缺则 ``RuntimeError``。
+    #   ``fastapi>=0.100`` 不传递依赖它(历史原因:multipart parser 是独立项目
+    #   Kludex/python-multipart),干净 venv ``pip install -e .`` 会让 uvicorn
+    #   import 期挂掉,所有依赖 /api/attachments 或 /api/asr 的功能全废
+    #   (CI E2E webServer 启动 2026-08-11 踩坑,pre-existing 自 2026-06)。
+    "python-multipart>=0.0.7",
 ]
 
 [project.optional-dependencies]
