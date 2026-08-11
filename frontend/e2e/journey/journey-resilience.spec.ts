@@ -26,11 +26,18 @@ const APP_WS_KEY = '__nexusAppSockets';
 
 // 本地 dev 模式(reuseExistingServer=true)Playwright 不会自动重启被杀的
 // backend,本 spec 无法在本地跑(浏览器无限 reconnect 但后端永远不在)。
-// 留 CI-only;本地用 e2e/reconnect.spec.ts 测 WS 重连(无后端重启场景)。
-test.skip(
-  !process.env.CI,
-  '需要 CI 环境(Playwright webServer 自动重启被杀的 backend)',
-);
+//
+// 2026-08-11 发现:CI 环境下 Playwright webServer 也**不会**自动重启被
+// `pkill -f uvicorn...` 杀死的进程(注释里"CI 自动重启"是 2024 年初的
+// 错误假设)。Playwright webServer 的 process supervision 行为仅在
+// webServer command 自身非零退出时触发,SIGTERM/SIGKILL 外部杀进程不会
+// 触发重启路径。结果:这个 spec 杀完 uvicorn 之后,后续 13 个 spec 全部
+// 在没后端的状态下 timeout 32s 后 fail(级联失败,pre-existing 自 2026-06)。
+//
+// WS 断开重连的覆盖已经在 e2e/reconnect.spec.ts 走 dispatchEvent(1006)
+// 模拟网络断,稳定绿;进程级恢复需要 process supervisor / k8s readiness
+// 这类外部机制,不属于 E2E 覆盖范围。
+test.skip(true, 'Playwright 不会自动重启被 SIGKILL 的 webServer 进程;进程级恢复不在 E2E 范围(走 reconnect.spec.ts 测 WS 层重连)');
 
 test('重连稳态:后端 kill → 重启 → 浏览器自动恢复并继续对话', async ({ page }) => {
   test.setTimeout(240_000);

@@ -49,16 +49,21 @@ test.afterAll(() => {
   if (existsSync(ARTIFACT_PATH)) unlinkSync(ARTIFACT_PATH);
 });
 
+// Mock 模式(NEXUS_E2E_MOCK=1 + NEXUS_E2E_SCENARIO=delete_interrupt)走 delete
+// 工具 HITL 路径,默认 CI scenario=allow_nexus_write 不触发,本 spec 仅在
+// delete_interrupt 场景跑。
+//
+// 2026-08-11 修:把 test.skip 放在 test() callback 顶层(此位置),CI 默认
+// scenario 下 Playwright 标 skipped(=─)。原来 test.skip 在 callback 内部
+// 条件 false 时 skip 会被 Playwright 报 ✘ (test.skip 失败语义),导致 CI
+// 0ms fail × 3 retry(实际是 spec 设计,不是 bug)。
+test.skip(
+  process.env.NEXUS_E2E_MOCK !== '1' || process.env.NEXUS_E2E_SCENARIO !== 'delete_interrupt',
+  '需要 NEXUS_E2E_MOCK=1 + NEXUS_E2E_SCENARIO=delete_interrupt;默认 CI scenario=allow_nexus_write 不跑',
+);
+
 test('HITL 拦截 deepagents 0.7.4 delete 工具', async ({ page }) => {
   test.setTimeout(120_000);
-  test.skip(
-    process.env.NEXUS_E2E_MOCK !== '1',
-    '需要 NEXUS_E2E_MOCK=1 启用 mock LLM(真 LLM 路径不稳定)',
-  );
-  test.skip(
-    process.env.NEXUS_E2E_SCENARIO !== 'delete_interrupt',
-    '需要 NEXUS_E2E_SCENARIO=delete_interrupt 触发 delete 工具 HITL 路径',
-  );
 
   await journeyOpenHome(page);
 
