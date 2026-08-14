@@ -203,3 +203,27 @@ def test_hitl_middleware_invokes_helper_for_interrupt(tmp_path) -> None:
     with patch("nexus.backend.middleware.hitl.is_write_tool", wraps=is_write_tool) as m:
         mw._should_interrupt(tool_call)
         m.assert_called_once_with("write_file")
+
+
+def test_fs_tool_order_baseline_0_7_6() -> None:
+    """锁 deepagents FilesystemMiddleware._FS_TOOL_ORDER 在 0.7.6 的字面顺序。
+
+    WHY: HITL / MemoryFilter / QualityGateMiddleware 拦截逻辑依赖字面工具名
+    ('delete' / 'write_file' / ...)。若 0.7.7 / 0.8 改顺序或改名,
+    is_write_tool() 仍能兜底(子串匹配),但 LLM 工具提示的展示顺序会变,
+    触发 e2e flake。此断言作为 0.7.x 补丁升级窗口的基线锁;未来 0.7.7 / 0.8
+    升级时按新字面值更新即可。
+    """
+    from deepagents.middleware.filesystem import _ALL_FS_TOOL_NAMES, _FS_TOOL_ORDER
+
+    assert _FS_TOOL_ORDER == (
+        "ls",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "delete",
+        "glob",
+        "grep",
+    )
+    assert "delete" in _ALL_FS_TOOL_NAMES
+    assert "execute" in _ALL_FS_TOOL_NAMES
