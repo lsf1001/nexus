@@ -217,20 +217,24 @@ class TestProfiles:
             f"expected-only={sorted(expected - actual)}"
         )
 
-    def test_subagent_typeddict_required_keys_0_7_4(self) -> None:
-        """SubAgent / CompiledSubAgent / AsyncSubAgent TypedDict required == 0.7.4。
+    def test_subagent_typeddict_required_keys_0_7_13(self) -> None:
+        """SubAgent / CompiledSubAgent / AsyncSubAgent TypedDict required == 0.7.13。
 
-        这是 2026-08-04 对齐报告 §3/§4 的事实基线:required 字段决定启动期
-        是否需要校验。``AsyncSubAgent`` 把 ``url`` 从 required 降级为
-        optional 自 0.6.12 起已是事实,0.7.4 延续。
+        这是对齐报告 §3/§4 的事实基线:required 字段决定启动期是否需要校验。
+
+        0.7.13 跨 7 个补丁版本把 ``SubAgent.system_prompt`` 从 required 降级
+        为 optional(实测 ``__required_keys__ == {"name","description"}``)。
+        Nexus ``create_subagents()`` 仍显式传 system_prompt,代码侧零影响;
+        此处仅锁定新基线。``AsyncSubAgent`` 把 ``url`` 从 required 降级为
+        optional 自 0.6.12 起已是事实,0.7.13 延续。
         """
         from deepagents.middleware.async_subagents import AsyncSubAgent
         from deepagents.middleware.subagents import CompiledSubAgent, SubAgent
 
-        assert set(SubAgent.__required_keys__) == {"name", "description", "system_prompt"}
+        assert set(SubAgent.__required_keys__) == {"name", "description"}
         assert set(CompiledSubAgent.__required_keys__) == {"name", "description", "runnable"}
         assert set(AsyncSubAgent.__required_keys__) == {"name", "description", "graph_id"}
-        # url 0.6.12 起降级为 optional,0.7.4 延续
+        # url 0.6.12 起降级为 optional,0.7.13 延续
         assert "url" not in set(AsyncSubAgent.__required_keys__)
         assert "url" in set(AsyncSubAgent.__optional_keys__)
 
