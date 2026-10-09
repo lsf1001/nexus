@@ -51,10 +51,9 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-# === 状态机抽象 ===
-#
-# WHY frozen:Decision 是返回值,不希望下游误改 action / content(尤其 reject
-# reason,可能进 audit log)。frozen=True 静态阻止 mutation。
+# TODO(sub-project B): 接入 streaming.py 的"等用户决策"分支;
+# 当前 commit 仅做抽类 + 测试覆盖,无生产调用方。删除前确认所有
+# 调用点已迁移到新类(否则 3 个原 module-level 函数会被孤立)。
 @dataclass(frozen=True)
 class Decision:
     """HITL 决策结果。``HITLInterrupter.wait_decision`` 唯一返回类型。
@@ -73,6 +72,9 @@ class Decision:
     reason: str = ""
 
 
+# TODO(sub-project B): 接入 streaming.py 的"等用户决策"分支;
+# 当前 commit 仅做抽类 + 测试覆盖,无生产调用方。删除前确认所有
+# 调用点已迁移到新类(否则 3 个原 module-level 函数会被孤立)。
 class HITLInterrupter:
     """HITL 决策状态机:等 ws ``interrupt_decision`` 帧,直到收到合法 action 或超时。
 
@@ -117,25 +119,28 @@ class HITLInterrupter:
         """
         try:
             async with asyncio.timeout(self._timeout):
-                while True:
-                    frame = await self._ws.receive_json()
-                    if frame.get("type") != "interrupt_decision":
-                        # 异常帧:发 protocol_error + 走 reject 兜底。
-                        # WHY 不 raise:WS 流式循环不应被单帧异常中断,
-                        # 兜底 reject 让 agent 走 abort-from-listen 路径
-                        # 正常 finalize(用户可继续发下一轮)。
-                        await self._ws.send_json(
-                            {
-                                "type": "protocol_error",
-                                "reason": f"unexpected frame: {frame.get('type')!r}",
-                            }
-                        )
-                        return Decision(action="reject", reason="protocol_error")
-                    return self._parse_decision(frame)
+                frame = await self._ws.receive_json()
         except TimeoutError:
             # WHY debug:超时是 e2e 偶发 flake 源,debug 级足够排查。
             logger.debug("HITL decision timeout (%.1fs), fallback to reject", self._timeout)
             return Decision(action="reject", reason="timeout")
+
+        if frame.get("type") != "interrupt_decision":
+            # 异常帧: 发 protocol_error + 走 reject。
+            # 注意: send_json 不在 timeout 上下文内,避免 socket-level timeout
+            # 误判为 decision timeout(无法区分 asyncio.TimeoutError vs socket TimeoutError)。
+            try:
+                await self._ws.send_json(
+                    {
+                        "type": "protocol_error",
+                        "reason": f"unexpected frame: {frame.get('type')!r}",
+                    }
+                )
+            except Exception as exc:
+                logger.warning("protocol_error 帧发送失败: %s", exc)
+            return Decision(action="reject", reason="protocol_error")
+
+        return self._parse_decision(frame)
 
     @staticmethod
     def _parse_decision(frame: dict[str, Any]) -> Decision:

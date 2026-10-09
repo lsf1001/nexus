@@ -33,12 +33,11 @@ class _StubWS:
         self.sent.append(data)
 
     async def receive_json(self) -> dict[str, Any]:
-        # 无 frame 排队时 sleep 一个超过外层 timeout 的时长,让 ``asyncio.timeout``
-        # 先触发;否则默认返回 ping 会被实现判定为"异常帧"走 protocol_error 分支,
-        # timeout 测试永远进不到 TimeoutError 分支。
         if not self.received:
-            await asyncio.sleep(60.0)
-            return {"type": "ping"}
+            # 永久挂起,让 asyncio.timeout 取消 task;若未取消则 fail-loud
+            # 防止 silent 误判(如 default 返回 ping 会被实现当异常帧)。
+            await asyncio.Event().wait()
+            raise RuntimeError("stub received queue exhausted without timeout cancel")
         return self.received.pop(0)
 
 
@@ -144,3 +143,13 @@ async def test_protocol_error_sends_error_frame() -> None:
     assert any(f.get("type") == "protocol_error" for f in ws.sent)
     assert decision.action == "reject"
     assert decision.reason == "protocol_error"
+
+
+async def test_unknown_action_falls_back_to_reject(interrupter: Any) -> None:
+    """收到 interrupt_decision 但 action 不在白名单 → reject 兜底,reason 标注 action。"""
+    interrupter._ws.received = [  # type: ignore[attr-defined]
+        {"type": "interrupt_decision", "action": "fly"}
+    ]
+    decision = await _run(interrupter, _mock_interrupt())
+    assert decision.action == "reject"
+    assert "fly" in decision.reason
