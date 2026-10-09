@@ -14,10 +14,10 @@ to the response payload (fail-open).
   ``AgentMiddleware.awrap_model_call`` 对齐(handler 返回 ``ModelResponse``
   或 ``dict`` 都能消费);此处用 ``_extract_content`` 兼容两种形态,避免
   与 langchain 内部 message 对象耦合。
-- 校验器都是**同步**纯函数(:class:`nexus.backend.fact_check.pipeline.FactCheckPipeline`),
-  本中间件不需要 ``await`` 任何 IO;故整个 ``awrap_model_call`` 仍标
-  ``async`` 是为了与 deepagents 中间件签名一致(deepagents 0.6.x 主路径走
-  ``await handler(request)``)。
+- **统一入口**:用 :func:`nexus.backend.fact_check.verify` 做最终判定
+  (spec §3.6);旧 :class:`FactCheckPipeline.check` 仍调用以拿详细
+  ``conflicts`` 列表(给错误信息和 audit trail 用,FactCheckError 的
+  message 需含 claimed / actual 文本)。
 - sync 入口 ``wrap_model_call`` 不实现 —— LangChain 把 sync/async 视作两个
   分立方法,async 必须挂到 ``awrap_model_call`` 才能被 ``agent.astream()``
   发现(2026-07-13 journey-cold-start E2E 修)。
@@ -47,6 +47,7 @@ from typing import Any, Literal
 from langchain.agents.middleware.types import AgentMiddleware, AgentState
 
 from nexus.backend import db as _db
+from nexus.backend.fact_check import verify as _verify
 from nexus.backend.fact_check.pipeline import FactCheckPipeline
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ class FactCheckError(Exception):
 
 
 class FactCheckMiddleware(AgentMiddleware[AgentState, Any, Any]):
-    """DeepAgents 中间件：扫描模型输出中的事实声明并验证。
+    """DeepAgents 中间件:扫描模型输出中的事实声明并验证。
 
     Args:
         fail_strategy: ``"closed"`` 检测到冲突抛 :class:`FactCheckError`;
@@ -99,13 +100,22 @@ class FactCheckMiddleware(AgentMiddleware[AgentState, Any, Any]):
         of awrap_model_call is not available.")`` —— 这正是 2026-07-13
         journey-cold-start E2E 失败的根因。
 
-        流程:
+        流程(spec §3.6 middleware 改法):
           1. ``await handler(request)`` 拿到 LLM 输出(``ModelResponse`` /
              ``dict`` / ``str`` 都吃)。
           2. :meth:`_extract_content` 抽出文本字符串。
-          3. :meth:`FactCheckPipeline.check` 跑确定性校验。
-          4. 无冲突 → 原样返回。
-          5. 有冲突 → ``fail_strategy="closed"`` 抛 :class:`FactCheckError`;
+          3. :func:`nexus.backend.fact_check.verify` 跑统一入口判定
+             (score + claims_conflicted);同时保留
+             :meth:`FactCheckPipeline.check` 以拿详细 conflicts 列表
+             (FactCheckError message / audit trail 需要 claimed/actual 字段)。
+          4. **判定规则**(spec §3.4 字段映射):
+             - ``report.has_conflict`` → ``result.claims_conflicted > 0``
+             - ``report.passed`` → ``result.claims_verified``
+             - ``report.claims_total`` → ``result.claims_verified +
+               result.claims_conflicted``
+             - ``report.conflicts`` → 仍由 FactCheckPipeline.check 提供(详细)
+          5. 无冲突 → 原样返回。
+          6. 有冲突 → ``fail_strategy="closed"`` 抛 :class:`FactCheckError`;
              ``fail_strategy="open"`` 把 report dict 挂到 response 后返回。
         """
         response = await handler(request)
@@ -114,21 +124,31 @@ class FactCheckMiddleware(AgentMiddleware[AgentState, Any, Any]):
             return response
 
         t0 = time.perf_counter()
-        report = self.pipeline.check(content)
+        # 统一入口(规范要求):先跑 verify() 拿 score + claims_conflicted
+        verify_result = await _verify(content, context={"message_id": None})
         latency_ms = int((time.perf_counter() - t0) * 1000)
+
+        # 详细报告(供 FactCheckError message / audit trail / fail-open warnings):
+        # verify() 当前不暴露 conflicts 详细列表,继续走 pipeline 拿 claimed/actual。
+        report = self.pipeline.check(content)
 
         session_id, message_id = self._extract_session_context(request)
 
-        if not report.has_conflict:
-            # 通过但有声明 → 落 audit trail
-            if report.claims_total > 0:
+        if not verify_result.claims_conflicted:
+            # 通过(可能有 skipped/error)→ 落 audit trail
+            if verify_result.claims_verified > 0 or report.claims_total > 0:
                 self._persist(
                     session_id=session_id,
                     message_id=message_id,
                     status="pass",
-                    score=1.0,
+                    score=verify_result.score,
                     verdict="accept",
-                    reasoning=f"fact-check ok ({report.claims_total} claim(s), {report.passed} passed)",
+                    reasoning=(
+                        f"verify() ok (score={verify_result.score:.3f}, "
+                        f"verified={verify_result.claims_verified}, "
+                        f"conflicts={verify_result.claims_conflicted}, "
+                        f"failed={verify_result.claims_failed})"
+                    ),
                     claims=self._serialize_claims(report.all_results),
                     results=self._serialize_claims(report.all_results),
                     latency_ms=latency_ms,
@@ -143,20 +163,23 @@ class FactCheckMiddleware(AgentMiddleware[AgentState, Any, Any]):
                 session_id=session_id,
                 message_id=message_id,
                 status="fail",
-                score=0.0,
+                score=verify_result.score,
                 verdict="reject",
-                reasoning=f"fact-check found {len(report.conflicts)} conflict(s)",
+                reasoning=(
+                    f"verify() found {verify_result.claims_conflicted} conflict(s) (score={verify_result.score:.3f})"
+                ),
                 claims=self._serialize_claims(report.all_results),
                 results=report_dict["conflicts"],
                 latency_ms=latency_ms,
             )
             logger.warning(
-                "FactCheckMiddleware 拦截输出：%d 个冲突",
-                len(report.conflicts),
+                "FactCheckMiddleware 拦截输出:%d 个冲突 (score=%.3f)",
+                verify_result.claims_conflicted,
+                verify_result.score,
             )
             raise FactCheckError(report_dict["conflicts"])
 
-        # fail-open：附加 warning 到 dict 响应,字符串 / 对象形态仅记日志放行
+        # fail-open:附加 warning 到 dict 响应,字符串 / 对象形态仅记日志放行
         if isinstance(response, dict):
             response["_fact_check_warnings"] = report_dict
         # fail-open 也持久化(audit trail)
@@ -164,16 +187,19 @@ class FactCheckMiddleware(AgentMiddleware[AgentState, Any, Any]):
             session_id=session_id,
             message_id=message_id,
             status="fail",
-            score=0.0,
+            score=verify_result.score,
             verdict="reject",
-            reasoning=f"fact-check open-mode: {len(report.conflicts)} conflict(s)",
+            reasoning=(
+                f"verify() open-mode: {verify_result.claims_conflicted} conflict(s) (score={verify_result.score:.3f})"
+            ),
             claims=self._serialize_claims(report.all_results),
             results=report_dict["conflicts"],
             latency_ms=latency_ms,
         )
         logger.warning(
-            "FactCheckMiddleware open 放行：%d 个冲突",
-            len(report.conflicts),
+            "FactCheckMiddleware open 放行:%d 个冲突 (score=%.3f)",
+            verify_result.claims_conflicted,
+            verify_result.score,
         )
         return response
 

@@ -64,8 +64,13 @@ class DateWeekdayVerifier:
         "星期日",
     )
 
-    def verify(self, claim: FactClaim) -> VerificationResult:
-        """校验一条 date_weekday 声明;非该类型则跳过。"""
+    def verify(self, claim: FactClaim, context: dict | None = None) -> VerificationResult:
+        """校验一条 date_weekday 声明;非该类型则跳过。
+
+        Args:
+            claim: 待校验的事实声明。
+            context: 可选上下文(由 ``verify()`` 统一入口透传;本 verifier 不消费)。
+        """
         if claim.kind != "date_weekday":
             return VerificationResult(claim=claim, verdict="skipped")
 
@@ -175,8 +180,13 @@ class MathVerifier:
             raise ValueError(f"No numeric value in {s!r}")
         return float(m.group(1))
 
-    def verify(self, claim: FactClaim) -> VerificationResult:
-        """校验一条 math 声明;非该类型则跳过。"""
+    def verify(self, claim: FactClaim, context: dict | None = None) -> VerificationResult:
+        """校验一条 math 声明;非该类型则跳过。
+
+        Args:
+            claim: 待校验的事实声明。
+            context: 可选上下文(由 ``verify()`` 统一入口透传;本 verifier 不消费)。
+        """
         if claim.kind != "math":
             return VerificationResult(claim=claim, verdict="skipped")
 
@@ -216,8 +226,13 @@ class UnitsVerifier:
 
     _TOLERANCE: float = 0.01
 
-    def verify(self, claim: FactClaim) -> VerificationResult:
-        """校验一条 unit 声明;非该类型则跳过。"""
+    def verify(self, claim: FactClaim, context: dict | None = None) -> VerificationResult:
+        """校验一条 unit 声明;非该类型则跳过。
+
+        Args:
+            claim: 待校验的事实声明。
+            context: 可选上下文(由 ``verify()`` 统一入口透传;本 verifier 不消费)。
+        """
         if claim.kind != "unit":
             return VerificationResult(claim=claim, verdict="skipped")
 
@@ -257,8 +272,19 @@ class ExchangeRateVerifier:
 
     _TOLERANCE: float = 0.05  # 5% 容差,吸收汇率日常波动
 
-    def verify(self, claim: FactClaim, api_key: str | None = None) -> VerificationResult:
-        """校验一条 exchange_rate 声明;非该类型或币种缺失则跳过。"""
+    def verify(
+        self,
+        claim: FactClaim,
+        context: dict | None = None,
+        api_key: str | None = None,
+    ) -> VerificationResult:
+        """校验一条 exchange_rate 声明;非该类型或币种缺失则跳过。
+
+        Args:
+            claim: 待校验的事实声明。
+            context: 可选上下文(由 ``verify()`` 统一入口透传;本 verifier 不消费)。
+            api_key: 可选汇率 API key;走 ``context`` 或显式传。
+        """
         if claim.kind != "exchange_rate":
             return VerificationResult(claim=claim, verdict="skipped")
 
