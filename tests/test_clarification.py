@@ -21,6 +21,9 @@ def _authed_token(monkeypatch) -> str:
 
     monkeypatch.setitem(config_module.CONFIG, "ws_token", "test-token")
     monkeypatch.setitem(config_module.CONFIG, "resume_secret", "test-resume-secret-xyz")
+    # WHY: spec §3 P0-1 把 NEXUS_WS_AUTH_QUERY_FALLBACK 默认关掉,本文件
+    # 集成测试走 ?token= query fallback,需显式开 env gate。
+    monkeypatch.setenv("NEXUS_WS_AUTH_QUERY_FALLBACK", "true")
     return "test-token"
 
 

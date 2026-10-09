@@ -62,6 +62,9 @@ def _authed_token(monkeypatch) -> str:
     """注入 ws_token + resume_secret,返回一个合法 token。
 
     resume_secret 必须 >= 32 字节(resume.py _get_secret 的硬性约束)。
+
+    WHY 也开 ``NEXUS_WS_AUTH_QUERY_FALLBACK=true``: spec §3 P0-1 把默认
+    改为 OFF,这些 WS e2e 走 ``?token=`` query fallback,需显式开 env gate。
     """
     from nexus.backend import config as config_module
 
@@ -71,6 +74,7 @@ def _authed_token(monkeypatch) -> str:
         "resume_secret",
         "test-resume-secret-32bytes-or-more-abcdef0123456789",
     )
+    monkeypatch.setenv("NEXUS_WS_AUTH_QUERY_FALLBACK", "true")
     return "test-token"
 
 

@@ -5,9 +5,9 @@ WebSocket 鉴权走两条路径(优先级从高到低):
 1. **Sec-WebSocket-Protocol** 子协议头:浏览器原生 ``new WebSocket(url, ['nxv1-<b64u>'])``、
    Rust relay / tokio-tungstenite 都能设,token 不进 URL,不进代理 access log、
    不进浏览器历史、不进错误堆栈。**首选**。
-2. **query string ``?token=...``**:旧客户端 / 第三方调试用,默认兼容,
-   由 ``NEXUS_WS_AUTH_QUERY_FALLBACK`` 控制开关(默认 ``True``)。下个 major
-   版本移除。
+2. **query string ``?token=...``**:旧客户端 / 第三方调试用,**默认关闭**,
+   由 ``NEXUS_WS_AUTH_QUERY_FALLBACK=true`` 显式开启。WHY: CLAUDE.md 硬约
+   束 token 不进 URL,避免 access log / 浏览器历史泄漏。
 
 两条路径都走 :func:`_hmac_compare` 做常量时间比较,防时序攻击。
 """
@@ -23,7 +23,13 @@ from fastapi import HTTPException, Request, WebSocket
 
 from ...config import CONFIG
 
-__all__ = ["_extract_request_token", "_extract_ws_token", "require_token"]
+__all__ = [
+    "_extract_request_token",
+    "_extract_token",
+    "_extract_ws_token",
+    "_is_query_fallback_enabled",
+    "require_token",
+]
 
 
 # Sec-WebSocket-Protocol 格式:``nxv1-<base64url(token)>``。
@@ -80,6 +86,9 @@ def _extract_request_token(request: Request) -> str:
 def _extract_ws_token(websocket: WebSocket) -> str | None:
     """从 WebSocket 升级请求中提取 token(优先 subprotocol,fallback query)。
 
+    委托 :func:`_extract_token` 实际逻辑;此处只负责从 Starlette WebSocket
+    取 header + query_params。
+
     Returns:
         候选 token 字符串;两个路径都拿不到时返回 ``None``。调用方应再走
         :func:`_hmac_compare` 校验。
@@ -89,19 +98,53 @@ def _extract_ws_token(websocket: WebSocket) -> str | None:
         ``Sec-WebSocket-Protocol`` header。RFC 6455 规定多值用逗号分隔,
         元素按客户端优先级排序;我们顺序扫描取第一个 ``nxv1-<b64u>``。
     """
+    return _extract_token(
+        subprotocol_header=websocket.headers.get("sec-websocket-protocol", "") or None,
+        query_params=dict(websocket.query_params) if websocket.query_params else None,
+    )
+
+
+def _is_query_fallback_enabled() -> bool:
+    """Query fallback 是否启用(默认 False,P0-1 安全收紧)。
+
+    通过 ``NEXUS_WS_AUTH_QUERY_FALLBACK`` env gate 控制:值为 ``"true"``(大
+    小写不敏感)时启用 query string ``?token=`` 兜底,其它值(包括未设)拒
+    绝。WHY: CLAUDE.md 硬约束 token 不进 URL,默认 OFF 避免 access log
+    / 浏览器历史泄漏;需 fallback 的部署方显式开 env gate。
+    """
+    return os.environ.get("NEXUS_WS_AUTH_QUERY_FALLBACK", "false").lower() == "true"
+
+
+def _extract_token(
+    *,
+    subprotocol_header: str | None,
+    query_params: dict[str, str] | None = None,
+) -> str | None:
+    """从 subprotocol header + 可选 query 提取 token(纯函数,易测)。
+
+    Args:
+        subprotocol_header: ``Sec-WebSocket-Protocol`` 原始 header 值
+            (逗号分隔),``None`` 表示无此 header。
+        query_params: WS 升级请求的 query 字典(测试用,生产从
+            ``websocket.query_params`` 取)。仅当
+            :func:`_is_query_fallback_enabled` 为 True 时生效。
+
+    Returns:
+        候选 token 字符串;两个路径都拿不到时返回 ``None``。调用方应再走
+        :func:`_hmac_compare` 校验。
+    """
     # 1. Sec-WebSocket-Protocol header(RFC 6455 逗号分隔列表)
-    header_value = websocket.headers.get("sec-websocket-protocol", "")
-    if header_value:
-        for proto in header_value.split(","):
+    if subprotocol_header:
+        for proto in subprotocol_header.split(","):
             stripped = proto.strip()
             if stripped.startswith(_WS_SUBPROTOCOL_PREFIX):
                 token = _decode_subprotocol_token(stripped[len(_WS_SUBPROTOCOL_PREFIX) :])
                 if token is not None:
                     return token
 
-    # 2. query string fallback(默认开,通过 env 关)
-    if os.environ.get("NEXUS_WS_AUTH_QUERY_FALLBACK", "true").lower() == "true":
-        token = websocket.query_params.get("token")
+    # 2. query string fallback(默认 OFF,通过 env 显式开)
+    if _is_query_fallback_enabled() and query_params:
+        token = query_params.get("token")
         if token:
             return token
 

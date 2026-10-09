@@ -29,10 +29,17 @@ def _b64u_subprotocol(token: str) -> str:
 
 
 def _authed_token(monkeypatch) -> str:
-    """注入 ws_token(同 test_ws_resilience)。"""
+    """注入 ws_token(同 test_ws_resilience)。
+
+    WHY 也开 ``NEXUS_WS_AUTH_QUERY_FALLBACK=true``: spec §3 P0-1 把默认
+    改为 OFF,但本文件含 query fallback 集成测试(``test_ws_query_fallback_when_no_subprotocol``
+    / ``test_ws_subprotocol_takes_priority_over_query``)需要 fallback 开启
+    才能验证;显式开 false 的测试会自己 override。
+    """
     from nexus.backend import config as config_module
 
     monkeypatch.setitem(config_module.CONFIG, "ws_token", "test-token")
+    monkeypatch.setenv("NEXUS_WS_AUTH_QUERY_FALLBACK", "true")
     return "test-token"
 
 
