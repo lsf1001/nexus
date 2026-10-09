@@ -42,7 +42,14 @@ class DateWeekdayVerifier:
 
     支持中文格式（"2026年7月11日 星期六"）和 ISO 格式
     （"2026-07-11 Saturday"）。无法解析或日期非法时返回 verdict="error"。
+
+    类属性:
+      - ``name``: 唯一标识,加权算法 + 日志用。
+      - ``weight``: 加权权重;数学 / 汇率按置信度调整,其他默认 1.0。
     """
+
+    name = "date_weekday"
+    weight = 1.0
 
     _RE_ZH_DATE = re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})日")
     _RE_ISO_DATE = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
@@ -102,6 +109,9 @@ class MathVerifier:
     仅允许数字常量与 +、-、*、/、**、一元负号;函数调用、属性访问、
     Name 节点等都会被拒绝,杜绝 eval 注入。
     """
+
+    name = "math"
+    weight = 1.5  # 数学验证置信度更高,权重高一些
 
     _ALLOWED_OPS: dict[type, object] = {
         ast.Add: operator.add,
@@ -197,7 +207,12 @@ class UnitsVerifier:
     误差容限固定为 0.01,足以吸收常见四舍五入(如 km↔mile 的 3.107)而不
     放过明显错误(如 100°C = 200°F)。当来源/目标单位不属于同一可换算分类
     时返回 verdict="error"。
+
+    类属性:``name`` 标识符,``weight`` 加权权重(默认 1.0)。
     """
+
+    name = "unit"
+    weight = 1.0
 
     _TOLERANCE: float = 0.01
 
@@ -233,7 +248,12 @@ class ExchangeRateVerifier:
     校验逻辑:用 ``exchange_rate.fetch_rate`` 拿到 from→to 的汇率,乘以
     claimed_value,与 claimed_result 比较。API 不可用时直接 verdict="skipped",
     不阻断下游流程。
+
+    类属性:``name`` 标识符,``weight`` 权重 0.5(汇率波动大,置信度低)。
     """
+
+    name = "exchange_rate"
+    weight = 0.5  # 汇率波动大,权重低
 
     _TOLERANCE: float = 0.05  # 5% 容差,吸收汇率日常波动
 
