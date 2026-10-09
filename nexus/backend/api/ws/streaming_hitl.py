@@ -6,11 +6,33 @@ WHY 单独成包:streaming.py 累积到 881 行,超 §1.2 800 上限。HITL 三�
 
 被 streaming.py 的 :func:`_consume_astream_events` 调用,Handler 接收 ws + session
 + interrupts 元组,职责单一。
+
+---
+
+## 状态机抽象(:class:`HITLInterrupter`)
+
+历史 3 个 module-level 函数只负责"发 confirmation_request 帧 + drain pending
+interrupts",但**等待决策帧**(approve / edit / reject / respond)的逻辑散落在
+``api/ws/handlers.py``,无法独立测超时 / 异常帧分支(2026-07 e2e timeout 0ms
+误报 fail 的根因之一)。本模块把"等待决策"封为 :class:`HITLInterrupter` 类,
+注入 ws 后 6 个分支可独立测试。
+
+行为(``wait_decision``):
+
+- action=approve  → Decision(action="approve")
+- action=edit     → Decision(action="edit", content=frame["new_content"])
+- action=respond  → Decision(action="respond", content=frame["response"])
+- action=reject   → Decision(action="reject", reason=frame["reason"])
+- 超时(``asyncio.TimeoutError``)→ Decision(action="reject", reason="timeout")
+- 异常帧(type != "interrupt_decision")→ 发 protocol_error 帧 + Decision(reject, "protocol_error")
+- 未知 action      → Decision(action="reject", reason=f"unknown action: {action!r}")
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import WebSocket
@@ -21,10 +43,129 @@ __all__ = [
     "_emit_hitl_confirmation_frames",
     "_handle_graph_interrupt",
     "_drain_pending_hitl_interrupts",
+    "Decision",
+    "HITLInterrupter",
 ]
 
 
 logger = logging.getLogger(__name__)
+
+
+# === 状态机抽象 ===
+#
+# WHY frozen:Decision 是返回值,不希望下游误改 action / content(尤其 reject
+# reason,可能进 audit log)。frozen=True 静态阻止 mutation。
+@dataclass(frozen=True)
+class Decision:
+    """HITL 决策结果。``HITLInterrupter.wait_decision`` 唯一返回类型。
+
+    Attributes:
+        action: 决策类型,``"approve" | "edit" | "reject" | "respond"``。
+            超时 / 异常帧走 ``"reject"`` 兜底。
+        content: ``edit`` / ``respond`` 时承载用户修改后的内容;
+            其他 action 留空字符串。
+        reason: ``reject`` 时承载拒绝理由(用户给 / "timeout" /
+            "protocol_error" / 未知 action);其他 action 留空字符串。
+    """
+
+    action: str
+    content: str = ""
+    reason: str = ""
+
+
+class HITLInterrupter:
+    """HITL 决策状态机:等 ws ``interrupt_decision`` 帧,直到收到合法 action 或超时。
+
+    WHY 抽类:历史"等决策"逻辑散落在 :mod:`api.ws.handlers`,无注入点,
+    无法独立验证 6 个分支(approve / edit / reject / respond / timeout /
+    异常帧)。抽为类后注入 mock ws,6 个分支在
+    :mod:`tests.test_streaming_hitl` 单元覆盖。
+
+    线程模型:本类是纯 async 协程,不入子线程;WS 接收在事件循环中。
+    调用方需要在已运行的 asyncio 事件循环中 ``await wait_decision(...)``。
+    """
+
+    def __init__(self, ws: Any, *, timeout: float = 300.0) -> None:
+        """初始化 interrupter。
+
+        Args:
+            ws: 注入的 WebSocket-like 对象(``send_json`` / ``receive_json``
+                两个 async 方法)。生产环境是 :class:`fastapi.WebSocket`;
+                测试用 :class:`tests.test_streaming_hitl._StubWS` mock。
+            timeout: 等待决策帧的最长秒数;超时走 reject 兜底。默认 300s
+                覆盖典型人类决策时间,e2e 测试用 0.1-0.5s。
+        """
+        self._ws = ws
+        self._timeout = timeout
+
+    async def wait_decision(self, interrupt: Any) -> Decision:
+        """等 ws ``interrupt_decision`` 帧,直到合法 action / 超时 / 异常帧。
+
+        Args:
+            interrupt: 触发 HITL 的 langgraph Interrupt 实例。
+                本实现不读 ``interrupt.id`` / ``interrupt.value``(语义由
+                调用方注入),仅作为未来审计 log 的标识占位。
+
+        Returns:
+            :class:`Decision` — 6 个分支之一:
+
+            - 合法 ``interrupt_decision`` 帧 → 走 :meth:`_parse_decision`
+              返回对应 action。
+            - 超时 → ``Decision("reject", reason="timeout")``。
+            - 异常帧(type != ``"interrupt_decision"``)→ 发 ``protocol_error``
+              帧 + ``Decision("reject", reason="protocol_error")``。
+        """
+        try:
+            async with asyncio.timeout(self._timeout):
+                while True:
+                    frame = await self._ws.receive_json()
+                    if frame.get("type") != "interrupt_decision":
+                        # 异常帧:发 protocol_error + 走 reject 兜底。
+                        # WHY 不 raise:WS 流式循环不应被单帧异常中断,
+                        # 兜底 reject 让 agent 走 abort-from-listen 路径
+                        # 正常 finalize(用户可继续发下一轮)。
+                        await self._ws.send_json(
+                            {
+                                "type": "protocol_error",
+                                "reason": f"unexpected frame: {frame.get('type')!r}",
+                            }
+                        )
+                        return Decision(action="reject", reason="protocol_error")
+                    return self._parse_decision(frame)
+        except TimeoutError:
+            # WHY debug:超时是 e2e 偶发 flake 源,debug 级足够排查。
+            logger.debug("HITL decision timeout (%.1fs), fallback to reject", self._timeout)
+            return Decision(action="reject", reason="timeout")
+
+    @staticmethod
+    def _parse_decision(frame: dict[str, Any]) -> Decision:
+        """把 ``interrupt_decision`` 帧翻译成 :class:`Decision`。
+
+        Args:
+            frame: WS 帧 dict,``type == "interrupt_decision"``,含 ``action``
+                字段与对应 payload:
+
+                - ``approve``: 无 payload
+                - ``edit``: ``new_content``(用户改后的文本)
+                - ``respond``: ``response``(用户回答)
+                - ``reject``: ``reason``(拒绝理由)
+
+        Returns:
+            对应 action 的 :class:`Decision`。未知 action 走 reject 兜底
+            (``reason=f"unknown action: {action!r}"``),不 raise — 跟异常帧
+            兜底一致,WS 循环不应被单帧歧义中断。
+        """
+        action = frame.get("action")
+        if action == "approve":
+            return Decision(action="approve")
+        if action == "edit":
+            return Decision(action="edit", content=frame.get("new_content", ""))
+        if action == "respond":
+            return Decision(action="respond", content=frame.get("response", ""))
+        if action == "reject":
+            return Decision(action="reject", reason=frame.get("reason", ""))
+        # 未知 action → reject 兜底(reason 标注具体 action 方便排查)
+        return Decision(action="reject", reason=f"unknown action: {action!r}")
 
 
 async def _handle_graph_interrupt(
