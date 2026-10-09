@@ -1,8 +1,6 @@
 import asyncio
-import json
 import logging
 import os
-import sqlite3
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,6 +20,7 @@ from .api.ws import (
     handle_websocket,
     require_token,
 )
+from .app_state import init_app_state
 from .config import CONFIG, _get_nexus_home
 from .mcp import _load_tools_for_server, load_all_mcp_tools
 from .memory import USER_MEMORY_PATH
@@ -34,17 +33,13 @@ from .search import router as search_router
 from .sessions import router as sessions_router
 from .share import public_share_router
 from .share import router as share_router
-from .skills import scan_skills_dir
 
 _agent = None
 _mcp_tools: list[Any] = []
 _agent_lock = threading.RLock()
-# Agent 构造完成事件:WS 端在调 handle_websocket 前 await 这个,
-# 避免首条消息到达时 _agent 仍为 None,被 _run_agent_streaming 拒为 agent_unavailable。
-# 后台线程构造完成后 set;timeout 60s 后放弃,走原错误路径。
+# Agent 构造完成事件:WS 端 await 防首条消息到达时 _agent 仍 None;
+# _agent_singleton_style 跟踪 style,切换时 _get_current_agent 触发重建。
 _agent_ready_event: asyncio.Event | None = None
-# Round 6.1 风格维度:跟踪当前 _agent 实例对应的 style;切换风格时
-# _get_current_agent(style) 触发 reload + 清 _agent,走重建路径。
 _agent_singleton_style: str | None = None
 
 _main_loop: asyncio.AbstractEventLoop | None = None
@@ -133,80 +128,30 @@ def _create_agent_with_model(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时初始化，关闭时清理。
+    """启动时初始化,关闭时清理。
 
-    性能关键：Agent / QualityPipeline 的构造（import langchain / deepagents /
-    编译 LangGraph 图）耗时在 PyInstaller 打包后会被放大 10-30x。把这部分
-    从 lifespan 推到首次使用时，/health 在 1-2s 内就能响应 → 桌面端无需
-    等待 30s 就能加载 UI。Agent / pipeline 走"懒构造"路径。
+    性能关键:Agent / QualityPipeline 的构造耗时在 PyInstaller 打包后会被
+    放大 10-30x,推到首次使用时 /health 1-2s 内能响应 → 桌面端无需等 30s。
+
+    启动期装配拆两段: 1. ``init_app_state()``(app_state.py)负责 DB /
+    Project / skills / system prompt,返回 ``AppState`` 挂到
+    ``app.state.app_state``; 2. module-global 派生 ref + Gateway/ChannelRegistry。
     """
-    global _agent, _mcp_tools, _main_loop
-    # 保存主事件循环引用，供子线程提交协程使用
-    _main_loop = asyncio.get_running_loop()
-    app.state.main_loop = _main_loop
-    global _app_ref
-    _app_ref = app  # 给懒构造的 _ensure_agent_async 复用
-    # 初始化数据库
-    from .db import init_db
-
-    init_db()
-    # Round 1 SPEC §4.2: 默认 Project 自动迁移 — DB 初始化后立即跑,
-    # 确保 sessions.project_id 不为 NULL,后续 agent 构造能立即拿到上下文。
-    try:
-        from .projects.storage import (
-            ensure_default_project,
-            migrate_sessions_to_default,
-        )
-
-        ensure_default_project()
-        migrate_sessions_to_default()
-    except (OSError, sqlite3.OperationalError, sqlite3.IntegrityError) as exc:
-        # 环境异常(磁盘满 / 权限 / FK 半迁移状态):降级 warning + 继续启动,
-        # 让旧 Nexus 安装(没有 ~/Nexus/projects/ 目录)能成功跑起来。
-        # 真正的系统错误继续向外抛,例如后续 SPEC §5.1 严格化时直接 raise。
-        logger.warning("[projects] 默认 Project 迁移失败(继续启动): %s", exc, exc_info=True)
-    # 恢复上次激活的 Project；必须在默认 Project 创建后验证 DB 行是否存在。
-    try:
-        from .agent._system_prompt import set_active_project_id
-        from .db import get_db
-        from .projects.storage import read_active_project_id
-
-        active_project_id = read_active_project_id()
-        if active_project_id is not None:
-            with get_db() as conn:
-                project_exists = conn.execute(
-                    "SELECT 1 FROM projects WHERE id = ?",
-                    (active_project_id,),
-                ).fetchone()
-            if project_exists is not None:
-                set_active_project_id(active_project_id)
-            else:
-                logger.warning("[projects] active Project 不存在,跳过恢复: %s", active_project_id)
-    except (OSError, json.JSONDecodeError, sqlite3.Error) as exc:
-        logger.warning("[projects] active Project 恢复失败(继续启动): %s", exc, exc_info=True)
-    # 扫描运行时 skills(2026-07-15 引入)
-    # WHY init_db 之后:skill 加载失败不应阻断 DB 初始化。
-    # WHY 单独 try-except:用户 ~/.nexus/skills/ 损坏不该阻断整个启动。
-    try:
-        scan_skills_dir()
-    except Exception as e:  # noqa: BLE001 — 兜底任意扫描异常,不阻断启动
-        logger.warning("[skills] scan 失败,继续启动(无 skill 可用): %s", e, exc_info=True)
-    # 清空 system prompt 缓存,下次 get_system_prompt 会拼上新加载的 skills
-    reload_system_prompt()
-    # MCP 加载延后到 agent 首次构造时（省 0.5-3s）
-    _mcp_tools = []
-    # 关键：_agent 不在 lifespan 内构造。首次 WS 消息 / setup 完成时
-    # 走 _ensure_agent_ready() 触发构造。期间 /health / REST 路由正常工作。
-    _agent = None
-    # 注入共享依赖到 model_config 路由
+    global _agent, _mcp_tools, _main_loop, _app_ref
+    state = await init_app_state(app)
+    app.state.app_state = state
+    # module-global 派生 ref(Deprecated: spec §3.2 推荐走 app.state.app_state;
+    # 既有 handler 直接读 module-global 路径暂不破,后续 sub-project B 清理)
+    _main_loop = state.main_loop
+    _mcp_tools = list(state.mcp_tools)  # type: ignore[assignment]
+    _agent = state.agents.get("default")  # 懒构造路径:启动期 None
+    _app_ref = app
     model_config_routes.init_router(
         agent_lock=_agent_lock,
         mcp_tools=_mcp_tools,
         create_agent_with_model=_create_agent_with_model,
         set_global_agent=_set_global_agent,
     )
-
-    # 初始化 Gateway + ChannelRegistry (C4 重构: Gateway 真接管路由)
     import nexus.backend.db as _db_module
 
     from .channels import ChannelRegistry, Gateway
@@ -219,7 +164,7 @@ async def lifespan(app: FastAPI):
         messages_module=_db_module,
     )
     app.state.channel_registry = ChannelRegistry(app.state.gateway)
-    # QualityPipeline 也延后到 agent 构造完后再做（依赖 judge_llm）
+    # QualityPipeline 也延后到 agent 构造完后再做(依赖 judge_llm)
     app.state.quality_pipeline = None
     logger.info("Nexus Backend 已就绪 (Gateway 接管路由, Agent 懒构造)")
     yield
