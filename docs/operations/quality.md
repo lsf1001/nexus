@@ -407,7 +407,7 @@ ORDER BY rubric, fact_check_status;
 | 路径 | 优先级 | 开关 | 适用 |
 |---|---|---|---|
 | `Sec-WebSocket-Protocol: nxv1-<b64u>` | 高 | 始终启用 | 生产 |
-| `?token=...` query string | 低 | `NEXUS_WS_AUTH_QUERY_FALLBACK` (默认 true) | 旧客户端 / 调试 |
+| `?token=...` query string | 低 | `NEXUS_WS_AUTH_QUERY_FALLBACK` (生产默认关闭 `false`,仅调试显式开启) | 旧客户端 / 调试 |
 
 下个 major 版本(`2.0.0`)删除 query fallback。
 

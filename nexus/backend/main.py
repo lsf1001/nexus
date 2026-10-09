@@ -659,7 +659,9 @@ async def websocket_endpoint(websocket: WebSocket):
       RFC 7230 §3.2.6 token ABNF,Chromium ≥149 抛 SyntaxError,改为短
       前缀 ``nxv1-`` + base64url token(全字符在 tchar 内)。
     - Fallback 读 ``?token=`` query string,由 ``NEXUS_WS_AUTH_QUERY_FALLBACK``
-      控制开关(默认 ``true``,下个 major 版本移除)。
+      控制开关(默认 ``false``,需 fallback 的部署方显式设 ``true``)。下个 major 版本
+      删除该 fallback(详见 CHANGELOG Unreleased 段 "Breaking: WS auth query
+      fallback 默认关闭")。
     - 任何路径都走 ``hmac.compare_digest`` 做常量时间比较,防时序攻击。
     """
     expected = CONFIG.get("ws_token", "")

@@ -106,6 +106,28 @@ def test_ws_query_fallback_when_no_subprotocol(monkeypatch) -> None:
             ws.close()
 
 
+def test_ws_query_rejected_when_env_unset(monkeypatch) -> None:
+    """env 完全未设时,端到端 WS 握手必须被拒(P0-1 核心默认行为锁定)。
+
+    WHY: spec §3 P0-1 把 NEXUS_WS_AUTH_QUERY_FALLBACK 默认改 false。本测试
+    不依赖子模块 _is_query_fallback_enabled() 单测,而是走 HTTP upgrade 真实
+    握手路径,防有人在 main.py::websocket_endpoint 链路里硬编码开 fallback
+    把默认态绕过去。query token 是错的也无关 —— 任何 query 都应被拒。
+    """
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    from nexus.backend import config as config_module
+
+    monkeypatch.setitem(config_module.CONFIG, "ws_token", "test-token")
+    monkeypatch.delenv("NEXUS_WS_AUTH_QUERY_FALLBACK", raising=False)
+
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/api/ws?token=any-value") as ws:
+                ws.receive_json()
+
+
 def test_ws_query_fallback_disabled_via_env(monkeypatch) -> None:
     """``NEXUS_WS_AUTH_QUERY_FALLBACK=false`` 时,query token 被拒。"""
     _authed_token(monkeypatch)

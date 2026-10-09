@@ -160,6 +160,19 @@ model_id 显式挂载到 LLM 实例 + StreamGuard,retry 日志直接带维度。
 
 ### [Unreleased] — Pre-release hardening (2026-07-14)
 
+#### Breaking: WS auth query fallback 默认关闭
+
+WS 鉴权 query string `?token=` fallback 默认从 `true` 改为 `false`,符合
+CLAUDE.md 硬约束(token 不进 URL)。
+
+- **升级影响**: 任何依赖 `?token=` 走 WS 握手的旧客户端升级后将 401。
+- **迁移**: 需 fallback 的部署方在环境变量里设 `NEXUS_WS_AUTH_QUERY_FALLBACK=true`。
+- **背景**: 详见 `quality.md` §11.2 双路径兼容表 + `main.py::websocket_endpoint`
+  docstring。默认 OFF 避免 token 进代理 access log / 浏览器历史 / 错误堆栈。
+- **测试锁定**: `test_ws_auth_query_off.py` 锁默认 `false`(monkeypatch +
+  parametrize 5 用例)+ `test_ws_auth_subprotocol.py::test_ws_query_rejected_when_env_unset`
+  锁端到端握手 401。
+
 #### Added — 右栏 Artifacts 产物面板 + 三栏布局 (第十三轮 2026-07-20)
 
 参考 Claude Desktop 把 agent 产物(代码 / Markdown / SVG / HTML)从消息流

@@ -18,6 +18,7 @@ import base64
 import binascii
 import hmac
 import os
+from collections.abc import Mapping
 
 from fastapi import HTTPException, Request, WebSocket
 
@@ -100,7 +101,7 @@ def _extract_ws_token(websocket: WebSocket) -> str | None:
     """
     return _extract_token(
         subprotocol_header=websocket.headers.get("sec-websocket-protocol", "") or None,
-        query_params=dict(websocket.query_params) if websocket.query_params else None,
+        query_params=websocket.query_params or None,
     )
 
 
@@ -118,15 +119,16 @@ def _is_query_fallback_enabled() -> bool:
 def _extract_token(
     *,
     subprotocol_header: str | None,
-    query_params: dict[str, str] | None = None,
+    query_params: Mapping[str, str] | None = None,
 ) -> str | None:
     """从 subprotocol header + 可选 query 提取 token(纯函数,易测)。
 
     Args:
         subprotocol_header: ``Sec-WebSocket-Protocol`` 原始 header 值
             (逗号分隔),``None`` 表示无此 header。
-        query_params: WS 升级请求的 query 字典(测试用,生产从
-            ``websocket.query_params`` 取)。仅当
+        query_params: WS 升级请求的 query(``Mapping[str, str]``,生产
+            直接传 ``websocket.query_params`` —— Starlette ``QueryParams``
+            本身是 ``Mapping``,无需 ``dict()`` 拷贝)。仅当
             :func:`_is_query_fallback_enabled` 为 True 时生效。
 
     Returns:
