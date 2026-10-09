@@ -127,7 +127,7 @@ def _patch_titlebar() -> None:
                 ns_window.setTitlebarAppearsTransparent_(True)
                 ns_window.setTitleVisibility_(1)  # NSWindowTitleHidden = 1
         except Exception as exc:  # noqa: BLE001
-            print(f"[launcher] titlebar patch failed: {exc}", file=sys.stderr)
+            logger.warning("[launcher] titlebar patch failed: %s", exc)
 
     AppHelper.callAfter(_do)
 
@@ -179,7 +179,7 @@ def main() -> int:
 
     health_url = f"http://{args.host}:{args.port}/health"
     if not _wait_for_backend(health_url, timeout=30.0):
-        print(f"backend failed to start within 30s at {health_url}", file=sys.stderr)
+        logger.error("backend failed to start within 30s at %s", health_url)
         return 1
 
     if args.no_gui:

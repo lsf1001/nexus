@@ -166,7 +166,7 @@ class ResilientRunnable(BaseChatModel):
         """
         return {"max_input_tokens": int(_config_mod.CONFIG.get("context_window"))}
 
-    def _generate(self, messages: list, stop=None, run_manager=None, **kwargs: Any):
+    def _generate(self, messages: list, stop=None, run_manager=None, **kwargs: Any) -> Any:
         """同步 generate 路径：委托给底层 primary。公开入口走 ``ainvoke``。"""
         return self._primary._generate(messages, stop, run_manager, **kwargs)
 
@@ -174,11 +174,11 @@ class ResilientRunnable(BaseChatModel):
         """异步 generate 路径：委托给底层 primary。公开入口走 ``ainvoke``。"""
         return await self._primary._agenerate(messages, stop, run_manager, **kwargs)
 
-    def _stream(self, messages: list, stop=None, run_manager=None, **kwargs: Any):
+    def _stream(self, messages: list, stop=None, run_manager=None, **kwargs: Any) -> Any:
         """同步流路径：委托给底层 primary。公开入口走 ``astream``。"""
         yield from self._primary._stream(messages, stop, run_manager, **kwargs)
 
-    async def _astream(self, messages: list, stop=None, run_manager=None, **kwargs: Any):
+    async def _astream(self, messages: list, stop=None, run_manager=None, **kwargs: Any) -> Any:
         """异步流路径：委托给底层 primary。公开入口走 ``astream``。"""
         async for chunk in self._primary._astream(messages, stop, run_manager, **kwargs):
             yield chunk
