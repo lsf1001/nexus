@@ -15,8 +15,8 @@ verify() 内部流程(spec §3.4 + plan §6.6):
      直接把字符串喂给每个 verifier(stub 自己负责解释 claim)。
   2. 对每个 FactClaim × 默认 verifier 组合,按 ``claim.kind`` 路由;
      不匹配 kind 的 verifier 返回 ``verdict="skipped"`` 不计贡献。
-  3. 用 ``_result_to_score`` 把 ``VerificationResult.verdict`` 映射到
-     0.0-1.0,加权归一化。
+  3. 把 ``VerificationResult.verdict`` 直接分流:"ok" 计加权,
+     "conflict" 仅计数,"skipped" 不计贡献。
 """
 
 from __future__ import annotations
@@ -68,6 +68,38 @@ _DEFAULT_VERIFIERS: tuple[Any, ...] = (
 
 
 @dataclass(frozen=True)
+class _ScoreOutcome:
+    """单 verifier 跑一次的中间结果。
+
+    Attributes:
+        verdict: ``"ok"`` / ``"conflict"`` / ``"skipped"``。
+        weight: 该 verifier 的权重,仅 ``"ok"`` 时累加。
+    """
+
+    verdict: str
+    weight: float
+
+
+@dataclass(frozen=True)
+class _AggregateOutcome:
+    """遍历所有 (claim × verifier) 组合后的累计统计。
+
+    Attributes:
+        weighted_sum: 所有 ``verdict="ok"`` 的 ``weight * 1.0`` 之和。
+        total_weight: 所有 ``verdict="ok"`` 的权重之和(归一化分母)。
+        verified: ``verdict="ok"`` 的 verifier 个数。
+        failed: 抛 ``TimeoutError`` / ``VerifierError`` 的 verifier 个数。
+        conflicted: ``verdict="conflict"`` 的 verifier 个数。
+    """
+
+    weighted_sum: float
+    total_weight: float
+    verified: int
+    failed: int
+    conflicted: int
+
+
+@dataclass(frozen=True)
 class VerifyResult:
     """统一入口 ``verify()`` 的返回结果(spec §3.4)。
 
@@ -84,24 +116,6 @@ class VerifyResult:
     claims_failed: int = 0
     claims_conflicted: int = 0
     reasons: tuple[str, ...] = field(default_factory=tuple)
-
-
-def _result_to_score(result: VerificationResult) -> float:
-    """把 ``VerificationResult.verdict`` 映射到 0.0-1.0 浮点分,供 ``verify()`` 加权用。
-
-    映射规则:
-      - ``verdict="ok"`` → 1.0(声明通过校验)
-      - ``verdict="conflict"`` → 0.0(声明与事实不符)
-      - ``verdict="skipped"`` → 0.0(此 verifier 不适用本声明,不计贡献)
-      - ``verdict="error"`` → 0.0(校验过程异常,等同失败)
-
-    Args:
-        result: 单个 verifier 的 ``VerificationResult`` 输出。
-
-    Returns:
-        0.0-1.0 浮点分;只有 ``"ok"`` 给 1.0,其余情形视为 0。
-    """
-    return 1.0 if result.verdict == "ok" else 0.0
 
 
 def _extract_claims(text: str) -> list[FactClaim]:
@@ -122,87 +136,95 @@ def _extract_claims(text: str) -> list[FactClaim]:
     return out
 
 
+async def _score_one_verifier(
+    v: Any,
+    claim: Any,
+    context: dict[str, Any] | None,
+) -> _ScoreOutcome:
+    """单 verifier 跑一次,返回 ``(verdict, weight)``;异常留给 caller 处理。
+
+    同步 / 异步 verifier 都吃:``v.verify`` 同步返回 ``VerificationResult``
+    时直接用;返回 awaitable 时 await(内置 4 个 verifier 都是 async,但
+    测试 stub 也可能给 sync)。
+    """
+    result = v.verify(claim, context)
+    if inspect.isawaitable(result):
+        result = await result  # type: ignore[assignment]
+    return _ScoreOutcome(verdict=result.verdict, weight=v.weight)  # type: ignore[union-attr]
+
+
+async def _aggregate_results(
+    claims: list[Any],
+    vs: list[Any],
+    context: dict[str, Any] | None,
+) -> _AggregateOutcome:
+    """遍历所有 (claim × verifier) 组合,返回累计统计。
+
+    单 verifier 抛 ``VerifierError`` / ``TimeoutError`` 仅 ``logger.debug``
+    + 计入 ``failed``,不阻断主流程(spec §2.4)。
+    """
+    weighted_sum = 0.0
+    total_weight = 0.0
+    verified = 0
+    failed = 0
+    conflicted = 0
+    for c in claims:
+        for v in vs:
+            try:
+                outcome = await _score_one_verifier(v, c, context)
+            except (TimeoutError, VerifierError) as exc:
+                logger.debug(
+                    "verifier %s failed: %s",
+                    getattr(v, "name", type(v).__name__),
+                    exc,
+                )
+                failed += 1
+                continue
+            if outcome.verdict == "ok":
+                weighted_sum += outcome.weight
+                total_weight += outcome.weight
+                verified += 1
+            elif outcome.verdict == "conflict":
+                conflicted += 1
+            # "skipped" 不计入任何累计(spec §3.4)
+    return _AggregateOutcome(
+        weighted_sum=weighted_sum,
+        total_weight=total_weight,
+        verified=verified,
+        failed=failed,
+        conflicted=conflicted,
+    )
+
+
 async def verify(
     claim: str,
     *,
     context: dict[str, Any] | None = None,
     verifiers: list[Any] | None = None,
 ) -> VerifyResult:
-    """统一入口:遍历所有 verifier,加权计算最终 score(spec §3.4)。
+    """编排:抽取声明 → 聚合打分 → 输出 ``VerifyResult``(spec §3.4)。
 
-    Args:
-        claim: 待校验声明文本;走默认路径时会先经 extractor 抽取 FactClaim。
-        context: 可选上下文(MCP 状态 / DB 状态 / session_id 等)。
-        verifiers: 显式传入 verifier 列表;不传则用 4 个内置默认 verifier。
-            每个 verifier 需有 ``name: str`` + ``weight: float`` 类属性 +
-            ``async def verify(claim, context) -> VerificationResult`` 方法。
-            **当显式传 ``verifiers`` 时,跳过 extractor,直接喂字符串**(stub
-            风格;测试用)。
-
-    Returns:
-        ``VerifyResult``。
-
-    行为约定(spec §2.4):
-      - 单 verifier 抛 ``VerifierError`` / ``asyncio.TimeoutError`` →
-        静默跳过 + ``logger.debug``,剩余 verifier 权重归一化后再加权
-      - 全部 verifier 失败 → score=0.0, reasons=("all_verifiers_failed",)
-      - 不抛异常到调用方
+    三段式(每段一个 helper):
+      1. ``claims`` 抽取(默认走 4 个 extractor;显式 ``verifiers`` 时跳过)
+      2. ``_aggregate_results`` 跑加权聚合
+      3. 本函数末尾把聚合结果映射成 ``VerifyResult``
     """
-    use_defaults = verifiers is None
-    vs = list(_DEFAULT_VERIFIERS) if use_defaults else list(verifiers)
-
-    # 默认路径:先用 extractor 抽声明,再逐条 × verifier 路由。
-    # 显式路径(stub):直接喂字符串给每个 verifier。
-    if use_defaults:
-        claims = _extract_claims(claim)
-    else:
-        claims = [claim]  # type: ignore[list-item]
-
-    weighted_sum = 0.0
-    total_weight = 0.0
-    claims_verified = 0
-    claims_failed = 0
-    claims_conflicts = 0
-
-    for c in claims:
-        for v in vs:
-            try:
-                result = v.verify(c, context)
-                if inspect.isawaitable(result):
-                    result = await result
-                score = _result_to_score(result)  # type: ignore[arg-type]
-                verdict = result.verdict  # type: ignore[attr-defined]
-                if verdict == "skipped":
-                    continue
-                if verdict == "conflict":
-                    claims_conflicts += 1
-                else:  # "ok"
-                    weighted_sum += v.weight * score
-                    total_weight += v.weight
-                    claims_verified += 1
-            except (TimeoutError, VerifierError) as e:
-                logger.debug(
-                    "verifier %s failed: %s",
-                    getattr(v, "name", type(v).__name__),
-                    e,
-                )
-                claims_failed += 1
-                continue
-
-    if total_weight == 0.0:
+    vs = list(_DEFAULT_VERIFIERS) if verifiers is None else list(verifiers)
+    claims = _extract_claims(claim) if verifiers is None else [claim]  # type: ignore[list-item]
+    agg = await _aggregate_results(claims, vs, context)
+    if agg.total_weight == 0.0:
         return VerifyResult(
             score=0.0,
             claims_verified=0,
-            claims_failed=claims_failed,
-            claims_conflicted=claims_conflicts,
+            claims_failed=agg.failed,
+            claims_conflicted=agg.conflicted,
             reasons=("all_verifiers_failed",),
         )
-
     return VerifyResult(
-        score=weighted_sum / total_weight,
-        claims_verified=claims_verified,
-        claims_failed=claims_failed,
-        claims_conflicted=claims_conflicts,
+        score=agg.weighted_sum / agg.total_weight,
+        claims_verified=agg.verified,
+        claims_failed=agg.failed,
+        claims_conflicted=agg.conflicted,
     )
 
 
