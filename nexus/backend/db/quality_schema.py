@@ -85,6 +85,8 @@ class QualityScoreRepo:
         results_json = json.dumps(fact_check_results, ensure_ascii=False) if fact_check_results is not None else None
 
         cur = self._conn.execute(
+            # TODO(plan-quality-upsert): 改名 `insert_score` 或加唯一索引 +
+            # ON CONFLICT DO UPDATE 转真 upsert。详见 docstring 命名债说明。
             """
             INSERT INTO quality_scores
                 (session_id, message_id, rubric, score, verdict, reasoning,

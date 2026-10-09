@@ -4,10 +4,12 @@ WHY: 此前 ``save_quality_score`` 等函数直接挂在 ``db`` 顶层,~60 行
 杂糅 PRAGMA / DDL / DML,拆为 ``QualityScoreRepo`` 类后必须用 6 个测试锁定
 行为边界(注入连接 / 参数化 SQL / 不持连接 / 返回 dataclass)。
 
-注意 fixture 里的 ``quality_scores`` DDL 是从 ``db/__init__.py``
-``_create_tables()`` 抄来的**生产真实 schema**(``created_at`` 用
-``TIMESTAMP DEFAULT CURRENT_TIMESTAMP``,4 个 ``fact_check_*`` 列内联),
-不是另写一份字面量——避免测试 schema 与生产 schema 漂移。
+注意 fixture 里的 ``quality_scores`` DDL 反映的是 ``db/__init__.py``
+``_create_tables()`` + ``_ensure_column()`` **生产最终列形态**
+(``created_at`` 用 ``TIMESTAMP DEFAULT CURRENT_TIMESTAMP``,4 个
+``fact_check_*`` 列内联在 CREATE TABLE 里),不是按"CREATE TABLE
+后再 ALTER TABLE ADD COLUMN"的两步迁移路径。CRUD 单测关注的是最终
+列形态,迁移路径由 ``tests/test_db_migrations_quality.py`` 覆盖。
 """
 
 from __future__ import annotations
